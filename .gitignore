@@ -18,7 +18,7 @@
 /*.Rcheck/
 
 # RStudio files
-.Rproj.user/
+#.Rproj.user/
 
 # produced vignettes
 vignettes/*.html
@@ -37,3 +37,16 @@ vignettes/*.pdf
 
 # R Environment Variables
 .Renviron
+
+# Large documents
+2019_041-eng.pdf
+
+# Raw data
+bits_ca.csv
+bits_hh.csv
+bits_hl.csv
+DATRAS_dataproducts_units.pdf
+SISP7 BITS 2017.pdf
+/data/shapefiles
+
+.Rproj.user
