@@ -48,5 +48,6 @@ bits_hl.csv
 DATRAS_dataproducts_units.pdf
 SISP7 BITS 2017.pdf
 /data/shapefiles
+/output/
 
 .Rproj.user
