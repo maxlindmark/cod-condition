@@ -90,8 +90,8 @@ sp <- get.depth(baltic_sea, latlong[, 1:2], locator = FALSE)
 df2 <- sp
 
 df3 <- df2 %>%
-  rename("Y" = "lat", "X" = "lon") %>% 
-  filter(depth > -130)
+  rename("Y" = "lat", "X" = "lon") #%>% 
+  # filter(depth > -130) # We filter this later in the plots...
 
 # Now make a new grid. Can't use expand grid
 pred_grid <- data.frame(X =     rep(df3$X, length(unique(dat$year))),
@@ -101,10 +101,4 @@ pred_grid <- data.frame(X =     rep(df3$X, length(unique(dat$year))),
 
 # Save
 write.csv(pred_grid, file = "data/pred_grid.csv")
-
-
-
-
-
-
 
