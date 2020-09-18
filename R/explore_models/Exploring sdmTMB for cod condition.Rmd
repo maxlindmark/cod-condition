@@ -5,6 +5,7 @@ date: "9/18/2020"
 output:
   html_document:
     df_print: paged
+  pdf_document: default
 ---
 
 ```{r setup, include = FALSE, cache=FALSE}
@@ -69,7 +70,7 @@ d <- d %>%
 
 ```
 
-I will next standardize the covariates to have a mean of 0 and variance of 1 to facilitate comparison between different ones.
+I will next standardize the covariates to have a mean of 0 and variance of 1 to facilitate comparison between different ones, and read in the prediction grid.
 
 
 ```{r read and process data}
@@ -85,13 +86,15 @@ pred_grid <-
 
 pred_grid <- pred_grid %>%
   dplyr::select(-X.1) %>% 
-  mutate(ln_length_cm = log(1)) %>% # For now we'll predict changes in the intercept (condition factor)
+  mutate(ln_length_cm = log(1), # For now we'll predict changes in the intercept (condition factor)
+         X = round(X, digits = 4), # I get a strange memory issues when plotting but this solves it
+         Y = round(Y, digits = 4)) %>% 
   filter(year %in% c(unique(d$year)))
 ```
 
 We can now plot the Fulton K condition factor to get a glimpse of what we might expect (but finally our estimates are closer to Le Cren's condition index).
 
-```{r}
+```{r, fig.height=14}
 # Plot "Fulton K" in space and time 
 d %>%
   ggplot(., aes(X, Y, color = Fulton_K)) + 
@@ -170,8 +173,6 @@ Hence, I will proceed with this model, makes some predictions and compare it to 
 
 So, now we can predict and plot estimates using all fixed and random effects on pre-made grid. This grid is made by doing an expand grid over survey ranges, then filtering out areas that are actually in the ocean using ICES shapefiles. Lastly some areas are too deep for sampling (-135 m). I've added a depth column so that I can make those predictions NA so it's clear they are different from e.g. land and islands (maybe unnessecary but it makes them grey, i.e. different from land. 
 
-**I'm having memory issues here so just plotting maps for 2 years here and from now on (!)**
-
 ```{r}
 p <- predict(m1, newdata = pred_grid)
 
@@ -184,12 +185,12 @@ p <- p %>% mutate(est2 = ifelse(depth < -130, NA, est),
 Plot the predicted condition with fixed and random effects:
 
 ```{r}
-ggplot(filter(p, year %in% c("1995", "2015")), aes(X, Y, fill = est2)) +
+ggplot(p, aes(X, Y, fill = est2)) +
   geom_raster() +
   facet_wrap(~year, ncol = 5) +
   scale_fill_viridis(option = "magma", 
                      name = "log(condition factor)") + 
-  theme_bw() +
+  theme_bw(base_size = 8) +
   coord_cartesian(expand = 0) + 
   ggtitle("Prediction (random + fixed)")
 ```
@@ -197,12 +198,12 @@ ggplot(filter(p, year %in% c("1995", "2015")), aes(X, Y, fill = est2)) +
 Plot the spatiotemporal random effects:
 
 ```{r}
-ggplot(filter(p, year %in% c("1995", "2015")), aes(X, Y, fill = est_rf2)) +
+ggplot(p, aes(X, Y, fill = est_rf2)) +
   geom_raster() +
   facet_wrap(~year, ncol = 5) +
   scale_fill_viridis(option = "magma", 
                      name = "log(condition factor)") + 
-  theme_bw() +
+  theme_bw(base_size = 8) +
   coord_cartesian(expand = 0) + 
   ggtitle("Spatiotemporal random effects")
 ```
@@ -210,7 +211,7 @@ ggplot(filter(p, year %in% c("1995", "2015")), aes(X, Y, fill = est_rf2)) +
 Plot the spatial random effects:
 
 ```{r}
-ggplot(filter(p, year == 2005), aes(X, Y, fill = omega_s2)) +
+ggplot(filter(p, year == 2000), aes(X, Y, fill = omega_s2)) +
   geom_raster() +
   scale_fill_viridis(option = "magma", 
                      name = "log(condition factor)") + 
@@ -325,12 +326,12 @@ pfle <- predict(mfle2, newdata = pred_grid_fle)
 # Replace too-deep predictions with NA
 pfle <- pfle %>% mutate(est2 = ifelse(depth < -130, NA, est))
 
-ggplot(filter(pfle, year %in% c("1995", "2015")), aes(X, Y, fill = est2)) +
+ggplot(pfle, aes(X, Y, fill = est2)) +
   geom_raster() +
   facet_wrap(~year, ncol = 5) +
   scale_fill_viridis(option = "magma", 
                      name = "log(condition factor)") + 
-  theme_bw() +
+  theme_bw(base_size = 8) +
   coord_cartesian(expand = 0) + 
   ggtitle("Prediction (random + fixed) with covariates")
 ```
