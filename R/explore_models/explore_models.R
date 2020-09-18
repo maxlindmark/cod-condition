@@ -43,6 +43,7 @@ library(tidyverse)
 library(tidylog)
 library(viridis)
 library(sdmTMB)
+library(marmap)
 
 
 # B. READ DATA =====================================================================
@@ -57,6 +58,18 @@ d <- d %>%
          Fulton_K = weight_g/(0.01*length_cm^3)) %>% # Just an approximation for now
   dplyr::select(year, Y, X, sex, length_cm, weight_g, Quarter, CPUE_cod, CPUE_fle,
                 ln_length_cm, ln_weight_g, Fulton_K)
+
+# There's quite a spread in the CPUE variables (#caught per trawling hour).
+# Highest cod CPUE is ~3 cod per second! Will need to check the data again,
+# maybe select certain sizes or hauls with a minimum towing time. 
+# I will next standardize the covariates to have a mean of 0 and variance of 1 to 
+# facilitate comparison between different ones
+
+d <- d %>% 
+  mutate(CPUE_cod_st = CPUE_cod,
+         CPUE_fle_st = CPUE_fle) %>% 
+  mutate_at(c("CPUE_cod_st", "CPUE_fle_st"), ~(scale(.) %>% as.vector))
+
 
 # Read in prediction grid
 pred_grid <- read.csv("data/pred_grid.csv")
@@ -90,23 +103,23 @@ d %>%
 
 # C. FIT SIMPLE GLM  ===============================================================
 # Next we can fit a simple intercept-only GLM without any spatial or temporal structure
-m_glm <- glm(Fulton_K ~ 1, data = d, family = gaussian(link = "log"))
-
-# Extract residuals
-d$m_glm_residuals <- residuals(m_glm)
-
-# Plot residuals over map
-ggplot(d, aes(X, Y, colour = m_glm_residuals)) +
-  scale_color_gradient2() +
-  geom_point(size = 2) + 
-  theme_classic() +
-  NULL
-
-# Plot residuals by year
-ggplot(d, aes(year, m_glm_residuals, group = year)) +
-  geom_boxplot() + 
-  theme_classic() +
-  NULL
+# m_glm <- glm(Fulton_K ~ 1, data = d, family = gaussian(link = "log"))
+# 
+# # Extract residuals
+# d$m_glm_residuals <- residuals(m_glm)
+# 
+# # Plot residuals over map
+# ggplot(d, aes(X, Y, colour = m_glm_residuals)) +
+#   scale_color_gradient2() +
+#   geom_point(size = 2) + 
+#   theme_classic() +
+#   NULL
+# 
+# # Plot residuals by year
+# ggplot(d, aes(year, m_glm_residuals, group = year)) +
+#   geom_boxplot() + 
+#   theme_classic() +
+#   NULL
 
 ## Residuals appear to vary both spatially and are somewhat clustered within years.
 
@@ -119,7 +132,7 @@ ggplot(d, aes(year, m_glm_residuals, group = year)) +
 
 
 # D. FIT SPATIOTEMPORAL MODELS OF WEIGHT~LENGTH ====================================
-# I will start with 100 knots and alter I will fit and compare models with more knots
+# I will start with 75 knots and alter I will fit and compare models with more knots
 spde <- make_spde(d$X, d$Y, n_knots = 75)
 plot_spde(spde)
 
@@ -128,7 +141,7 @@ plot_spde(spde)
 # Compare Gaussian and student t models with a spatiotemporal AR1 process
 m0 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm, data = d, time = "year", spde = spde,
              family = gaussian(link = "identity"), ar1_fields = TRUE,
-             include_spatial = TRUE,  spatial_trend = FALSE, spatial_only = FALSE) 
+             include_spatial = TRUE,  spatial_trend = FALSE, spatial_only = FALSE)
 
 m1 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm, data = d, time = "year", spde = spde,
              family = student(link = "identity"), ar1_fields = TRUE,
@@ -160,11 +173,11 @@ ggplot(df, aes(X, Y, colour = residuals_m1)) +
 # Seems to be some clustering still...
 
 # We can also look at the AR1 parameter to ensure it is warranted
-sd1 <- as.data.frame(summary(TMB::sdreport(m1$tmb_obj)))
-sd1$Estimate[row.names(sd1) == "ar1_phi"]
-# [1] 1.019191
-sd1$Estimate[row.names(sd1) == "ar1_phi"] +
-  c(-2, 2) * sd1$`Std. Error`[row.names(sd1) == "ar1_phi"]
+# sd1 <- as.data.frame(summary(TMB::sdreport(m1$tmb_obj)))
+# sd1$Estimate[row.names(sd1) == "ar1_phi"]
+# # [1] 1.019191
+# sd1$Estimate[row.names(sd1) == "ar1_phi"] +
+#   c(-2, 2) * sd1$`Std. Error`[row.names(sd1) == "ar1_phi"]
 # [1] 0.7932714 1.2451101
 
 # Strong support for it, will not run model without AR1 process in the spatiotemporal
@@ -180,7 +193,8 @@ p <- predict(m1, newdata = pred_grid)
 # Replace too-deep predictions with NA
 p <- p %>% mutate(est2 = ifelse(depth < -130, NA, est))
 
-ggplot(p, aes(X, Y, fill = est2)) +
+# Plot prediction (for)
+ggplot(filter(p, year %in% c("1995", "2015")), aes(X, Y, fill = est2)) +
   geom_raster() +
   facet_wrap(~year, ncol = 5) +
   scale_fill_viridis(option = "magma", 
@@ -189,8 +203,8 @@ ggplot(p, aes(X, Y, fill = est2)) +
   coord_cartesian(expand = 0) + 
   ggtitle("Prediction (random + fixed")
 
-# Plot the spatiotemporal random effects
-ggplot(p, aes(X, Y, fill = est_rf)) +
+# Plot the spatiotemporal random effects for selected year (memory exhaustion...)
+ggplot(filter(p, year %in% c("1995", "2015")), aes(X, Y, fill = est_rf)) +
   geom_raster() +
   facet_wrap(~year, ncol = 5) +
   scale_fill_viridis(option = "magma", 
@@ -200,7 +214,7 @@ ggplot(p, aes(X, Y, fill = est_rf)) +
   ggtitle("Spatiotemporal random effects")
 
 # Plot the spatial random effects
-ggplot(filter(p, year == 2005), aes(X, Y, fill = omega_s)) +
+ggplot(filter(p, year %in% c("2015")), aes(X, Y, fill = omega_s)) +
   geom_raster() +
   scale_fill_viridis(option = "magma", 
                      name = "log(condition factor)") + 
@@ -219,18 +233,6 @@ autoplot(baltic_sea, geom = c("r", "c")) +
 
 # D. FIT SPATIOTEMPORAL MODELS OF WEIGHT~LENGTH WITH ADDITIONAL COVARIATES =========
 # Now we want to refit the same model with the additional fixed effects outlined above
-# First we include the density of cod (measured as #caught per trawling hour)
-# There's quite a spread in the CPUE variables. Highest cod CPUE is ~3 cod per second!
-# Will need to check the data again, maybe select certain sizes or hauls with a
-# minimum towing time. For now I'll just set a roof on the CPUE to help models converge...
-
-# I will next standardize the covariates to have a mean of 0 and variance of 1 to 
-# facilitate comparison between different ones
-
-d <- d %>% 
-  mutate(CPUE_cod_st = CPUE_cod,
-         CPUE_fle_st = CPUE_fle) %>% 
-  mutate_at(c("CPUE_cod_st", "CPUE_fle_st"), ~(scale(.) %>% as.vector))
 
 # Fit model with cod cpue as covariate
 mcod <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + CPUE_cod_st, data = d, time = "year",
@@ -239,6 +241,10 @@ mcod <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + CPUE_cod_st, data = d, tim
                include_spatial = TRUE, 
                spatial_trend = FALSE, 
                spatial_only = FALSE) 
+
+# Run extra optimization steps to help convergence:
+mcod2 <- run_extra_optimization(mcod, nlminb_loops = 1, newton_steps = 1)
+
 
 #... And with flounder 
 mfle <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + CPUE_fle_st, data = d, time = "year",
