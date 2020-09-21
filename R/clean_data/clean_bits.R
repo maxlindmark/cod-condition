@@ -34,7 +34,7 @@
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 # A. LOAD LIBRARIES ================================================================
-rm(list = ls())
+# rm(list = ls())
 
 # Load libraries, install if needed
 library(tidyverse)
@@ -685,6 +685,6 @@ ggsave("figures/data_explore/condition.png", width = 6.5, height = 6.5, dpi = 60
 
 mdat <- dat
 
-#write.csv(mdat, "data/mdat_cond.csv")
+write.csv(mdat, "data/mdat_cond.csv", row.names = FALSE)
 
 

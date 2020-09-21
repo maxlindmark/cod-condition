@@ -13,7 +13,7 @@
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 # A. LOAD LIBRARIES ================================================================
-rm(list = ls())
+#rm(list = ls())
 
 # Load libraries, install if needed
 library(tidyverse)
@@ -38,9 +38,15 @@ library(marmap)
 dat <- read.csv("data/mdat_cond.csv") 
 
 # Make predictions on a grid - basic example
+min(dat$lat)
+
+# Make predictions on a grid - basic example
 pred_grid <- expand.grid(
   lat = seq(min(dat$lat), max(dat$lat), length.out = 50),
   lon = seq(min(dat$lon), max(dat$lon), length.out = 100))
+
+# Here I could convert to UTM to get even distance across space. But I am in two UTM
+# zones, 33 and 34, so perhaps I will stick with lat-long... 
 
 # Then remove Kattegatt...
 pred_grid <- pred_grid %>% 
@@ -87,18 +93,14 @@ plot(data, pch = 16, col = "red", add = TRUE)
 
 sp <- get.depth(baltic_sea, latlong[, 1:2], locator = FALSE)
 
-df2 <- sp
-
-df3 <- df2 %>%
-  rename("Y" = "lat", "X" = "lon") #%>% 
-  # filter(depth > -130) # We filter this later in the plots...
+df <- sp
 
 # Now make a new grid. Can't use expand grid
-pred_grid <- data.frame(X =     rep(df3$X, length(unique(dat$year))),
-                        Y =     rep(df3$Y, length(unique(dat$year))),
-                        depth = rep(df3$depth, length(unique(dat$year))),
-                        year = rep(sort(unique(dat$year)), each = nrow(df3)))
+pred_grid <- data.frame(lon = rep(df$lon, length(unique(dat$year))),
+                        lat = rep(df$lat, length(unique(dat$year))),
+                        depth = rep(df$depth, length(unique(dat$year))),
+                        year = rep(sort(unique(dat$year)), each = nrow(df)))
 
 # Save
-write.csv(pred_grid, file = "data/pred_grid.csv")
+write.csv(pred_grid, file = "data/pred_grid.csv", row.names = FALSE)
 
