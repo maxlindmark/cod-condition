@@ -42,8 +42,8 @@ min(dat$lat)
 
 # Make predictions on a grid - basic example
 pred_grid <- expand.grid(
-  lat = seq(min(dat$lat), max(dat$lat), length.out = 50),
-  lon = seq(min(dat$lon), max(dat$lon), length.out = 100))
+  lat = seq(54, 58, by = 0.05),
+  lon = seq(12, 22, by = 0.1))
 
 # Here I could convert to UTM to get even distance across space. But I am in two UTM
 # zones, 33 and 34, so perhaps I will stick with lat-long... 
