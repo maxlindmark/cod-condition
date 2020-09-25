@@ -1,0 +1,438 @@
+---
+title: "Exploring sdmTMB for cod condition"
+author: "Max Lindmark"
+date: "9/18/2020"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include = FALSE, cache=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.asp = 0.618,
+  fig.align='center'
+)
+```
+
+# EXTRACT CODE LIKE THIS: https://bookdown.org/yihui/rmarkdown-cookbook/purl.html
+
+## Background
+
+The body condition and growth of Eastern Baltic cod has declined steadily since the regime shift in the early 1990's to a degree that it now can be viewed as collapsed. Several hypotheses have been put forward, including changes in overlap with pelagic prey (e.g. Gårdmark et al, 2015), reduced oxygen levels (e.g. Casini et al, 2016), increased competition for benthic food sources with flounder (Orio et al, 2019) as well as increased intraspecific competition and growth bottlenecks within the population (Svedäng & Hornborg, 2014).  
+
+
+## Methods
+
+In this script I will fit spatiotemporal models of allometric weight-length relationships ($w=\alpha l^ \beta$ -> $log(w) = \alpha + \beta log(l) + \beta_x x$) using [sdmTMB](https://github.com/pbs-assess/sdmTMB). I aim here to first find an appropriate model structure for evaluating how $\alpha$ (log condition factor), has changed over space and time. Next I aim to evaluate the effects of additional covariates at the haul-level ($\beta_x x$) for the predicted weight given a length.
+
+The covariates I currently consider are:
+
+- Density of cod. CPUE available for each haul (added in data)
+- Density of flounder. CPUE available for each haul (added in data)
+- Oxygen concentration. Possible to link data to nearest haul *(not yet added)*
+- Sprat CPUE. *(not yet added)*
+- Herring CPUE. *(not yet added)*
+- maybe: temperature as a base-covariate through it's effect on growth, metabolism, digestion etc.
+
+(Re pelagics: Semi coarse predictions exist (by ICES rectangle). I can either do a join operation to get the estimated CPUE by rectangle linked to all hauls in that rectangle, or attempt to fit a new model and predict CPUE for the locations where I have haul conditions. Going for the former I think...).
+
+The project currently lives [here](https://github.com/maxlindmark/cod_condition). Below follows a walkthrough of the first attempts to model this. Sean Andersson contributed with input to this version.
+
+```{r packages, message=FALSE, warning=TRUE}
+library(tidyverse); theme_set(theme_classic())
+library(tidylog)
+library(viridis)
+library(sdmTMB)
+library(marmap)
+library(rnaturalearth)
+library(rnaturalearthdata)
+
+# For adding maps to plots
+world <- ne_countries(scale = "medium", returnclass = "sf")
+```
+
+Now read data
+
+```{r read and process data, message=FALSE, warning=FALSE}
+d <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/mdat_cond.csv")
+
+# Calculate variables, including standardizing the covariates to have a mean of 0 and
+# variance of 1 to facilitate comparison between different ones
+d <- d %>%
+  mutate(ln_weight_g = log(weight_g),
+         ln_length_cm = log(length_cm),
+         Fulton_K = weight_g/(0.00692*length_cm^3.08)) %>% # cod-specific, from FishBase
+  dplyr::select(year, lat, lon, sex, length_cm, weight_g, Quarter, CPUE_cod, CPUE_fle,
+                ln_length_cm, ln_weight_g, Fulton_K) %>% 
+  mutate(CPUE_cod_st = CPUE_cod,
+         CPUE_fle_st = CPUE_fle) %>% 
+  mutate_at(c("CPUE_cod_st", "CPUE_fle_st"), ~(scale(.) %>% as.vector))
+```
+
+Read the prediction grid:
+
+```{r read and process prediction grid, message=FALSE, warning=FALSE}
+pred_grid <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/pred_grid.csv")
+
+# SA: You likely want to work in UTMs so distance is constant with space
+# ML: I did not think so much about this, but that sounds like a good idea. Although for now I can't choose which of the two UTM zones to use... (I did change from X and Y to lon and lat to make it more clear in case I switch later!)
+pred_grid <- pred_grid %>%
+  mutate(ln_length_cm = log(1)) %>% # For now we'll predict changes in the intercept (condition factor)
+  mutate(X = lon,
+         Y = lat) %>% 
+  filter(year %in% c(unique(d$year)))
+```
+
+We can now plot the Fulton K condition factor to get a glimpse of what we might expect (but finally our estimates are closer to Le Cren's condition index).
+
+```{r plot condition, fig.width=12}
+# Plot "Fulton K" in space and time 
+d %>%
+  ggplot(., aes(lon, lat, color = Fulton_K)) + 
+  geom_point(size = 1.2, alpha = 0.8) + 
+  facet_wrap(~ year, ncol = 6) +
+  scale_color_gradient2(midpoint = mean(d$Fulton_K)) +
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(12.5, 21.5), ylim = c(54, 58))
+```
+
+Ok there's a clear temporal development in condition and the spatial coverage of data varies by year (less data initially).
+
+Next we fit spatial/spatiotemporal models to account for this. Given that we do not have samples in all spatial locations for all years, and we believe that there are "hotpots" of body condition, we model a temporal correlation for the spatiotemporal variation (Thorson, 2019), specifically, this is done by estimating the spatiotemporal fields as an AR1 process. Hence, we set ar1_fields = TRUE.
+
+I will start by setting up the SPDE mesh with 75 knots and alter I will fit and compare models with more knots. In the first step I will compare a Gaussian with a student t model to see which distribution seems more appropriate.
+
+```{r fit first spatiotemporal glmm, results='hide', cache=TRUE}
+# SA: good for now; could increase knots eventually:
+spde <- make_spde(d$lon, d$lat, n_knots = 70)
+plot_spde(spde)
+
+# Compare Gaussian and student t models with a spatiotemporal AR1 process
+m0 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm, data = d, time = "year", spde = spde,
+             family = gaussian(link = "identity"), ar1_fields = TRUE,
+             include_spatial = TRUE,  spatial_trend = FALSE, spatial_only = FALSE,
+             silent = FALSE)
+
+# SA: note that the degrees of freedom on the Student-t are fixed out 3 currently; we can tweak that so you could specify it if you want.
+# ML: Yes, I saw that! Would you agree that the QQ plots for the Gaussian model suggest presence of tails, and that the student model improves that, but maybe assumes too heavy tails? So maybe a df of ~4-6 would be good to try (just guessing!)? 
+# SA: working in log space and Student-t might be fine here, though it's possible that something like Gamma(link = "log") or lognormal might capture the mean-variance relationship better and not require the transformation.
+# ML: Ok, I see! In this case the main reason for taking the logs is transform the allometric model to a linear form, so maybe that wouldn't work
+m1 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm, data = d, time = "year", spde = spde,
+             family = student(link = "identity"), ar1_fields = TRUE,
+             include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
+             silent = FALSE) 
+```
+
+Evaluate model fit
+
+```{r spatiotemporal glmm residuals, results='hide', message=FALSE}
+# Inspect fitted models
+print(m0)
+print(m1)
+
+# Look at the residuals:
+df <- d
+
+df$residuals_m0 <- residuals(m0)
+df$residuals_m1 <- residuals(m1)
+
+qqnorm(df$residuals_m0); abline(a = 0, b = 1)
+```
+
+Gaussian looks bad.
+
+```{r student residuals}
+qqnorm(df$residuals_m1); abline(a = 0, b = 1)
+```
+
+Student looks a lot better but could perhaps be improved further (maybe by tweaking the df parameter). Check the residuals for the student t model on a map.
+
+```{r student residuals on map, fig.width=12}
+ggplot(df, aes(lon, lat, colour = residuals_m1)) +
+  geom_point(size = 1) +
+  facet_wrap(~year, ncol = 6) +
+  scale_color_gradient2() +
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(12.5, 21.5), ylim = c(54, 58))
+```
+
+Maybe some clustering remains...
+
+However, moving on we can also look at the AR1 parameter to ensure it is warranted.
+
+```{r check parameter estimates}
+# SA: Note that this is in -Inf to Inf space, although you are probably aware of that; `2 * plogis(ar_phi) - 1` will transform it
+# SA: also note that you can use (1) the already calculated sdreport and (2) the as.list S3 method for a handy named list... no more row.names()!:
+# ML: Right, that's what you wrote in the e-mail, forgot to correct that.
+# ML: Perfect, will se as.list on the repot. Thanks!
+m1_est <- as.list(m1$sd_report, "Estimate")
+m1_se <- as.list(m1$sd_report, "Std. Error")
+# Transform back to -1 to 1 scale
+2 * plogis(m1_est$ar1_phi) - 1
+2 * plogis(m1_est$ar1_phi + c(-2, 2) * m1_se$ar1_phi) - 1
+```
+
+Strong support for it, will not run model without AR1 process in the spatiotemporal field for now.
+
+Hence, I will proceed with this model, makes some predictions and compare it to a model with covariates.
+
+# Update here, add in the fixed effect and random walk on time !
+
+So, now we can predict and plot estimates using all fixed and random effects on pre-made grid. This grid is made by doing an expand grid over survey ranges, then filtering out areas that are actually in the ocean using ICES shapefiles. Lastly some areas are too deep for sampling (-135 m). I've added a depth column so that I can make those predictions NA so it's clear they are different from e.g. land and islands (maybe unnessecary but it makes them grey, i.e. different from land. 
+
+```{r predict on grid}
+p <- predict(m1, newdata = pred_grid)
+
+# Replace too-deep predictions with NA
+p <- p %>% mutate(est2 = ifelse(depth < -130, NA, est),
+                  eps_st2 = ifelse(depth < -130, NA, epsilon_st),
+                  omega_s2 = ifelse(depth < -130, NA, omega_s),
+                  est_non_rf2 = ifelse(depth < -130, NA, est_non_rf))
+```
+
+Plot the predicted condition with fixed and random effects:
+
+```{r plot prediciton on grid, fig.width=12}
+ggplot(p, aes(lon, lat, fill = est2)) +
+  geom_raster() +
+  facet_wrap(~year, ncol = 6) +
+  scale_fill_viridis(option = "magma", 
+                     name = "log(condition factor)") + 
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(12.5, 21.5), ylim = c(54, 58)) +
+  ggtitle("Prediction (random + fixed)")
+```
+
+Plot the spatiotemporal random effects:
+
+SA: Note that these are the spatial (omega) + spatiotemporal (epsilon) effects. If you just want the spatiotemporal ones, then you want `p$epsilon_st`. I have done that above.
+
+ML: Oh didn't realize that. Good, perhaps that was the reason they seemed similar...
+
+SA: You likely want a diverging colour scheme for these since they will be centered on 0. I have done that.
+
+ML: Yes makes sense and loks good!
+
+SA: typically each time slice would be centered on zero, however you have a moderately large AR1 phi parameter, which is letting it wander off a bit
+
+SA: an alternative might be the spatial_trend (since what you have look roughly linear) likely instead of the AR1 form, I would be interested to hear if that works well. If everything is generally decreasing, you could also try just having a fixed effect for year, which might be simplest of all and useful for inference... or let the intercept be a random walk through time:
+`formula = ln_weight_g ~ 0 + ln_length_cm, time_varying = ~ 1`
+
+SA: hopefully that's right, I haven't tried it here
+
+SA: All depends on what the end goal is for inference and what is most useful.
+
+ML: Those are good ideas! 
+
+```{r plot spatiotemporal on grid, fig.width=12}
+ggplot(p, aes(lon, lat, fill = eps_st2)) +
+  geom_raster() +
+  facet_wrap(~year, ncol = 6) +
+  scale_fill_gradient2(
+                     name = "log(condition factor)") + 
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(12.5, 21.5), ylim = c(54, 58)) +
+  ggtitle("Spatiotemporal random effects")
+```
+
+Plot the spatial random effects:
+
+```{r plot spatial on grid}
+ggplot(filter(p, year == 2000), aes(lon, lat, fill = omega_s2)) +
+  geom_raster() +
+  scale_fill_gradient2(
+                     name = "log(condition factor)") + 
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(12.5, 21.5), ylim = c(54, 58)) +
+  geom_point(data = d, aes(lon, lat), color = "green", inherit.aes = FALSE, size = 0.2) +
+  ggtitle("Spatial random effects + data")
+```
+
+SA: there are also the `p$est_non_rf` for just the fixed effects (and time-varying effects) if you want to look at that
+
+ML: Sounds good, will plot that too!
+
+Plot fixed effects on grid:
+
+```{r plot fixed effects on grid, fig.width=12}
+# Filter 1 year if I end up with a model like this where all years are identical
+ggplot(p, aes(lon, lat, fill = est_non_rf2)) +
+  geom_raster() +
+  facet_wrap(~year, ncol = 6) +
+  scale_fill_viridis(name = "log(condition factor)") + 
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(12.5, 21.5), ylim = c(54, 58)) +
+  ggtitle("Spatiotemporal random effects")
+```
+
+Predictions with fixed and random effects and the spatiotemporal random effect are quite similar. I guess this is because I don't have any other strong covariates yet (and the length-variable is set to 0 for this prediction). All random effects (and predictions) also seem to largely follow depth. Not really sure how to interpret that. At the deeper areas there is less oxygen and less benthic food so in theory it can make sense).
+
+```{r compare with bathymetry}
+baltic_sea <- getNOAA.bathy(lon1 = min(d$lon), lon2 = max(d$lon),
+                            lat1 = min(d$lat), lat2 = max(d$lat), resolution = 15)
+
+autoplot(baltic_sea, geom = c("r", "c")) +
+  scale_fill_gradient2(low = "darkblue", high = "gray", midpoint = 0)
+```
+
+Now we want to refit the same model with the additional fixed effects outlined above.
+
+```{r spatiotemporal glmm with covariates, results='hide', cache=TRUE}
+# Fit model with cod cpue as covariate
+mcod <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + CPUE_cod_st, data = d, time = "year",
+               spde = spde, family = student(link = "identity"), 
+               ar1_fields = TRUE,
+               include_spatial = TRUE, 
+               spatial_trend = FALSE, 
+               spatial_only = FALSE,
+               silent = FALSE)
+
+# Run extra optimization steps to help convergence:
+# mcod2 <- run_extra_optimization(mcod, nlminb_loops = 1, newton_steps = 1)
+
+# SA: interesting; you might try more knots (or sometimes fewer) or even a different seed on the make_spde function.
+## ---------- Actually this did not improve convergence this time!
+# I landed on fewer knots because I had convergence issues also with the first models with more knots
+
+#... And with flounder 
+mfle <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + CPUE_fle_st, data = d, time = "year",
+               spde = spde, family = student(link = "identity"), 
+               ar1_fields = TRUE,
+               include_spatial = TRUE, 
+               spatial_trend = FALSE, 
+               spatial_only = FALSE,
+               silent = FALSE) # sorry if this ruined the .Rmd output!
+
+# Run extra optimization steps to help convergence:
+# mfle2 <- run_extra_optimization(mfle, nlminb_loops = 1, newton_steps = 1)
+# max(mfle2$gradients)
+
+# Check the models
+print(mcod)
+print(mfle)
+```
+
+Check the new fixed effect estimates:
+
+```{r check new fixed effects}
+# Look at the new parameter (cod)
+# SA: use mcod$sdreport !
+# ML: Yes, thanks!
+cod_est <- as.list(mcod$sd_report, "Estimate")
+cod_se <- as.list(mcod$sd_report, "Std. Error")
+cod_est$b_j.2
+cod_est$b_j.2 + c(-2, 2) * cod_se$b_j.2
+
+fle_est <- as.list(mfle$sd_report, "Estimate")
+fle_se <- as.list(mfle$sd_report, "Std. Error")
+fle_est$b_j.2
+fle_est$b_j.2 + c(-2, 2) * fle_est$b_j.2
+```
+
+
+```{r model comparison with AIC}
+# Compare the models with AIC (unsure actually if this is correct for a sdmTMB model...)
+# SA: as long as only the fixed effects change and reml = FALSE, then yes
+# SA: if random effects change and reml = TRUE, then yes
+# SA: all conditional on whether AIC is a good thing to use for this type of model... but people do
+# ML: 
+aic_m1 <- extractAIC(m1)
+aic_mcod <- extractAIC(mcod)
+aic_mfle <- extractAIC(mfle)
+
+aic_m1
+aic_mcod
+aic_mfle
+```
+
+The model with flounder has a smaller AIC, even though the 95% confidence interval for it's coefficient crosses 0 (unlike the coefficient for cod).
+
+Now let's look more closely at the our estimates. If I understand Thorson (2015) correctly:
+
+*"This implies that $\gamma X$ (the covariate times its coefficient) has a standard deviation of $\gamma$ such that coefficients can be interpreted via comparison with the standard deviation of spatial, temporal and spatiotemporal variation, as well as that of residual variation."*
+
+I can now compare the coefficient of flounder with the standard deviation of the spatial and spatiotemporal effects, i.e. $\sigma_E$ and $\sigma_A$ in Thorson (2015) (Eqns. 6b-7). These terms are the square roots of the marginal variances of the random fields, i.e. $\sigma_E^2$ and $\sigma_A^2$.
+
+In sdmTMB I think $\sigma_E$ and $\sigma_A$ above correspond to Spatiotemporal SD (sigma_E) and Spatial SD (sigma_O) seen in `print(model)`. I think the non-rounded values can be extracted from:
+
+```{r extract sds of random fields}
+mfle$sd_report$value
+# SA: correct, or as a named list (note the last argument):
+est <- as.list(mfle$sd_report, "Estimate", report = TRUE)
+se <- as.list(mfle$sd_report, "Std. Error", report = TRUE)
+est$sigma_O
+se$sigma_O
+est$sigma_E
+se$sigma_E
+```
+
+These standard deviations can now be compared with the coefficients of the flounder model:
+
+```{r flounder coefficient}
+fle_est$b_j.2
+```
+
+I interpret this as that the flounder coefficient is small relative to other sources of temporally constant variation across space (omega) and factors varying in space from year to year (epsilon). Further, I don't think inclusion of the flounder covariate leads to less variation explained by the spatial and spatiotemporal effects. Compare those standard deviations with the model without covariates:
+
+```{r compare with base model sds on random fields}
+m1$sd_report$value
+m1_est$sigma_O
+m1_est$sigma_E
+```
+
+For the sake of comparison, I can also produce a map to look at the differences there.
+
+```{r map prediction for covariate model, fig.width=12}
+# Add in a fixed covariate here
+pred_grid_fle <- pred_grid
+pred_grid_fle$CPUE_fle_st <- 0 # Mean since standardized
+
+pfle <- predict(mfle, newdata = pred_grid_fle)
+
+# Replace too-deep predictions with NA
+pfle <- pfle %>% mutate(est2 = ifelse(depth < -130, NA, est))
+
+ggplot(pfle, aes(X, Y, fill = est2)) +
+  geom_raster() +
+  facet_wrap(~year, ncol = 6) +
+  scale_fill_viridis(option = "magma", 
+                     name = "log(condition factor)") + 
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(12.5, 21.5), ylim = c(54, 58)) +
+  ggtitle("Prediction (random + fixed) with covariates")
+```
+
+## To do
+
+- The spatial_trend argument is ignored for now [see e-mail], is my interpretation correct?
+
+SA: it is a random field that represents a slope over the time variable; yes it is confusingly internally still called omega_s_slope or something similar. I should fix that. If TRUE, omega_s can be thought of as an intercept and omega_s_slope (zeta_s) the slope. We have a paper in review on it I could share if you want. Sorry it's badly documented... although I think there is a vignette on it.
+
+- Do I extract the standard deviations for the spatial and spatiotemporal trends correctly, and interpret then correctly in relation to covariates?
+
+SA: extracted correctly, yes, although see my suggested list version
+
+SA: as for that Thorson 2015 paragraph, hmm, perhaps yes, although I hadn't thought of it that way before. I've more commonly seen assessment of covariates via the magnitude (ecological relavance), confidence interval, and/or AIC, but yes, that could be a useful scale comparison. That assumes you have scaled your predictor to have variance = 1, which might make less sense if it's a log variable.
+
+
+## References
+
+Anderson, S.C., Keppel, E.A., Edwards, A.M. 2019. A reproducible data synopsis for over 100 species of British Columbia groundfsh. *DFO Can. Sci. Advis. Sec. Res. Doc*. 2019/041. vii + 321 p.
+
+Casini, M., Käll, F., Hansson, M., Plikshs, M., Baranova, T., Karlsson, O., Lundström, K., Neuenfeldt, S., Gårdmark, A. and Hjelm, J., 2016. Hypoxic areas, density-dependence and food limitation drive the body condition of a heavily exploited marine fish predator. *Royal Society open science*, 3(10), p.160416.
+
+Gårdmark, A., Casini, M., Huss, M., van Leeuwen, A., Hjelm, J., Persson, L. and de Roos, A.M., 2015. Regime shifts in exploited marine food webs: detecting mechanisms underlying alternative stable states using size-structured community dynamics theory. *Philosophical Transactions of the Royal Society B: Biological Sciences*, 370(1659), p.20130262.
+
+Orio, A., Bergström, U., Florin, A.B., Lehmann, A., Šics, I. and Casini, M., 2019. Spatial contraction of demersal fish populations in a large marine ecosystem. *Journal of Biogeography*, 46(3), pp.633-645.
+
+Svedäng, H. and Hornborg, S., 2014. Selective fishing induces density-dependent growth. *Nature communications*, 5(1), pp.1-6.
+
+Thorson, J.T., 2015. Spatio-temporal variation in fish condition is not consistently explained by density, temperature, or season for California Current groundfishes. *Marine Ecology Progress Series*, 526, pp.101-112.
+
+
