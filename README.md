@@ -10,7 +10,7 @@ We use Spatiotemporal linear mixed-effects models and a predictive-modelling fra
 ## How to replicate our analyses and navigate this repo
 
 `data`
-Data are not uploaded here due to being large. They are available from database [DATRAS](https://datras.ices.dk/Data_products/Download/Download_Data_public.aspx). Can also be sent upon request
+Rawr data are not uploaded here due to being large, only processed data for replicating the analysis. Raw data are available from ICES databases [DATRAS](https://datras.ices.dk/Data_products/Download/Download_Data_public.aspx) and [OCEANOGRAPHY](https://ocean.ices.dk/HydChem/HydChem.aspx?plot=yes). Can also be sent upon request to reproduce the data cleaning.
 
 `R`
 Contains code for analysis and data processing

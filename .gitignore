@@ -41,12 +41,12 @@ vignettes/*.pdf
 # Large documents
 2019_041-eng.pdf
 
-# Raw data
-bits_ca.csv
-bits_hh.csv
-bits_hl.csv
-DATRAS_dataproducts_units.pdf
+# Raw data & modell outputs
 SISP7 BITS 2017.pdf
+/data/DATRAS_cpue_length_haul
+/data/DATRAS_exchange
+/data/from_mich
+/data/OCEANOGRAPHY
 /data/shapefiles
 /output/
 
