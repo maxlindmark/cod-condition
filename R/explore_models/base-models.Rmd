@@ -20,11 +20,9 @@ knitr::opts_chunk$set(
 )
 ```
 
-# EXTRACT CODE LIKE THIS: https://bookdown.org/yihui/rmarkdown-cookbook/purl.html
-
 ## Background
 
-The body condition and growth of Eastern Baltic cod has declined steadily since the regime shift in the early 1990's to a degree that it now can be viewed as collapsed. Several hypotheses have been put forward, including changes in overlap with pelagic prey (e.g. Gårdmark et al, 2015), reduced oxygen levels (e.g. Casini et al, 2016), increased competition for benthic food sources with flounder (Orio et al, 2019) as well as increased intraspecific competition and growth bottlenecks within the population (Svedäng & Hornborg, 2014).  
+The body condition and growth of Eastern Baltic cod has declined steadily since the regime shift in the early 1990's to a degree that the stock now can be viewed as collapsed. Several hypotheses have been put forward, including changes in overlap with pelagic prey (e.g. Gårdmark et al, 2015), reduced oxygen levels (e.g. Casini et al, 2016), increased competition for benthic food sources with flounder (Orio et al, 2019; Orio 2020) as well as increased intraspecific competition and growth bottlenecks within the population (Svedäng & Hornborg, 2014; Neuenfeldt 2019).  
 
 
 ## Methods
@@ -60,7 +58,7 @@ world <- ne_countries(scale = "medium", returnclass = "sf")
 Now read data
 
 ```{r read and process data, message=FALSE, warning=FALSE}
-d <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/mdat_cond.csv")
+d <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/clean_for_analysis/mdat_cond.csv")
 
 # Calculate variables, including standardizing the covariates to have a mean of 0 and
 # variance of 1 to facilitate comparison between different ones
@@ -78,7 +76,7 @@ d <- d %>%
 Read the prediction grid:
 
 ```{r read and process prediction grid, message=FALSE, warning=FALSE}
-pred_grid <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/pred_grid.csv")
+pred_grid <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/clean_for_analysis/pred_grid.csv")
 
 # SA: You likely want to work in UTMs so distance is constant with space
 # ML: I did not think so much about this, but that sounds like a good idea. Although for now I can't choose which of the two UTM zones to use... (I did change from X and Y to lon and lat to make it more clear in case I switch later!)
@@ -106,7 +104,7 @@ Ok there's a clear temporal development in condition and the spatial coverage of
 
 Next we fit spatial/spatiotemporal models to account for this. Given that we do not have samples in all spatial locations for all years, and we believe that there are "hotpots" of body condition, we model a temporal correlation for the spatiotemporal variation (Thorson, 2019), specifically, this is done by estimating the spatiotemporal fields as an AR1 process. Hence, we set ar1_fields = TRUE.
 
-I will start by setting up the SPDE mesh with 75 knots and alter I will fit and compare models with more knots. In the first step I will compare a Gaussian with a student t model to see which distribution seems more appropriate.
+I will start by setting up the SPDE mesh with 70 knots and alter I will fit and compare models with more knots. In the first step I will compare a Gaussian with a student t model to see which distribution seems more appropriate.
 
 ```{r fit first spatiotemporal glmm, results='hide', cache=TRUE}
 # SA: good for now; could increase knots eventually:
@@ -116,7 +114,7 @@ plot_spde(spde)
 # Compare Gaussian and student t models with a spatiotemporal AR1 process
 m0 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm, data = d, time = "year", spde = spde,
              family = gaussian(link = "identity"), ar1_fields = TRUE,
-             include_spatial = TRUE,  spatial_trend = FALSE, spatial_only = FALSE,
+             include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
              silent = FALSE)
 
 # SA: note that the degrees of freedom on the Student-t are fixed out 3 currently; we can tweak that so you could specify it if you want.
@@ -429,7 +427,11 @@ Casini, M., Käll, F., Hansson, M., Plikshs, M., Baranova, T., Karlsson, O., Lun
 
 Gårdmark, A., Casini, M., Huss, M., van Leeuwen, A., Hjelm, J., Persson, L. and de Roos, A.M., 2015. Regime shifts in exploited marine food webs: detecting mechanisms underlying alternative stable states using size-structured community dynamics theory. *Philosophical Transactions of the Royal Society B: Biological Sciences*, 370(1659), p.20130262.
 
+Neuenfeldt, S., Bartolino, V., Orio, A., Andersen, K.H., Andersen, N.G., Niiranen, S., Bergström, U., Ustups, D., Kulatska, N. and Casini, M., 2020. Feeding and growth of Atlantic cod (Gadus morhua L.) in the eastern Baltic Sea under environmental change. ICES Journal of Marine Science, 77(2), pp.624-632.
+
 Orio, A., Bergström, U., Florin, A.B., Lehmann, A., Šics, I. and Casini, M., 2019. Spatial contraction of demersal fish populations in a large marine ecosystem. *Journal of Biogeography*, 46(3), pp.633-645.
+
+Orior, A., Bergströn, U., Floring, Ann-Britt., Sics, I. and Casini, M., 2020. Long-term changes in spatial overlap between interacting cod and flounder in the Baltic Sea. Hydrobiologia, 847(11), pp.2541-2553.
 
 Svedäng, H. and Hornborg, S., 2014. Selective fishing induces density-dependent growth. *Nature communications*, 5(1), pp.1-6.
 
