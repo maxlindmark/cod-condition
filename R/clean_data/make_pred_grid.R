@@ -102,5 +102,5 @@ pred_grid <- data.frame(lon = rep(df$lon, length(unique(dat$year))),
                         year = rep(sort(unique(dat$year)), each = nrow(df)))
 
 # Save
-write.csv(pred_grid, file = "data/pred_grid.csv", row.names = FALSE)
+write.csv(pred_grid, file = "data/clean_for_analysis/pred_grid.csv", row.names = FALSE)
 

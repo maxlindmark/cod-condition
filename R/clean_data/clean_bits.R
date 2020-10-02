@@ -1,32 +1,20 @@
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # 2020.06.16: Max Lindmark
 #
-# - Code to clean and merge BITS HH, and CA data directly from DATRAS
-#   We want to end up with a dataset of length-at-weight of cod, with haul information 
-#   and columns indicating the catch of cod and flounder at the haul.
+# - Code to clean and merge BITS HH (Record with detailed haul information),
+#   and CA (Sex-maturity-age–length keys (SMALK's) for ICES subdivision) data
+#   directly from DATRAS. We want to end up with a dataset of length-at-weight of cod,
+#   with haul information.
 # 
-# - The approach is as follows:
-#   1. Read the CA data which has weight-length information. Clean and standardize
-#   2. Read in the HH data file, which has information about the haul (coordinates etc)
-#   3. Select the IDs that are i both data sets, merge haul and condition data
-#   3. Read in the catch covariates. Use only hauls that are in the condition data
-#      If the haul is not in the catch data, give a 0 catch
-#   4. Add in the remaining covariates (oxygen, pelagics etc). Same here, add 0 if NA
-#      after the data join.
+#   Next, we join in CPUE (Catch in numbers per hour of hauling) of flounder and cod
+#   We calculate this for two size classes by species. If the haul is not in the catch
+#   data, give a 0 catch
 # 
-#   HH: Record with detailed haul information;
-#   HL: Length frequency data; 
-#   CA: Sex-maturity-age–length keys (SMALK's) for ICES subdivision.
+#   After that, we join in the abundance of sprat and herring. This is available on 
+#   an ICES rectangle-level, so many hauls will end up with the same abundance
 # 
-# A. Load libraries
-# 
-# B. Get haul information into catch data
-# 
-# C. Get haul & catch data in to length-weight data 
-# 
-# D. Prepare data for analysis
-# 
-# E. Add additional covariates
+#   Lastly, we join in the Oxygen data. This is still in progress as I need to decide
+#   on the least bad way to do it... 
 #
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -48,6 +36,9 @@ library(patchwork)
 library(rgdal)
 library(raster)
 library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(rgeos)
 
 # Print package versions
 # sessionInfo()
@@ -66,15 +57,16 @@ library(sf)
 bits_hh <- read.csv("data/DATRAS_exchange/bits_hh.csv")
 
 # Create ID column
-bits_hh$ID <- paste(bits_hh$Year, bits_hh$Quarter, bits_hh$Ship,
-                    bits_hh$Gear, bits_hh$HaulNo, bits_hh$Depth, sep = ".")
+bits_hh <- bits_hh %>% 
+  mutate(ID = paste(Year, Quarter, Ship, Gear, HaulNo, StNo, sep = "."))
 
 # Check that per ID, there's only one row
-bits_hh %>% 
+bits_hh %>%
   group_by(ID) %>% 
   mutate(n = n()) %>% 
-  ungroup() %>%
-  ggplot(., aes(factor(n))) + geom_bar()
+  filter(n > 1) %>% 
+  arrange(ID) %>% 
+  as.data.frame()
 
 # Check default availability of environmental data
 ggplot(bits_hh, aes(BotSal)) + geom_histogram()
@@ -111,11 +103,8 @@ bits_ca <- bits_ca %>% filter(SpecCode %in% c("164712", "126436") & LngtClass > 
 bits_ca$Species <- "Cod"
 
 # Create ID column
-# bits_ca$ID <- paste(bits_ca$Year, bits_ca$Quarter, bits_ca$Country, bits_ca$Ship,
-#                     bits_ca$Gear, bits_ca$HaulNo, bits_ca$StNo, sep = ".")
-
-bits_ca$ID <- paste(bits_ca$Year, bits_ca$Quarter, bits_ca$Country, bits_ca$Ship,
-                    bits_ca$Gear, bits_ca$HaulNo, bits_ca$StNo, sep = ".")
+bits_ca <- bits_ca %>% 
+  mutate(ID = paste(Year, Quarter, Ship, Gear, HaulNo, StNo, sep = "."))
 
 # Check that per ID AND LNGTCLASS, there's only one row
 bits_ca %>% 
@@ -124,7 +113,6 @@ bits_ca %>%
   mutate(n = n()) %>% 
   ungroup() %>%
   ggplot(., aes(factor(n))) + geom_bar()
-
 
 # Now I need to copy rows with NoAtLngt > 1 so that 1 row = 1 ind
 # First make a small test
@@ -143,12 +131,12 @@ bits_ca <- bits_ca %>%
   drop_na(IndWgt) %>% 
   drop_na(LngtClass) %>% 
   filter(IndWgt > 0 & LngtClass > 0) %>%  # Filter positive length and weight
-  mutate(Length_cm = ifelse(LngtCode == ".", 
+  mutate(length_cm = ifelse(LngtCode == ".", 
                             LngtClass/10,
                             LngtClass)) %>% # Standardize length ((https://vocab.ices.dk/?ref=18))
   as.data.frame()
   
-ggplot(bits_ca, aes(Length_cm, fill = LngtCode)) + geom_histogram()
+ggplot(bits_ca, aes(length_cm, fill = LngtCode)) + geom_histogram()
 
 
 # D. JOIN CONDITION AND HAUL DATA ==================================================
@@ -166,217 +154,707 @@ dat <- left_join(bits_ca, bits_hh_filter)
 # in the haul data
 dat <- dat %>% drop_na(ShootLat)
 
-# Lastly we can remove hauls from outside the study area and select only quarter 4
+# Lastly we can remove hauls from outside the study area and select only quarter 4,
+# and remove non-valid hauls
 dat <- dat %>% 
+  filter(ShootLat < 58 & ShootLong > 12.5) %>% 
+  mutate(kattegatt = ifelse(ShootLat > 55.5 & ShootLong < 14, "Y", "N")) %>% 
+  filter(kattegatt == "N",
+         Quarter == 4,
+         HaulVal == "V") %>% 
+  dplyr::select(-kattegatt)
+
+
+# E. READ AND JOIN THE COD AND FLOUNDER COVARIATES =================================
+cov_dat <- read.csv("data/DATRAS_cpue_length_haul/CPUE per length per haul per hour_2020-09-25 16_15_36.csv")
+
+# Remove hauls from outside the study area and select only quarter 4
+cov_dat <- cov_dat %>% 
   filter(ShootLat < 58 & ShootLong > 12.5) %>% 
   mutate(kattegatt = ifelse(ShootLat > 55.5 & ShootLong < 14, "Y", "N")) %>% 
   filter(kattegatt == "N") %>% 
   filter(Quarter == 4) %>% 
   dplyr::select(-kattegatt)
 
+# I am now going to assume that a haul that is present in the condition data but not
+# in this covariate data means that the catch is 0
+cov_dat %>% arrange(CPUE_number_per_hour)
+cov_dat %>% filter(CPUE_number_per_hour == 0)
 
-# E. READ THE CPUE COVARIATES ======================================================
-cov_dat <- read.csv("data/DATRAS_cpue_length_haul/CPUE per length per haul per hour_2020-09-25 16_15_36.csv")
+# Create a new ID column. Note that I can't define a single ID column that works for
+# all data sets. The ID that I used for the Exchange data cannot be applied here. I
+# need to come up with a new ID here. Run this to see common columns:
+# colnames(dat)[colnames(dat) %in% colnames(cov_dat)]
+# First filter by species and convert length to cm, then add in ID
 
-# Create ID column
-cov_dat$ID <- paste(cov_dat$Year, cov_dat$Quarter, cov_dat$Country, cov_dat$Ship,
-                    cov_dat$Gear, cov_dat$HaulNo, cov_dat$StNo, sep = ".")
+cod <- cov_dat %>%
+  filter(Species == "Gadus morhua") %>% 
+  mutate(length_cm = LngtClass/10) %>% 
+  filter(LngtClass > 0) %>% 
+  mutate(ID2 = paste(Year, Quarter, Ship, Gear, HaulNo, Depth, ShootLat, ShootLong, sep = "."))
 
-head(cov_dat)
+fle <- cov_dat %>%
+  filter(Species == "Platichthys flesus") %>% 
+  mutate(length_cm = LngtClass/10) %>% 
+  filter(LngtClass > 0) %>% 
+  mutate(ID2 = paste(Year, Quarter, Ship, Gear, HaulNo, Depth, ShootLat, ShootLong, sep = "."))
 
-# Filter ID's from the covariate data that are also found in the condition data
-condition_IDs <- unique(dat$ID)
+# First check if this is unique by haul. Then I should get 1 row per ID and size...
+cod %>%
+  group_by(ID2, LngtClass) %>% 
+  mutate(n = n()) %>% 
+  ungroup() %>% 
+  distinct(n, .keep_all = TRUE) %>% 
+  as.data.frame()
 
+fle %>%
+  group_by(ID2, LngtClass) %>% 
+  mutate(n = n()) %>% 
+  ungroup() %>% 
+  distinct(n, .keep_all = TRUE) %>% 
+  as.data.frame()
 
-# Note that this data has only a single length standard. Convert this to cm, as in the
-# condition data
-ggplot(cov_dat, aes(LngtClass, fill = Species)) + geom_density(alpha = 0.5)
+# And add also the same ID to dat (condition and haul data).
+# Check if unique!
+# It is with the exception of 8 rows. Not much I can do about that because I don't have
+# any more unique columns I can add to the ID
+test <- read.csv("data/DATRAS_exchange/bits_hh.csv")
+test <- test %>%
+  mutate(ID2 = paste(Year, Quarter, Ship, Gear, HaulNo, Depth, ShootLat, ShootLong, sep = "."))
 
-cov_dat <- cov_dat %>% mutate(Length_cm = LngtClass/10)
+test %>%
+  mutate(ID2 = paste(Year, Quarter, Ship, Gear, HaulNo, Depth, ShootLat, ShootLong, sep = ".")) %>%
+  group_by(ID2) %>%
+  mutate(n = n()) %>%
+  ungroup() %>%
+  filter(!n==1) %>%
+  as.data.frame()
 
-ggplot(cov_dat, aes(Length_cm, fill = Species)) + geom_density(alpha = 0.5)
+# Test if these are in dat:
+test_ids <- unique(test$ID2)
 
-# Remove the individuals with size 0
-cov_dat <- cov_dat %>% filter(LngtClass > 0)
+# Add in ID2
+dat <- dat %>%
+  mutate(ID2 = paste(Year, Quarter, Ship, Gear, HaulNo, Depth, ShootLat, ShootLong, sep = "."))
 
-# Check the distribution of CPUEs
-ggplot(cov_dat, aes(CPUE_number_per_hour)) +
-  geom_histogram(alpha = 0.5) + 
-  facet_wrap(~ Species) + 
-  scale_x_log10()
+# No they are not, no need to filter.
+filter(dat, ID2 %in% test_ids)
+
+# Are there any ID's that are IN the covariate data that are not in the test
+# (raw haul data) data?
+cod$ID2[!cod$ID2 %in% test$ID2]
+fle$ID2[!fle$ID2 %in% test$ID2]
+
+filter(fle, ID2 %in% unique(test$ID2)) 
+# Nope! All good.
 
 # Now calculate the mean CPUE per hauls and size group per species. For cod we use 30
-# cm and for flounder 20 cm
-cod_above_30cm <- cov_dat %>% 
-  filter(Species == "Gadus morhua") %>% 
-  filter(Length_cm >= 30) %>% 
-  group_by(ID) %>% 
-  summarise(cpue = sum(CPUE_number_per_hour)) %>% 
+# cm and for flounder 20 cm. This is because Neuenfeldt et al (2019) found that cod
+# below 30cm are in a growth-bottleneck, and because Haase et al (2020) found that 
+# flounder above 20cm start feeding a lot of saduria, which has been speculated to
+# decline in cod stomachs due to interspecific competition and increased spatial
+# overlap with flounder.
+cod_above_30cm <- cod %>% 
+  filter(length_cm >= 30) %>% 
+  group_by(ID2) %>% 
+  summarise(cpue_cod_above_30cm = sum(CPUE_number_per_hour)) %>% 
   ungroup()
 
-cod_below_30cm <- cov_dat %>% 
-  filter(Species == "Gadus morhua") %>% 
-  filter(Length_cm < 30) %>% 
-  group_by(ID) %>% 
-  summarise(cpue = sum(CPUE_number_per_hour)) %>% 
+cod_below_30cm <- cod %>% 
+  filter(length_cm < 30) %>% 
+  group_by(ID2) %>% 
+  summarise(cpue_cod_below_30cm = sum(CPUE_number_per_hour)) %>% 
   ungroup()
 
-fle_above_20cm <- cov_dat %>% 
-  filter(Species == "Platichthys flesus") %>% 
-  filter(Length_cm >= 20) %>% 
-  group_by(ID) %>% 
-  summarise(cpue = sum(CPUE_number_per_hour)) %>% 
+fle_above_20cm <- fle %>% 
+  filter(length_cm >= 20) %>% 
+  group_by(ID2) %>% 
+  summarise(cpue_fle_above_20cm = sum(CPUE_number_per_hour)) %>% 
   ungroup()
 
-fle_below_20cm <- cov_dat %>% 
-  filter(Species == "Platichthys flesus") %>% 
-  filter(Length_cm < 20) %>% 
-  group_by(ID) %>% 
-  summarise(cpue = sum(CPUE_number_per_hour)) %>% 
+fle_below_20cm <- fle %>% 
+  filter(length_cm < 20) %>% 
+  group_by(ID2) %>% 
+  summarise(cpue_fle_below_20cm = sum(CPUE_number_per_hour)) %>% 
   ungroup()
 
 # Test it worked, first by plotting n rows per ID
-cod_above_30cm %>% group_by(ID) %>% mutate(n = n()) %>% 
+cod_above_30cm %>% group_by(ID2) %>% mutate(n = n()) %>% 
   ggplot(., aes(factor(n))) + geom_bar()
 
 # Next by calculating an example
-cod_above_30cm %>% filter(ID == "2002.4..DAN2.TVL.43.")
-sum(filter(cov_dat, ID == "2002.4..DAN2.TVL.43." &
-             Species == "Gadus morhua" & 
-             Length_cm >= 30)$CPUE_number_per_hour)
+unique(cod_above_30cm$ID2)
 
+cod_above_30cm %>% filter(ID2 == "2003.4.DAN2.TVL.13.66.55.3736.16.9982")
+sum(filter(cod, ID2 == "2003.4.DAN2.TVL.13.66.55.3736.16.9982" &
+             length_cm >= 30)$CPUE_number_per_hour)
 
-# F. MERGE CATCH COVARIATES WITH CONDITION DATA ====================================
+# Correct! The data subset yields the same 
+
+# Join covariates
 cod_above_30cm
 cod_below_30cm
 fle_above_20cm
 fle_below_20cm
 
-# Left join dat and cpue data. 
+# Some rows are not present in the condition data (dat) but are in the CPUE data.
+# As I showed above, all ID2's in the CPUE data are in the raw haul data, so if they 
+# aren't with us anymore that means they have been filtered away along the road.
+# I don't need to remove those ID2's though because when using left_join I keep only
+# rows in x!
+# cod_above_30cm$ID2[!cod_above_30cm$ID2 %in% test$ID2]
 
-test_id <- head(bits_hh$ID[!bits_hh$ID %in% bits_hl_fle$ID], 1)
+# Left join dat and cpue data (cod_above_30cm)
+dat <- left_join(dat, cod_above_30cm) 
+
+# Left join dat and cpue data (cod_below_30cm)
+dat <- left_join(dat, cod_below_30cm) 
+
+# Left join dat and cpue data (fle_above_20cm)
+dat <- left_join(dat, fle_above_20cm) 
+
+# Left join dat and cpue data (fle_below_20cm)
+dat <- left_join(dat, fle_below_20cm) 
+
+head(dat)
+
+dat
+
+# Again, I'm assuming here that NA means 0 catch, because there were no catches by that 
+# haul in the CPUE data. Testing a random ID2 that the covariate is repeated within haul
+unique(dat$ID2)
+
+filter(dat, ID2 == "2004.4.SOL2.TVS.53.42.55.1918.13.2392")
+filter(dat, ID2 == "2003.4.BAL.TVL.23.62.54.55.15.65")
+
+# Replace NA catches with 0
+dat$cpue_cod_above_30cm[is.na(dat$cpue_cod_above_30cm)] <- 0
+dat$cpue_cod_below_30cm[is.na(dat$cpue_cod_below_30cm)] <- 0
+dat$cpue_fle_above_20cm[is.na(dat$cpue_fle_above_20cm)] <- 0
+dat$cpue_fle_below_20cm[is.na(dat$cpue_fle_below_20cm)] <- 0
+
+filter(dat, ID2 == "2004.4.SOL2.TVS.53.42.55.1918.13.2392")
+filter(dat, ID2 == "2003.4.BAL.TVL.23.62.54.55.15.65")
+
+# Create total CPUE column
+dat <- dat %>% mutate(cpue_cod = cpue_cod_above_30cm + cpue_cod_below_30cm,
+                      cpue_fle = cpue_fle_above_20cm + cpue_fle_below_20cm)
+
+# Final check, use random ID2's and compare them in cod/fle and test
+cod$ID2[cod$ID2 %in% dat$ID2]
+
+cod %>% filter(ID2 == "1992.4.SOL.H20.42.20.54.5.14.2")
+dat %>% filter(ID2 == "1992.4.SOL.H20.42.20.54.5.14.2")
+
+sum(filter(cod, ID2 == "1991.4.SOL.H20.30.26.54.6.14.25" & length_cm >= 30)$CPUE_number_per_hour)
+sum(filter(cod, ID2 == "1991.4.SOL.H20.30.26.54.6.14.25" & length_cm < 30)$CPUE_number_per_hour)
+dat %>% filter(ID2 == "1991.4.SOL.H20.30.26.54.6.14.25") %>%
+  dplyr:: select(ID2, cpue_cod_above_30cm, cpue_cod_below_30cm)
+
+fle %>% filter(ID2 == "1992.4.SOL.H20.42.20.54.5.14.2")
+dat %>% filter(ID2 == "1992.4.SOL.H20.42.20.54.5.14.2")
+
+sum(filter(fle, ID2 == "1991.4.SOL.H20.30.26.54.6.14.25" & length_cm >= 20)$CPUE_number_per_hour)
+sum(filter(fle, ID2 == "1991.4.SOL.H20.30.26.54.6.14.25" & length_cm < 20)$CPUE_number_per_hour)
+dat %>% filter(ID2 == "1991.4.SOL.H20.30.26.54.6.14.25") %>%
+  dplyr:: select(ID2, cpue_fle_above_20cm, cpue_fle_below_20cm)
 
 
-test <- left_join(dat, cod_above_30cm) 
+# F. READ AND JOIN PELAGIC COVARIATES ==============================================
+spr <- read_xlsx("data/from_mich/Abundances_rectangles_1984-2019_corrected.xlsx",
+                 sheet = 1) %>%
+  filter(Year > 1990) %>% 
+  rename("StatRec" = "Rec") %>%
+  mutate(StatRec = as.factor(StatRec),
+         Species = "Sprat",
+         abun_spr = `Age 0`+`Age 1`+`Age 2`+`Age 3`+`Age 4`+`Age 5`+`Age 6`+`Age 7`+`Age 8+`+`1+`,
+         ID3 = paste(StatRec, Year, sep = ".")) # Make new ID)
+  
+head(spr)
 
-head(test)
+her <- read_xlsx("data/from_mich/Abundances_rectangles_1984-2019_corrected.xlsx",
+                 sheet = 2) %>%
+  as.data.frame() %>%
+  filter(Year > 1990) %>% 
+  rename("StatRec" = "Rect2") %>% # This is not called Rec in the data for some reason
+  mutate(StatRec = as.factor(StatRec),
+         Species = "Herring",
+         abun_her = `Age 0`+`Age 1`+`Age 2`+`Age 3`+`Age 4`+`Age 5`+`Age 6`+`Age 7`+`Age 8+`+`1+`,
+         ID3 = paste(StatRec, Year, sep = ".")) # Make new ID
 
-unique(is.na(test$IndWgt))
+# How many unique rows per ID3?
+her %>%
+  group_by(ID3) %>% 
+  mutate(n = n()) %>% 
+  ggplot(., aes(factor(n))) + geom_bar()
 
+spr %>%
+  group_by(ID3) %>% 
+  mutate(n = n()) %>% 
+  ggplot(., aes(factor(n))) + geom_bar()
 
-
-# Here I need to save the NAs if they are in the condition data because that means a
-# zero catch
-
-
-
-
-
-
-
-
-
-
-# X. PREPARE DATA FOR ANALYSIS =====================================================
-
-
-# Plot stacked bars of sample size
-dat %>% 
-  group_by(year, Quarter) %>% 
-  summarize(n_ind = n()) %>% 
+# Ok, some ID's with two rows...
+test_spr <- spr %>%
+  group_by(ID3) %>% 
+  mutate(n = n()) %>% 
+  filter(n == 2) %>% 
   ungroup() %>% 
-  ggplot(., aes(year, n_ind, fill = factor(Quarter))) +
-  geom_bar(stat = "identity")
+  as.data.frame()
 
-# Plot sample size over space and color by mean size
-# Quarter 1
-dat %>%
-  filter(Quarter == 1) %>% 
-  mutate(pos = paste(lat, lon, sep = "_")) %>% 
-  dplyr::group_by(year, pos) %>% 
-  mutate(n = n(),
-         mean_size = mean(LngtClass)) %>%
-  dplyr::ungroup() %>% 
-  ggplot(aes(x = lon, y = lat, size = n, color = mean_size)) +
-  geom_point(alpha = 0.3) +
-  scale_size(range = c(0.01, 3)) +
-  facet_wrap(~ year) + 
-  scale_color_viridis(option = "magma") +
-  ggtitle("Quarter 1") +
-  NULL
+test_spr
 
-# Quarter 4
-dat %>%
-  filter(Quarter == 4) %>% 
-  mutate(pos = paste(lat, lon, sep = "_")) %>% 
-  dplyr::group_by(year, pos) %>% 
-  mutate(n = n(),
-         mean_size = mean(LngtClass)) %>%
-  dplyr::ungroup() %>% 
-  ggplot(aes(x = lon, y = lat, size = n, color = mean_size)) +
-  geom_point(alpha = 0.3) +
-  scale_size(range = c(0.01, 3)) +
-  facet_wrap(~ year) + 
-  scale_color_viridis(option = "magma") +
-  ggtitle("Quarter 4") +
-  NULL
+# Seems to be due to rectangles somehow being in different sub divisions. I need to
+# group by ID3 and summarize
+nrow(spr)
+nrow(spr %>% group_by(ID3) %>% mutate(n = n()) %>% filter(n == 2))
+nrow(spr %>% group_by(ID3) %>% mutate(n = n()) %>% filter(!n == 1))
 
-# Filter Q4 because that's what we will have pelagic covariates from
+spr_sum <- spr %>%
+  group_by(ID3) %>% 
+  summarise(abun_spr = sum(abun_spr)) %>% # Sum abundance within ID3
+  distinct(ID3, .keep_all = TRUE) %>% # Remove duplicate ID3
+  mutate(ID_temp = ID3) %>% # Create temporary ID3 that we can use to split in order
+                            # to get Year and StatRect back into the summarized data
+  separate(ID_temp, c("StatRec", "Year"), sep = 4)
 
-dat <- filter(dat, Quarter == 4)
+nrow(spr_sum) 
+nrow(spr)
+nrow(spr %>% group_by(ID3) %>% mutate(n = n()) %>% filter(n == 2))
 
-# Plot length over weight
-ggplot(dat, aes(length_cm, weight_g, color = factor(LngtCode))) + geom_point()
+filter(spr_sum, ID3 == "39G2.1991")
+filter(spr, ID3 == "39G2.1991")
 
-# Inspect response variable
-ggplot(dat, aes(condition)) + geom_histogram()
+# This should equal 1 (new # rows =  old - duplicated ID3)
+nrow(spr_sum) / (nrow(spr) - 0.5*nrow(spr %>% group_by(ID3) %>% mutate(n = n()) %>% filter(n == 2)))
 
-# Filter outliers
-dat <- dat %>% filter(condition < 2 & condition > 0.25)
+# Join pelagic covariates
+# Make StatRec a factor in the main data
+dat <- dat %>% mutate(StatRec = as.factor(StatRec))
+unique(is.na(dat$StatRec))
 
-ggplot(dat, aes(condition)) + geom_histogram()
+# Create ID3 to match pelagics data
+dat <- dat %>% mutate(ID3 = paste(StatRec, Year, sep = "."))
 
-# Check the sex-variable
-ggplot(dat, aes(Sex)) + geom_bar() # I can remove the U, the NA and the -9's... Lot's of data still!
-dat$sex <- ifelse(!dat$Sex %in% c("F", "M"), "U", dat$Sex)
-dat$sex <- as.factor(dat$sex)
-ggplot(dat, aes(sex)) + geom_bar() 
+# Are there any StatRec that are in the condition data that are not in the pelagics data?
+dat$StatRec[!dat$StatRec %in% her$StatRec]
+dat$StatRec[!dat$StatRec %in% spr$StatRec]
 
-dat %>% ggplot(., aes(sex)) + geom_bar() + facet_wrap(~ year)
+# No, but not all ID3's are present
+dat$ID3[!dat$ID3 %in% her$ID3]
+dat$ID3[!dat$ID3 %in% spr$ID3]
 
-# Plot the response variable
-ggplot(dat, aes(lon, lat, color = condition)) + 
-  geom_point(size = 0.5) + 
-  facet_wrap(~ year) +
-  scale_color_gradient2(low = "red", high = "blue", mid = "white", midpoint = 1) +
-  NULL
+filter(dat, ID3 == "44G8.1991")
+filter(her, ID3 == "44G8.1991")
 
-# Read in map for overlaying countries
-library(rnaturalearth)
-library(rnaturalearthdata)
+filter(dat, StatRec == "44G8")
+filter(her, StatRec == "44G8")
 
+# Select columns from pelagic data to go in dat
+spr_sub <- spr %>% dplyr::select(ID3, abun_spr)
+her_sub <- her %>% dplyr::select(ID3, abun_her)
+
+# Now join dat and sprat data
+dat <- left_join(dat, spr_sub)
+
+# And herring..
+dat <- left_join(dat, her_sub)
+
+# REPLACE NA ABUNDANCES WITH 0
+dat$abun_her[is.na(dat$abun_her)] <- 0
+dat$abun_spr[is.na(dat$abun_spr)] <- 0
+
+unique(is.na(dat$abun_spr))
+
+# Test an ID3 in spr/her and dat
+# > head(unique(dat$ID3))
+# [1] "39G4.1991" "40G4.1991" "43G7.1991" "44G8.1991" "44G9.1991" "44G7.1991"
+spr %>% filter(ID3 == "44G7.1991")
+her %>% filter(ID3 == "44G7.1991")
+dat %>% filter(ID3 == "44G7.1991")
+
+# Plot distribution of abundances
+ggplot(dat, aes(abun_spr)) + geom_histogram()
+ggplot(dat, aes(abun_her)) + geom_histogram()
+
+# How to select which ages to use as predictor variables?
+# From Niiranen et al, it seem sprat in cod stomachs range between 50 and 150 mm and
+# herring range between essentially 0 to 300 mm. Which ages does that correspond to? For
+# that we need VBGE parameters. Following Lindmark et al (in prep), in which the VBGE 
+# curves are plotted for these species for weight, and weight-length relationships are 
+# estimated, we see the following:
+
+# Sprat: a 5 and 15 cm sprat weighs 1 and 30 g respectively. 
+0.0078*5^3.07
+0.0078*15^3.07
+# This covers all weights and ages in the sprat data. Moreover, in Niiranen et al it
+# doesn't seem to be much variation between size classes of cod with respect to this.
+
+# Herring: a 1 and 30 cm herring weighs >1 and 182 g respectively. 
+0.0042*1^3.14
+0.0042*30^3.14
+# This covers all weights and ages in the herring data. Moreover, in Niiranen et al it
+# doesn't seem to be much variation between size classes of cod with respect to this.
+
+# Conclusion: I will not filter any further
+
+
+# G. READ AND JOIN OXYGEN DATA =====================================================
+oxy_91_98 <- read.csv("data/OCEANOGRAPHY/1991-1998.csv")
+oxy_99_05 <- read.csv("data/OCEANOGRAPHY/1999-2005.csv")
+oxy_06_12 <- read.csv("data/OCEANOGRAPHY/2006-2012.csv")
+oxy_13_19 <- read.csv("data/OCEANOGRAPHY/2013-2019.csv")
+
+oxy <- rbind(oxy_91_98, oxy_99_05, oxy_06_12, oxy_13_19)
+
+# Split month column to year and month
+oxy <- oxy %>% 
+  mutate(yyyy.mm.ddThh.mm_temp = yyyy.mm.ddThh.mm) %>% 
+  separate(yyyy.mm.ddThh.mm_temp, c("year", "month", "day_time"), sep = "([-])") %>% 
+  filter(!DOXY..ml.l. %in% c("<0.00", "<0.01", "<0.02", "<0.10")) %>% # remove these characters (33 rows)
+  mutate(DOXY..ml.l._num = as.numeric(DOXY..ml.l.),
+         month = as.numeric(month),
+         year = as.numeric(year),
+         quarter = ifelse(month < 4, 1, 2),
+         quarter = ifelse(month > 6, 3, quarter),
+         quarter = ifelse(month > 9, 4, quarter)) %>% 
+  rename("lat" = "Latitude..degrees_north.",
+         "lon" = "Longitude..degrees_east.",
+         "DOXY" = "DOXY..ml.l._num") %>% 
+  filter(lat < 58 & lon > 12.5) %>% 
+  mutate(kattegatt = ifelse(lat > 55.5 & lon < 14, "Y", "N")) %>% 
+  filter(kattegatt == "N") %>% 
+  dplyr::select(-kattegatt) %>% 
+  mutate(ID4 = paste(year, quarter, lat, lon, sep = "_")) %>% # Create unique ID (station)
+  arrange(ID4) 
+
+# Now we want to filter the rows within each ID with maximum pressure, assuming that 
+# is the bottom depth
+oxy <- oxy %>%
+  group_by(ID4) %>% 
+  filter(PRES..db. == max(PRES..db.)) %>% 
+  ungroup()
+
+# Check if oxygen varies a lot between quarters
+ggplot(oxy, aes(year, DOXY, color = factor(quarter))) +
+  geom_point() +
+  stat_smooth()
+
+# How many datapoints do I have per unique combination of lat-lon by year and quarter?
+oxy %>% 
+  group_by(ID4) %>% 
+  mutate(n = n()) %>% 
+  ggplot(., aes(n)) + geom_histogram()
+
+oxy %>% 
+  group_by(ID4) %>% 
+  mutate(n = n()) %>%
+  filter(n > 1) %>% 
+  arrange(ID4) %>% 
+  as.data.frame() %>% 
+  head(20)
+
+# Since there are multiple samples per year, quarter and lon-lat, I will summarize by ID4
+# (i.e. Year, Quarter, Lat and Lon) - i.e. excluding monthly differences
+oxy <- oxy %>% 
+  group_by(ID4) %>% 
+  summarise(mean_DOXY = mean(DOXY)) %>% 
+  mutate(ID4_temp = ID4) %>% 
+  separate(ID4_temp, c("Year", "Quarter", "lat", "lon"), sep = "([_])") %>% 
+  mutate_at(c("Year", "Quarter", "lat", "lon"), as.numeric)
+
+# How many datapoints do I have per unique combination of lat-lon (by year and quarter)?
+oxy %>% 
+  group_by(ID4) %>% 
+  mutate(n = n()) %>% 
+  ggplot(., aes(factor(n))) + geom_bar()
+
+# Now check the spatial resolution of samples
 world <- ne_countries(scale = "medium", returnclass = "sf")
 
-p0 <- ggplot(dat, aes(lon, lat, color = condition, fill = condition)) + 
+oxy %>%
+  ggplot(., aes(lon, lat)) + 
+  geom_point(size = 1, alpha = 0.8) + 
+  facet_wrap(~ Year, ncol = 6) +
   geom_sf(data = world, inherit.aes = F, size = 0.2) +
-  coord_sf(xlim = c(min(dat$lon), max(dat$lon)),
-           ylim = c(min(dat$lat), max(dat$lat))) +
-  geom_point(size = 0.2) + 
-  facet_wrap(~ year, ncol = 5) +
-  scale_color_gradient2(low = "red", high = "blue", mid = "white", midpoint = 1) +
-  scale_fill_gradient2(low = "red", high = "blue", mid = "white", midpoint = 1) +
+  coord_sf(xlim = c(12.5, 21.5), ylim = c(54, 58))
+
+# I will next join in the closet CTD measurement with the haul, and then plot the distances.
+# Then I will either remove data where the distance is too long (see the MSC thesis),
+# or see if I can use data from another quarter
+
+# Create ID4 in dat
+dat <- dat %>% mutate(ID4 = paste(Year, ShootLat, ShootLong, sep = "_"))
+
+# Now join datasets!
+# https://stackoverflow.com/questions/55752064/r-finding-closest-coordinates-between-two-large-data-sets
+dat_cond <- dat %>%
+  rename("lat" = "ShootLat",
+         "lon" = "ShootLong") %>% 
+  dplyr::select(Year, lat, lon, ID4) %>%
+  as.data.frame()
+
+dat_oxy <- oxy %>%
+  dplyr::select(Year, lat, lon, mean_DOXY, Quarter) %>%
+  as.data.frame() %>% 
+  filter(Quarter == 4)
+
+# Now do the loop again and plot arrows for distances for the selected subset
+# General area boundaries
+xmin <- min(dat$ShootLong)
+xmax <- max(dat$ShootLong)
+ymin <- min(dat$ShootLat)
+ymax <- max(dat$ShootLat)
+
+data_list <- list()
+
+for (i in 1:length(unique(dat_cond$Year))) {
+  
+  temp_cond <- subset(dat_cond, Year == i + 1990) # First year is 1991
+  temp_oxy <- subset(dat_oxy, Year == i + 1990) # First year is 1991
+  
+  dd <- pointDistance(temp_cond[, 3:2], temp_oxy[, 3:2], lonlat = TRUE, allpairs = FALSE)
+  ii <- apply(dd, 1, which.min)
+  
+  temp_cond$mean_DOXY = temp_oxy$mean_DOXY[ii]
+  
+  temp_cond$distance = dd[cbind(1:nrow(dd), ii)]
+  
+  data_list[[i]] <- temp_cond
+  
+  # Illustrate
+  mypath <- file.path("figures/supp", paste(unique(temp_cond$Year), ".jpg", sep = ""))
+  
+  png(file = mypath)
+  
+  plot(temp_cond[, 3:2], col = "blue", pch = 20, main = i + 1990,
+       xlim = c(xmin, xmax), ylim = c(ymin, ymax))
+  points(temp_oxy[, 3:2], col = "red", pch = 20)
+  
+  for (j in 1:(nrow(temp_cond))) {
+    k <- temp_oxy$mean_DOXY == temp_cond$mean_DOXY[j]
+    
+    x0 <- temp_cond[j, 3]
+    y0 <- temp_cond[j, 2]
+    
+    # Get the index of the vector that is closest by taking the minimum absolute difference
+    # Else I get random long errors if the oxygen level is the same (length > 1 in the arrow index)
+    
+    x1 <- temp_oxy[k, 3][which.min(abs(x0 - temp_oxy[k, 3]))]
+    y1 <- temp_oxy[k, 2][which.min(abs(y0 - temp_oxy[k, 2]))]
+    
+    arrows(x0 = x0, y0 = y0, x1 = x1, y1 = y1, length = .1)
+  }
+  
+  dev.off()
+  
+}
+# The warnings are from the arrows being too short and hence not plotted properly
+
+data_oxy_cond <- dplyr::bind_rows(data_list)
+
+# Now join in the oxygen data...
+data_oxy_cond <- data_oxy_cond %>%
+  dplyr::select(mean_DOXY, ID4, distance) %>%
+  distinct(ID4, .keep_all = TRUE)
+
+# No NA here...
+unique(is.na(data_oxy_cond$mean_DOXY..ml.l._num))
+
+# Are there any ID4s in data_oxy_cond that are not in dat?
+data_oxy_cond$ID4[!data_oxy_cond$ID4 %in% dat$ID4]
+# Nope
+
+# Are there any ID4s in dat that are not in data_oxy_cond?
+dat$ID4[!dat$ID4 %in% data_oxy_cond$ID4]
+# Nope
+
+dat <- left_join(dat, data_oxy_cond)
+
+# Plot distribution of distances
+ggplot(dat, aes(distance)) +
+  geom_histogram()
+
+# Plot full data to compare which samples are removed if I filter on distance
+ggplot(dat, aes(distance)) +
+  geom_histogram()
+
+p1 <- dat %>%
+  ggplot(., aes(ShootLong, ShootLat, color = distance)) + 
+  geom_point(size = 0.6, alpha = 0.8) + 
+  facet_wrap(~ Year, ncol = 8) +
+  scale_color_viridis() +
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(12.5, 21.5), ylim = c(54, 58)) + 
+  ggtitle("All data")
+
+# Looks like it's mostly the coastal data are low-intensity data areas that have large
+# distances
+p2 <- dat %>%
+  filter(distance > 10000) %>% 
+  ggplot(., aes(ShootLong, ShootLat, color = distance)) + 
+  geom_point(size = 0.6, alpha = 0.8) + 
+  facet_wrap(~ Year, ncol = 8) +
+  scale_color_viridis() +
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(12.5, 21.5), ylim = c(54, 58)) +
+  ggtitle("Distance to nearest CTD > 10 km")
+
+p1 / p2 
+
+
+# OK, stopping here for a minute. Will ask SMHI for advice on oxygen data, and maybe
+# acquire model outputs.
+
+
+# H. PREPARE DATA FOR ANALYSIS =====================================================
+d <- dat %>%
+  rename("weight_g" = "IndWgt",
+         "lat" = "ShootLat",
+         "lon" = "ShootLong",
+         "year" = "Year",
+         "sex" = "Sex") %>% 
+  mutate(ln_weight_g = log(weight_g),
+         ln_length_cm = log(length_cm),
+         rel_cond = weight_g/(0.00692*length_cm^3.08)) %>% # cod-specific, from FishBase
+  dplyr::select(year, lat, lon, sex, length_cm, weight_g, Quarter,
+                cpue_cod_above_30cm, cpue_cod_below_30cm, cpue_cod, 
+                cpue_fle_above_20cm, cpue_fle_below_20cm, cpue_fle,
+                abun_spr, abun_her,
+                rel_cond,
+                mean_DOXY, distance) %>% 
+  mutate(cpue_cod_above_30cm_st = cpue_cod_above_30cm,
+         cpue_cod_below_30cm_st = cpue_cod_below_30cm,
+         cpue_cod_st = cpue_cod,
+         cpue_fle_above_20cm_st = cpue_fle_above_20cm,
+         cpue_fle_below_20cm_st = cpue_fle_below_20cm,
+         cpue_fle_st = cpue_fle,
+         abun_spr_st = abun_spr,
+         abun_her_st = abun_her,
+         mean_DOXY_st = mean_DOXY) %>% 
+  mutate_at(c("cpue_cod_above_30cm_st", "cpue_cod_below_30cm_st", "cpue_cod_st",
+              "cpue_fle_above_20cm_st", "cpue_fle_below_20cm_st", "cpue_fle_st",
+              "abun_spr_st", "abun_her_st",
+              "mean_DOXY_st"),
+            ~(scale(.) %>% as.vector)) %>% 
+  filter(rel_cond < 2.5 & rel_cond > 0.5) # Visual exploration, larger values likely data entry errors
+
+
+# FOR NOW I WILL CALL IT 2 BECAUSE I DONT KNOW HOW IT DIFFERS FROM THE OLD CODE!!!
+# I SAVED THAT SCRIPT IN A LOCAL FOLDER SO I CAN COMPARE THAT WITH THIS IF DATA DIFFER
+write.csv(d, file = "data/clean_for_analysis/mdat_cond2.csv", row.names = FALSE)
+
+
+# I. EXPLORE DATA ==================================================================
+# Plot condition over time
+ggplot(d, aes(year, rel_cond)) +
+  geom_point(shape = 21, fill = "black", color = "white") + 
+  stat_smooth(method = "lm") + 
+  ggtitle("condition over time") 
+
+# Plot condition vs oxygen
+ggplot(d, aes(mean_DOXY_st, rel_cond)) +
+  geom_point(shape = 21, fill = "black", color = "white") + 
+  stat_smooth(method = "lm") + 
+  ggtitle("condition vs oxygen") 
+
+# Plot condition vs oxygen with filter
+d %>% 
+  filter(distance < 5000) %>% 
+  ggplot(., aes(mean_DOXY_st, rel_cond)) +
+  geom_point(shape = 21, fill = "black", color = "white") + 
+  stat_smooth(method = "lm") + 
+  ggtitle("condition vs oxygen") 
+
+# Plot condition vs oxygen with filter by year
+d %>% 
+  filter(distance < 5000) %>% 
+  ggplot(., aes(mean_DOXY_st, rel_cond, fill = factor(year), color = factor(year))) +
+  geom_point(alpha = 0.5, size = 0.5) + 
+  stat_smooth(method = "lm") + 
+  ggtitle("condition vs oxygen") 
+
+# Check if slope changes by year
+# https://community.rstudio.com/t/extract-slopes-by-group-broom-dplyr/2751/7
+d %>% 
+  filter(distance < 5000) %>% 
+  split(.$year) %>% 
+  purrr::map(~lm(rel_cond ~ mean_DOXY_st, data = .x)) %>% 
+  purrr::map_df(broom::tidy, .id = 'year') %>%
+  filter(term == 'mean_DOXY_st') %>% 
+  mutate(ci_low = estimate + -1.96*std.error,
+         ci_high = estimate + 1.96*std.error) %>% 
+  mutate(year_n = as.numeric(year)) %>%
+  ggplot(., aes(year_n, estimate)) +
+  stat_smooth(method = "lm", color = "black") + 
+  geom_point() + 
+#  geom_errorbar(aes(ymin = ci_low, ymax = ci_high, x = year_n)) + 
   NULL
 
-pWord0 <- p0 + theme(text = element_text(size = 8),
-                     legend.position = "bottom", 
-                     legend.title = element_text(size = 6),
-                     legend.text = element_text(size = 6),
-                     axis.text = element_text(size = 4))
+# Plot condition vs herring
+ggplot(d, aes(abun_her_st, rel_cond)) +
+  geom_point(shape = 21, fill = "black", color = "white") + 
+  stat_smooth(method = "lm") + 
+  ggtitle("condition vs herring") 
 
-ggsave("figures/data_explore/condition.png", width = 6.5, height = 6.5, dpi = 600)
+# Plot condition vs sprat
+ggplot(d, aes(abun_spr_st, rel_cond)) +
+  geom_point(shape = 21, fill = "black", color = "white") + 
+  stat_smooth(method = "lm") + 
+  ggtitle("condition vs sprat")
 
-mdat <- dat
+# Plot condition vs cod and flounder
+p1 <- ggplot(d, aes(cpue_cod_above_30cm_st, rel_cond)) +
+  geom_point(shape = 21, fill = "black", color = "white") + 
+  stat_smooth() + 
+  ggtitle("cod_above_30cm") + 
+  #coord_cartesian(xlim = c(0.001, 5)) +
+  NULL
 
-write.csv(mdat, "data/mdat_cond.csv", row.names = FALSE)
+p2 <- ggplot(d, aes(cpue_cod_below_30cm_st, rel_cond)) +
+  geom_point(shape = 21, fill = "black", color = "white") + 
+  stat_smooth() +
+  ggtitle("cod_below_30cm") + 
+  #coord_cartesian(xlim = c(0.001, 5)) +
+  NULL
 
+p3 <- ggplot(d, aes(cpue_cod_st, rel_cond)) +
+  geom_point(shape = 21, fill = "black", color = "white") + 
+  stat_smooth() +
+  ggtitle("cpue_cod_st") + 
+  #coord_cartesian(xlim = c(0.001, 5)) +
+  NULL
 
+p4 <- ggplot(d, aes(cpue_fle_above_20cm_st, rel_cond)) +
+  geom_point(shape = 21, fill = "black", color = "white") + 
+  stat_smooth() +
+  ggtitle("cpue_fle_above_20cm_st") + 
+  #coord_cartesian(xlim = c(0, 5)) +
+  NULL
+
+p5 <- ggplot(d, aes(cpue_fle_below_20cm_st, rel_cond)) +
+  geom_point(shape = 21, fill = "black", color = "white") + 
+  stat_smooth() +
+  ggtitle("cpue_fle_below_20cm_st") + 
+  #coord_cartesian(xlim = c(0.001, 5)) +
+  NULL
+
+p6 <- ggplot(d, aes(cpue_fle_st, rel_cond)) +
+  geom_point(shape = 21, fill = "black", color = "white") + 
+  stat_smooth() +
+  ggtitle("cpue_fle_st") + 
+  #coord_cartesian(xlim = c(0.001, 5)) + 
+  NULL
+
+(p1 + p2 + p3)/(p4 + p5 + p6)
+
+# Do this for all classes... and maybe years?
+ggplot(d, aes((cpue_fle_st+cpue_cod_st), rel_cond)) +
+  geom_point(shape = 21, fill = "black", color = "white") + 
+  stat_smooth() +
+  xlim(-2, 12) +
+  NULL
+
+ggplot(d, aes((cpue_fle_below_20cm_st+cpue_cod_below_30cm_st), rel_cond)) +
+  geom_point(shape = 21, fill = "black", color = "white") + 
+  stat_smooth() +
+  NULL
