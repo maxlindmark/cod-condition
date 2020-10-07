@@ -718,11 +718,11 @@ d <- dat %>%
          Fulton_K = weight_g/(0.01*length_cm^3), # cod-specific, from FishBase
          sex = ifelse(sex == -9, "U", sex),
          sex = as.factor(sex)) %>% 
-  dplyr::select(year, lat, lon, sex, length_cm, weight_g, Quarter,
+  dplyr::select(year, lat, lon, sex, length_cm, weight_g, ln_length_cm, ln_weight_g,
+                Quarter, Fulton_K,
                 cpue_cod_above_30cm, cpue_cod_below_30cm, cpue_cod, 
                 cpue_fle_above_20cm, cpue_fle_below_20cm, cpue_fle,
                 abun_spr, abun_her,
-                Fulton_K,
                 mean_DOXY, distance) %>% 
   mutate(cpue_cod_above_30cm_st = cpue_cod_above_30cm,
          cpue_cod_below_30cm_st = cpue_cod_below_30cm,
@@ -741,8 +741,6 @@ d <- dat %>%
   filter(Fulton_K < 2.5 & Fulton_K > 0.5) %>%  # Visual exploration, larger values likely data entry errors
   ungroup()
 
-# FOR NOW I WILL CALL IT 2 BECAUSE I DONT KNOW HOW IT DIFFERS FROM THE OLD CODE!!!
-# I SAVED THAT SCRIPT IN A LOCAL FOLDER SO I CAN COMPARE THAT WITH THIS IF DATA DIFFER
 write.csv(d, file = "data/clean_for_analysis/mdat_cond.csv", row.names = FALSE)
 
 
