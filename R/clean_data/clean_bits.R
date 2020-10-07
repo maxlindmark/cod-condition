@@ -738,8 +738,11 @@ d <- dat %>%
               "abun_spr_st", "abun_her_st",
               "mean_DOXY_st"),
             ~(scale(.) %>% as.vector)) %>% 
-  filter(Fulton_K < 2.5 & Fulton_K > 0.5) %>%  # Visual exploration, larger values likely data entry errors
+  filter(Fulton_K < 3 & Fulton_K > 0.15) %>%  # Visual exploration, larger values likely data entry errors
   ungroup()
+
+# filter(d, Fulton_K < 0.5) %>% dplyr::select(Fulton_K, length_cm, weight_g) %>% arrange(Fulton_K) %>% as.data.frame()
+# filter(d, Fulton_K > 2.5) %>% dplyr::select(Fulton_K, length_cm, weight_g) %>% arrange(Fulton_K) %>% as.data.frame()
 
 write.csv(d, file = "data/clean_for_analysis/mdat_cond.csv", row.names = FALSE)
 
