@@ -736,15 +736,19 @@ d <- dat %>%
               "abun_spr_st", "abun_her_st",
               "mean_DOXY_st"),
             ~(scale(.) %>% as.vector)) %>% 
-  filter(rel_cond < 2.5 & rel_cond > 0.5) # Visual exploration, larger values likely data entry errors
-
+  filter(rel_cond < 2.5 & rel_cond > 0.5) %>%  # Visual exploration, larger values likely data entry errors
+  ungroup()
 
 # FOR NOW I WILL CALL IT 2 BECAUSE I DONT KNOW HOW IT DIFFERS FROM THE OLD CODE!!!
 # I SAVED THAT SCRIPT IN A LOCAL FOLDER SO I CAN COMPARE THAT WITH THIS IF DATA DIFFER
-write.csv(d, file = "data/clean_for_analysis/mdat_cond2.csv", row.names = FALSE)
+write.csv(d, file = "data/clean_for_analysis/mdat_cond.csv", row.names = FALSE)
 
 
 # I. EXPLORE DATA ==================================================================
+
+# - Do the exploratory plots like this:
+#   - https://dpananos.github.io/posts/2018/04/blog-post-8/
+
 # Plot condition over time
 ggplot(d, aes(year, rel_cond)) +
   geom_point(shape = 21, fill = "black", color = "white") + 
