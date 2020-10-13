@@ -749,7 +749,7 @@ d <- dat %>%
 # filter(d, Fulton_K < 0.5) %>% dplyr::select(Fulton_K, length_cm, weight_g) %>% arrange(Fulton_K) %>% as.data.frame()
 # filter(d, Fulton_K > 2.5) %>% dplyr::select(Fulton_K, length_cm, weight_g) %>% arrange(Fulton_K) %>% as.data.frame()
 
-#write.csv(d, file = "data/clean_for_analysis/mdat_cond.csv", row.names = FALSE)
+write.csv(d, file = "data/clean_for_analysis/mdat_cond.csv", row.names = FALSE)
 
 str(d)
 
