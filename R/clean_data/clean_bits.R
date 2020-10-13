@@ -498,19 +498,22 @@ ggplot(dat, aes(abun_her)) + geom_histogram()
 # Conclusion: I will not filter any further
 
 
-# G. READ AND JOIN OXYGEN DATA =====================================================
-oxy_91_98 <- read.csv("data/OCEANOGRAPHY/1991-1998.csv")
-oxy_99_05 <- read.csv("data/OCEANOGRAPHY/1999-2005.csv")
-oxy_06_12 <- read.csv("data/OCEANOGRAPHY/2006-2012.csv")
-oxy_13_19 <- read.csv("data/OCEANOGRAPHY/2013-2019.csv")
+# G. READ AND JOIN OCEANOGRAPHIC DATA =====================================================
+# Read the standard daata (select "Oxygen" as parameter)
+ocean_91_98 <- read.csv("data/OCEANOGRAPHY/OXYGEN/1991-1998.csv")
+ocean_99_05 <- read.csv("data/OCEANOGRAPHY/OXYGEN/1999-2005.csv")
+ocean_06_12 <- read.csv("data/OCEANOGRAPHY/OXYGEN/2006-2012.csv")
+ocean_13_19 <- read.csv("data/OCEANOGRAPHY/OXYGEN/2013-2019.csv")
 
-oxy <- rbind(oxy_91_98, oxy_99_05, oxy_06_12, oxy_13_19)
+ocean <- rbind(ocean_91_98, ocean_99_05, ocean_06_12, ocean_13_19)
+
+oxy <- ocean
 
 # Split month column to year and month
 oxy <- oxy %>% 
   mutate(yyyy.mm.ddThh.mm_temp = yyyy.mm.ddThh.mm) %>% 
   separate(yyyy.mm.ddThh.mm_temp, c("year", "month", "day_time"), sep = "([-])") %>% 
-  filter(!DOXY..ml.l. %in% c("<0.00", "<0.01", "<0.02", "<0.10")) %>% # remove these characters (33 rows)
+  filter(!DOXY..ml.l. %in% c("", "<0.00", "<0.01", "<0.02", "<0.03", "<0.10")) %>% # remove these characters (33 rows)
   mutate(DOXY..ml.l._num = as.numeric(DOXY..ml.l.),
          month = as.numeric(month),
          year = as.numeric(year),
@@ -572,11 +575,12 @@ oxy %>%
 world <- ne_countries(scale = "medium", returnclass = "sf")
 
 oxy %>%
-  ggplot(., aes(lon, lat)) + 
-  geom_point(size = 1, alpha = 0.8) + 
+  ggplot(., aes(lon, lat, color = source)) + 
+  geom_point(size = 0.5, alpha = 0.8) + 
   facet_wrap(~ Year, ncol = 6) +
   geom_sf(data = world, inherit.aes = F, size = 0.2) +
   coord_sf(xlim = c(12.5, 21.5), ylim = c(54, 58))
+
 
 # I will next join in the closet CTD measurement with the haul, and then plot the distances.
 # Then I will either remove data where the distance is too long (see the MSC thesis),
@@ -717,8 +721,9 @@ d <- dat %>%
          ln_length_cm = log(length_cm),
          Fulton_K = weight_g/(0.01*length_cm^3), # cod-specific, from FishBase
          sex = ifelse(sex == -9, "U", sex),
-         sex = as.factor(sex)) %>% 
-  dplyr::select(year, lat, lon, sex, length_cm, weight_g, ln_length_cm, ln_weight_g,
+         sex = as.factor(sex),
+         year_f = as.factor(year)) %>% 
+  dplyr::select(year, year_f, lat, lon, sex, length_cm, weight_g, ln_length_cm, ln_weight_g,
                 Quarter, Fulton_K,
                 cpue_cod_above_30cm, cpue_cod_below_30cm, cpue_cod, 
                 cpue_fle_above_20cm, cpue_fle_below_20cm, cpue_fle,
@@ -744,8 +749,9 @@ d <- dat %>%
 # filter(d, Fulton_K < 0.5) %>% dplyr::select(Fulton_K, length_cm, weight_g) %>% arrange(Fulton_K) %>% as.data.frame()
 # filter(d, Fulton_K > 2.5) %>% dplyr::select(Fulton_K, length_cm, weight_g) %>% arrange(Fulton_K) %>% as.data.frame()
 
-write.csv(d, file = "data/clean_for_analysis/mdat_cond.csv", row.names = FALSE)
+#write.csv(d, file = "data/clean_for_analysis/mdat_cond.csv", row.names = FALSE)
 
+str(d)
 
 # I. EXPLORE DATA ==================================================================
 
@@ -753,13 +759,13 @@ write.csv(d, file = "data/clean_for_analysis/mdat_cond.csv", row.names = FALSE)
 #   - https://dpananos.github.io/posts/2018/04/blog-post-8/
 
 # Plot condition over time
-ggplot(d, aes(year, rel_cond)) +
+ggplot(d, aes(year, Fulton_K)) +
   geom_point(shape = 21, fill = "black", color = "white") + 
   stat_smooth(method = "lm") + 
   ggtitle("condition over time") 
 
 # Plot condition vs oxygen
-ggplot(d, aes(mean_DOXY_st, rel_cond)) +
+ggplot(d, aes(mean_DOXY_st, Fulton_K)) +
   geom_point(shape = 21, fill = "black", color = "white") + 
   stat_smooth(method = "lm") + 
   ggtitle("condition vs oxygen") 
@@ -767,7 +773,7 @@ ggplot(d, aes(mean_DOXY_st, rel_cond)) +
 # Plot condition vs oxygen with filter
 d %>% 
   filter(distance < 5000) %>% 
-  ggplot(., aes(mean_DOXY_st, rel_cond)) +
+  ggplot(., aes(mean_DOXY_st, Fulton_K)) +
   geom_point(shape = 21, fill = "black", color = "white") + 
   stat_smooth(method = "lm") + 
   ggtitle("condition vs oxygen") 
@@ -775,7 +781,7 @@ d %>%
 # Plot condition vs oxygen with filter by year
 d %>% 
   filter(distance < 5000) %>% 
-  ggplot(., aes(mean_DOXY_st, rel_cond, fill = factor(year), color = factor(year))) +
+  ggplot(., aes(mean_DOXY_st, Fulton_K, fill = factor(year), color = factor(year))) +
   geom_point(alpha = 0.5, size = 0.5) + 
   stat_smooth(method = "lm") + 
   ggtitle("condition vs oxygen") 
@@ -785,7 +791,7 @@ d %>%
 d %>% 
   filter(distance < 5000) %>% 
   split(.$year) %>% 
-  purrr::map(~lm(rel_cond ~ mean_DOXY_st, data = .x)) %>% 
+  purrr::map(~lm(Fulton_K ~ mean_DOXY_st, data = .x)) %>% 
   purrr::map_df(broom::tidy, .id = 'year') %>%
   filter(term == 'mean_DOXY_st') %>% 
   mutate(ci_low = estimate + -1.96*std.error,
@@ -798,54 +804,54 @@ d %>%
   NULL
 
 # Plot condition vs herring
-ggplot(d, aes(abun_her_st, rel_cond)) +
+ggplot(d, aes(abun_her_st, Fulton_K)) +
   geom_point(shape = 21, fill = "black", color = "white") + 
   stat_smooth(method = "lm") + 
   ggtitle("condition vs herring") 
 
 # Plot condition vs sprat
-ggplot(d, aes(abun_spr_st, rel_cond)) +
+ggplot(d, aes(abun_spr_st, Fulton_K)) +
   geom_point(shape = 21, fill = "black", color = "white") + 
   stat_smooth(method = "lm") + 
   ggtitle("condition vs sprat")
 
 # Plot condition vs cod and flounder
-p1 <- ggplot(d, aes(cpue_cod_above_30cm_st, rel_cond)) +
+p1 <- ggplot(d, aes(cpue_cod_above_30cm_st, Fulton_K)) +
   geom_point(shape = 21, fill = "black", color = "white") + 
   stat_smooth() + 
   ggtitle("cod_above_30cm") + 
   #coord_cartesian(xlim = c(0.001, 5)) +
   NULL
 
-p2 <- ggplot(d, aes(cpue_cod_below_30cm_st, rel_cond)) +
+p2 <- ggplot(d, aes(cpue_cod_below_30cm_st, Fulton_K)) +
   geom_point(shape = 21, fill = "black", color = "white") + 
   stat_smooth() +
   ggtitle("cod_below_30cm") + 
   #coord_cartesian(xlim = c(0.001, 5)) +
   NULL
 
-p3 <- ggplot(d, aes(cpue_cod_st, rel_cond)) +
+p3 <- ggplot(d, aes(cpue_cod_st, Fulton_K)) +
   geom_point(shape = 21, fill = "black", color = "white") + 
   stat_smooth() +
   ggtitle("cpue_cod_st") + 
   #coord_cartesian(xlim = c(0.001, 5)) +
   NULL
 
-p4 <- ggplot(d, aes(cpue_fle_above_20cm_st, rel_cond)) +
+p4 <- ggplot(d, aes(cpue_fle_above_20cm_st, Fulton_K)) +
   geom_point(shape = 21, fill = "black", color = "white") + 
   stat_smooth() +
   ggtitle("cpue_fle_above_20cm_st") + 
   #coord_cartesian(xlim = c(0, 5)) +
   NULL
 
-p5 <- ggplot(d, aes(cpue_fle_below_20cm_st, rel_cond)) +
+p5 <- ggplot(d, aes(cpue_fle_below_20cm_st, Fulton_K)) +
   geom_point(shape = 21, fill = "black", color = "white") + 
   stat_smooth() +
   ggtitle("cpue_fle_below_20cm_st") + 
   #coord_cartesian(xlim = c(0.001, 5)) +
   NULL
 
-p6 <- ggplot(d, aes(cpue_fle_st, rel_cond)) +
+p6 <- ggplot(d, aes(cpue_fle_st, Fulton_K)) +
   geom_point(shape = 21, fill = "black", color = "white") + 
   stat_smooth() +
   ggtitle("cpue_fle_st") + 
@@ -855,13 +861,13 @@ p6 <- ggplot(d, aes(cpue_fle_st, rel_cond)) +
 (p1 + p2 + p3)/(p4 + p5 + p6)
 
 # Do this for all classes... and maybe years?
-ggplot(d, aes((cpue_fle_st+cpue_cod_st), rel_cond)) +
+ggplot(d, aes((cpue_fle_st+cpue_cod_st), Fulton_K)) +
   geom_point(shape = 21, fill = "black", color = "white") + 
   stat_smooth() +
   xlim(-2, 12) +
   NULL
 
-ggplot(d, aes((cpue_fle_below_20cm_st+cpue_cod_below_30cm_st), rel_cond)) +
+ggplot(d, aes((cpue_fle_below_20cm_st+cpue_cod_below_30cm_st), Fulton_K)) +
   geom_point(shape = 21, fill = "black", color = "white") + 
   stat_smooth() +
   NULL
