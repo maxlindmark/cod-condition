@@ -1,6 +1,6 @@
 ---
 title: "Exploring sdmTMB for cod condition"
-author: "Max Lindmark"
+author: "Max Lindmark (contribution by Sean Andersson)"
 date: "9/18/2020"
 output:
   html_document:
@@ -16,31 +16,87 @@ knitr::opts_chunk$set(
   comment = "#>",
   fig.width = 7,
   fig.asp = 0.618,
-  fig.align='center'
+  fig.align ='center'
 )
 ```
 
 ## Background
 
-The body condition and growth of Eastern Baltic cod has declined steadily since the regime shift in the early 1990's to a degree that the stock now can be viewed as collapsed. Several hypotheses have been put forward, including changes in overlap with pelagic prey (e.g. Gårdmark et al, 2015), reduced oxygen levels (e.g. Casini et al, 2016), increased competition for benthic food sources with flounder (Orio et al, 2019; Orio 2020) as well as increased intraspecific competition and growth bottlenecks within the population (Svedäng & Hornborg, 2014; Neuenfeldt 2019).  
+The body condition and growth of Eastern Baltic cod (*Gadus morhua*) has declined steadily since the regime shift in the early 1990's to a degree that the stock now can be viewed as collapsed. Several hypotheses have been put forward, including changes in overlap with pelagic prey (e.g. Gårdmark *et al*, 2015), reduced oxygen levels decreasing habitat quality and leading to contraction of the distributional range thus increasing competition (e.g. Casini *et al*, 2016), increased competition for benthic food sources with flounder (Orio *et al*, 2019; Orio 2020) as well as increased intraspecific competition and growth bottlenecks within the population (Svedäng & Hornborg, 2014).
+
+However, these potential explanatory variables have not been evaluated on a fine spatial scale, even though factors such as competition, food availability and local habitat quality likely occur on fine spatial scales. Instead, averages over larger spatial areas (e.g. ICES subdivisions) have been the variables in previous comparisons. Moreover, the ability of each of proposed explanatory variable (linked to a hypothesis) to explain variation in the condition of cod has not been compared in a standardized way, and has not been contrasted to residual spatial and spatiotemporal variation.
+
+### Aim
+In this study I have compiled data for individual-level condition and matched that with predictor variables (on a haul level) representing different ecological hypotheses regarding drivers of variation in cod condition.
+
+To account for spatial and temporal autocorrelation using data at this scale, I in apply spatiotemporal predictive-process GLMMs using the R-package [sdmTMB](https://github.com/pbs-assess/sdmTMB). This modeling framework allows evaluation of how much of the variation in condition can be explained by covariates, spatial (unmeasured variation in condition that is stable over time) and spatiotemporal variation (unmeasured variation in condition that changes between years).
+
+In this script, I aim to find a good default model explaining spatiotemporal variation in cod condition, without any of the suggested explanatory variables (the rest will be done in a different script). Then I show examples of two models with additional explanatory variable. The project currently lives [here](https://github.com/maxlindmark/cod_condition). Details follow below. 
 
 
 ## Methods
+### Modeling framwork
+In fishes, weight is typically assumed to vary log-normally around an average allometric function of length: $w=al^b$, where $w$ is weight in grams, $l$ is length in cm, $b$ is the allometric length exponent and $a$ is the condition factor in unit $g/L^b$ (Froese *et al*., 2014; Grüss *et al*., 2020). Typically this relationship is linearized by taking logs on both sides: $\operatorname{log}(w)=a+b\operatorname{log}(l)$. Le Cren's condition index is defined as the residuals from this length-weight relationship.
 
-In this script I will fit spatiotemporal models of allometric weight-length relationships ($w=\alpha l^ \beta$ -> $log(w) = \alpha + \beta log(l) + \beta_x x$) using [sdmTMB](https://github.com/pbs-assess/sdmTMB). I aim here to first find an appropriate model structure for evaluating how $\alpha$ (log condition factor), has changed over space and time. Next I aim to evaluate the effects of additional covariates at the haul-level ($\beta_x x$) for the predicted weight given a length.
+We model this individual-level relationship with a spatiotemporal GLMM of the form:
 
+$$
+\operatorname{log}(w_{s,t}) = \alpha_0 + \alpha_mS_m + \alpha_uS_u + \omega_s + \epsilon_{s,t} + \sum^{n_k}_{k=1}\gamma_k\boldsymbol{X_k} + \beta \operatorname{log}(l)
+$$ 
+
+where $\alpha_0$ is the female condition factor, $\alpha_m$ is the offset for males and $\alpha_u$ for unsexed individuals. $\omega_s$ and $\epsilon_{s,t}$ represent spatial and spatiotemporal random effects, respectively. $\boldsymbol{X_k}$ is a matrix of $n_k$ measured *additional* covariates and $\gamma_k$ is the effect of the $k$-th *additional* covariate. $\beta$ is the length-coefficient, corresponding to the allometric exponent. The spatial and spatiotemporal random effects are assumed to be drawn from a multivariate normal distribution:
+
+$$
+\omega \sim \operatorname{MVNormal}(0, \Sigma_\omega)\\
+\epsilon \sim \operatorname{MVNormal}(0, \Sigma_\epsilon)
+$$
+
+I also consider the spatiotemporal random effects to be drawn from a multivariate normal distribution following an AR1 process:
+
+$$
+\delta_{t=1} \sim \operatorname{MVNormal}(0, \Sigma_\epsilon)\\
+\delta_{t>1} = \phi\delta_{t-1} + \sqrt{1-\phi^2}\epsilon_t, \epsilon_t \sim \operatorname{MVNormal}(0, \Sigma_\epsilon)
+$$
+
+In the spatial and spatiotemporal random fields, $\Sigma_\omega$ and $\Sigma_\epsilon$ are covariance matricies, where the covariance ($\Phi(s, s')$) between spatial points $s$ and $s'$ is given by a Matérn function:
+
+$$
+\Phi(s, s') = \tau^2/\Gamma(\nu)2^{\nu-1}(\kappa d_{jk})^{\nu}K_\nu(\kappa d_{jk})
+$$
+where $\tau^2$ is the spatial (marginal) variance. 
+
+This model (first equation) can be viewed as an approximation of Le Cren's condition index (Grüss *et al*., 2020), as the log of the condition factor, i.e. $\operatorname{log}(a)$ or the constant in the allometric relationship, can be defined as: $\operatorname{log}(a) = \alpha_0 + \alpha_sS + \omega_s + \delta_{s,t} + \sum^{n_k}_{k=1}\gamma_k\boldsymbol{X_k}$. Thus, Eq. 1 is a model for a spatially and temporally varying condition factor.
+
+### Finding a default model
+I aim to find an appropriate model structure for Eq. 1, to which I later can include and evaluate additional covariates ($\gamma_k\boldsymbol{X_k}$). To find this default model, I fit a model with only length at sex as covariates, and assume errors are Student-t distributed to account for the presence of heavy tails.
+
+I fit different versions of this model:
+
+* Fixed effect of year
+* Time-varying intercept through random walk
+* Spatial trend, which is a random field representing a slope over the time variable.
+
+These models are fit with the spatiotemporal field being independent each year or following an AR1 process.
+
+### Data
+#### Individual length and weight
+The data are individual-level measurements of length and weight of Baltic cod in quarter 4 between the year 1991-2019, and stem from the Baltic International Trawl Survey (BITS) (can be downloaded from [DATRAS](https://datras.ices.dk/Data_products/Download/Download_Data_public.aspx)). These data are cleaned and merged with additional covariate data in [this](https://github.com/maxlindmark/cod_condition/blob/master/R/clean_data/clean_bits.R) script.
+
+#### Haul-level covariates
 The covariates I currently consider are:
 
-- Density of cod. CPUE available for each haul (added in data)
-- Density of flounder. CPUE available for each haul (added in data)
-- Oxygen concentration. Possible to link data to nearest haul *(not yet added)*
-- Sprat CPUE. *(not yet added)*
-- Herring CPUE. *(not yet added)*
-- maybe: temperature as a base-covariate through it's effect on growth, metabolism, digestion etc.
+* **Density of cod** (by length group, currently >30cm, ≤30 cm or total). Abundance CPUE available for each haul from the [BITS](https://datras.ices.dk/Data_products/Download/Download_Data_public.aspx) survey.
+* **Density of flounder** (by length group, currently >20cm, ≤20 cm or total).  Abundance CPUE available for each haul from the [BITS](https://datras.ices.dk/Data_products/Download/Download_Data_public.aspx) survey.
+* **Oxygen concentration**. Possible to link ICES oceanographic [data](https://ocean.ices.dk/HydChem/HydChem.aspx?plot=yes) data to nearest haul in BITS
+    - *added, but very coarse resolution. Have asked the Swedish Meteorological and Hydrological Institute for model output since current samples are sometimes too far from the haul location*
+* **Sprat CPUE**. These data stem from the Baltic International Acoustic Survey (BIAS).  
+* **Herring CPUE**. These data stem from the Baltic International Acoustic Survey (BIAS).
+    - *Each haul in the condition data is assigned with an abundance of sprat and herring based on the ICES rectangle the haul was in, because we don't have sprat and herring abundance on a finer scale than rectangle. Note also these data are not really available online, because some calculations have been made to get abundances per rectangle...*
+* **Maybe**: temperature as a base-covariate through its effect on growth, metabolism, digestion etc.
 
-(Re pelagics: Semi coarse predictions exist (by ICES rectangle). I can either do a join operation to get the estimated CPUE by rectangle linked to all hauls in that rectangle, or attempt to fit a new model and predict CPUE for the locations where I have haul conditions. Going for the former I think...).
+The covariates are standardized to have a mean of 0 and a standard deviation of 1, to allow for direct comparison with the spatial and spatiotemporal standard deviation (Thorson, 2015; Grüss *et al*., 2020)
 
-The project currently lives [here](https://github.com/maxlindmark/cod_condition). Below follows a walkthrough of the first attempts to model this. Sean Andersson contributed with input to this version.
+#### Explore data
 
 ```{r packages, message=FALSE, warning=TRUE}
 library(tidyverse); theme_set(theme_classic())
@@ -55,22 +111,18 @@ library(rnaturalearthdata)
 world <- ne_countries(scale = "medium", returnclass = "sf")
 ```
 
-Now read data
+Now read data:
 
 ```{r read and process data, message=FALSE, warning=FALSE}
 d <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/clean_for_analysis/mdat_cond.csv")
 
-# Calculate variables, including standardizing the covariates to have a mean of 0 and
-# variance of 1 to facilitate comparison between different ones
-d <- d %>%
-  mutate(ln_weight_g = log(weight_g),
-         ln_length_cm = log(length_cm),
-         Fulton_K = weight_g/(0.00692*length_cm^3.08)) %>% # cod-specific, from FishBase
-  dplyr::select(year, lat, lon, sex, length_cm, weight_g, Quarter, CPUE_cod, CPUE_fle,
-                ln_length_cm, ln_weight_g, Fulton_K) %>% 
-  mutate(CPUE_cod_st = CPUE_cod,
-         CPUE_fle_st = CPUE_fle) %>% 
-  mutate_at(c("CPUE_cod_st", "CPUE_fle_st"), ~(scale(.) %>% as.vector))
+# These should be factors...
+d <- d %>% mutate(year_f = as.factor(year), # Actually I'm modelling this as a continous variable for now
+                  sex_f = as.factor(sex))
+
+# Since I also use year as a continuous variable, I will center it to start at 1991 (start of time series)
+# (*** Not used currently, I opted for the factor effect of year instead as that lead to better convergence as in smaller max gradient. To use a continuous year variable I had to use fewer knots, and then the models without year had some issues with convergence (m3 below))
+d <- d %>% mutate(year_ct = year - 1991)
 ```
 
 Read the prediction grid:
@@ -79,80 +131,207 @@ Read the prediction grid:
 pred_grid <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/clean_for_analysis/pred_grid.csv")
 
 # SA: You likely want to work in UTMs so distance is constant with space
-# ML: I did not think so much about this, but that sounds like a good idea. Although for now I can't choose which of the two UTM zones to use... (I did change from X and Y to lon and lat to make it more clear in case I switch later!)
+# ML: I did not think so much about this, but that sounds like a good idea. Although for now I can't choose which of the two UTM zones to use... (I did change from X and Y to lon and lat to make it more clear in case I switch
+# later!)
 pred_grid <- pred_grid %>%
-  mutate(ln_length_cm = log(1)) %>% # For now we'll predict changes in the intercept (condition factor)
+  mutate(ln_length_cm = log(1),
+         year_f = as.factor(year), # Using year as a continious variable in the model as there seems to be a
+         # linear decline
+         sex_f = "F") %>% # For now we'll predict changes in the intercept ("female condition factor")
   mutate(X = lon,
-         Y = lat) %>% 
+         Y = lat,
+         year_ct = year - 1991) %>% 
   filter(year %in% c(unique(d$year)))
 ```
 
-We can now plot the Fulton K condition factor to get a glimpse of what we might expect (but finally our estimates are closer to Le Cren's condition index).
+We can now plot the Fulton K condition factor to get a glimpse of what we might expect (but in the main model we use Le Cren's condition index).
 
 ```{r plot condition, fig.width=12}
 # Plot "Fulton K" in space and time 
-d %>%
-  ggplot(., aes(lon, lat, color = Fulton_K)) + 
-  geom_point(size = 1.2, alpha = 0.8) + 
+# It's a little bit difficult to see because we have many extreme observations
+ggplot(d, aes(Fulton_K)) + geom_histogram()
+
+# Plot "Fulton K" in space and time 
+# It's a little bit difficult to see because we have many extreme (high condition index) observations
+ggplot(d, aes(lon, lat, color = Fulton_K)) + 
+  geom_point(size = 1.5, alpha = 0.8) + 
   facet_wrap(~ year, ncol = 6) +
   scale_color_gradient2(midpoint = mean(d$Fulton_K)) +
   geom_sf(data = world, inherit.aes = F, size = 0.2) +
   coord_sf(xlim = c(12.5, 21.5), ylim = c(54, 58))
 ```
 
-Ok there's a clear temporal development in condition and the spatial coverage of data varies by year (less data initially).
+Ok, there's a clear temporal development in condition and the spatial coverage of data varies by year (fewer data in the beginning of the time series).
 
-Next we fit spatial/spatiotemporal models to account for this. Given that we do not have samples in all spatial locations for all years, and we believe that there are "hotpots" of body condition, we model a temporal correlation for the spatiotemporal variation (Thorson, 2019), specifically, this is done by estimating the spatiotemporal fields as an AR1 process. Hence, we set ar1_fields = TRUE.
+## Find the default model
+### Compare models
+After some exploration of all models considered here, I found that ~110 knots was the highest I could and still get convergence. I use `run_extra_optimization` (with various settings) for all models to reduce max gradient, but with higher # of knots I get an error I do not know how to resolve except with fewer knots:
 
-I will start by setting up the SPDE mesh with 70 knots and alter I will fit and compare models with more knots. In the first step I will compare a Gaussian with a student t model to see which distribution seems more appropriate.
+`Warning messages:`
+`1: In sqrt(diag(cov)) : NaNs produced`
+`2: The model may not have converged: non-positive-definite Hessian matrix.`
 
-```{r fit first spatiotemporal glmm, results='hide', cache=TRUE}
+```{r make spde mesh, results='hide', cache=TRUE, message=FALSE}
 # SA: good for now; could increase knots eventually:
-spde <- make_spde(d$lon, d$lat, n_knots = 70)
-plot_spde(spde)
+# ML: Thanks! I did increase from 70 up to 110, but see above 
 
-# Compare Gaussian and student t models with a spatiotemporal AR1 process
-m0 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm, data = d, time = "year", spde = spde,
-             family = gaussian(link = "identity"), ar1_fields = TRUE,
-             include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
-             silent = FALSE)
+spde <- make_mesh(data = d, xy_cols = c("lon", "lat"), n_knots = 110,
+                  type = c("kmeans", "cutoff", "cutoff_search"))
+plot(spde)
+```
 
+I assume use a Student-t distribution with 3 degrees of freedom (default), because initial exploration suggest presence of heavy tails in residuals. Now, fit the models outlined above.
+
+```{r fit Student-t spatiotemporal glmm, cache=TRUE}
 # SA: note that the degrees of freedom on the Student-t are fixed out 3 currently; we can tweak that so you could specify it if you want.
-# ML: Yes, I saw that! Would you agree that the QQ plots for the Gaussian model suggest presence of tails, and that the student model improves that, but maybe assumes too heavy tails? So maybe a df of ~4-6 would be good to try (just guessing!)? 
+# ML: Yes, I saw that! To me at least it seems that the Student model drastically improves fit by accounting the the heavy tails, but maybe assumes too heavy tails? I fit a simple glm (weight ~ length) in brms and estimate nu to be around 5.7.
 # SA: working in log space and Student-t might be fine here, though it's possible that something like Gamma(link = "log") or lognormal might capture the mean-variance relationship better and not require the transformation.
 # ML: Ok, I see! In this case the main reason for taking the logs is transform the allometric model to a linear form, so maybe that wouldn't work
-m1 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm, data = d, time = "year", spde = spde,
-             family = student(link = "identity"), ar1_fields = TRUE,
+
+# Model 1
+m1 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + sex_f + year_f, data = d, time = "year",
+             spde = spde, family = student(link = "identity"), ar1_fields = TRUE,
              include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
-             silent = FALSE) 
+             silent = TRUE) 
+
+m1b <- run_extra_optimization(m1, nlminb_loops = 1, newton_steps = 2)
+max(m1$gradients)
+max(m1b$gradients)
+
+# Model 1.1
+m1.1 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + sex_f + year_f, data = d, time = "year",
+               spde = spde, family = student(link = "identity"), ar1_fields = FALSE,
+               include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
+               silent = TRUE) 
+
+m1.1b <- run_extra_optimization(m1.1, nlminb_loops = 0, newton_steps = 1)
+max(m1.1$gradients)
+max(m1.1b$gradients)
+
+# Model 2
+# m2 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + sex_f, time_varying = ~ 1 + sex_f,
+#              data = d, time = "year",
+#              spde = spde, family = student(link = "identity"), ar1_fields = TRUE,
+#              include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
+#              silent = TRUE)
+
+# Model 3
+m3 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + sex_f, data = d, time = "year",
+             spde = spde, family = student(link = "identity"), ar1_fields = TRUE,
+             include_spatial = TRUE, spatial_trend = TRUE, spatial_only = FALSE,
+             silent = TRUE) 
+
+m3b <- run_extra_optimization(m3, nlminb_loops = 0, newton_steps = 1)
+max(m3$gradients)
+max(m3b$gradients)
+
+# Model 3.1 - spatial trend instead of AR1 spatiotemporal
+m3.1 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + sex_f, data = d, time = "year",
+               spde = spde, family = student(link = "identity"), ar1_fields = FALSE,
+               include_spatial = TRUE, spatial_trend = TRUE, spatial_only = FALSE,
+               silent = TRUE) 
+
+m3.1b <- run_extra_optimization(m3.1, nlminb_loops = 0, newton_steps = 1)
+max(m3.1$gradients)
+max(m3.1b$gradients)
 ```
 
-Evaluate model fit
+Regarding model 2 here: I'm a bit uncertain on what model I'm actually fitting here. Since I have the sex effect, which represent the intercept when `sex="F"` and an offset when `"M"` or `"U"`, I'm guessing it would only make sense to have all those coefficients as time varying. It doesn't converge, however, and I've also tried: `ar1_fields = FALSE`. I get:
 
-```{r spatiotemporal glmm residuals, results='hide', message=FALSE}
-# Inspect fitted models
-print(m0)
-print(m1)
+`Warning message:`
+`The model may not have converged: non-positive-definite Hessian matrix.`
 
-# Look at the residuals:
+I then tried omitting the sex-effect and modeled only the intercept as time-varying:`formula = ln_weight_g ~ ln_length_cm, time_varying = ~ 1`. But here I get:
+`Error in solve.default(h, g) : `
+  `system is computationally singular: reciprocal condition number = 2.12999e-16`
+
+I'm proceeding with m1b, m1.1b, m3b and m3.1b though. Look at the residuals:
+```{r extract student residuals}
 df <- d
 
-df$residuals_m0 <- residuals(m0)
-df$residuals_m1 <- residuals(m1)
+df$residuals_m1b <- residuals(m1b)
+df$residuals_m1.1b <- residuals(m1.1b)
+df$residuals_m3b <- residuals(m3b)
+df$residuals_m3.1b <- residuals(m3.1b)
 
-qqnorm(df$residuals_m0); abline(a = 0, b = 1)
+qqnorm(df$residuals_m1b); abline(a = 0, b = 1)
+qqnorm(df$residuals_m1.1b); abline(a = 0, b = 1)
+qqnorm(df$residuals_m3b); abline(a = 0, b = 1)
+qqnorm(df$residuals_m3.1b); abline(a = 0, b = 1)
 ```
 
-Gaussian looks bad.
+While the Student-t models looks a lot better (than the Gaussian [not shown]) they could perhaps be improved further by tweaking the df parameter (see comment above). Otherwise, they look identical to me (I am a bit surprised by that actually). I will next compare their AIC:
 
-```{r student residuals}
-qqnorm(df$residuals_m1); abline(a = 0, b = 1)
+```{r extract student aic}
+AIC(m1b)
+AIC(m1.1b)
+AIC(m3b)
+AIC(m3.1b)
 ```
 
-Student looks a lot better but could perhaps be improved further (maybe by tweaking the df parameter). Check the residuals for the student t model on a map.
+Model m1b, i.e. with an autoregressive spatiotemporal field and with a fixed (factor) year effect is most parsimonious and seems like a good option to proceed with now (given that I can't detect any different in the QQ plot between the alternative models).
+
+### Parameter estimates
+
+We can also look at the AR1 parameter, and sex-coefficients, to ensure they are warranted.
+
+```{r check ar1 estimate}
+# SA: Note that this is in -Inf to Inf space, although you are probably aware of that; `2 * plogis(ar_phi) - 1` will transform it
+# SA: also note that you can use (1) the already calculated sdreport and (2) the as.list S3 method for a handy named list... no more row.names()!:
+# ML: Right, that's what you wrote in the e-mail, forgot to correct that.
+# ML: Perfect, will use as.list on the report. Thanks!
+m1b_est <- as.list(m1b$sd_report, "Estimate")
+m1b_se <- as.list(m1b$sd_report, "Std. Error")
+# Transform back to -1 to 1 scale
+2 * plogis(m1b_est$ar1_phi) - 1
+2 * plogis(m1b_est$ar1_phi + c(-2, 2) * m1b_se$ar1_phi) - 1
+```
+
+Strong support for it (and the AIC-selected model also had it). What about the `sex_f`-effect?
+
+```{r check sex_f estimate}
+# Females
+m1b_est$b_j[1]
+m1b_est$b_j[1] + c(-2, 2) * m1b_se$b_j[1]
+
+# Males
+m1b_est$b_j[3]
+m1b_est$b_j[3] + c(-2, 2) * m1b_se$b_j[3]
+
+# Unsexed
+m1b_est$b_j[4]
+m1b_est$b_j[4] + c(-2, 2) * m1b_se$b_j[4]
+```
+
+The condition appears different between sexes. The average condition for a female is -4.43, and for males it is -4.44. Given the length-coefficient ($\beta$ or `m1b_est$b_j[2]`), we can exemplify the difference in weight:
+
+```{r example weights}
+# How much does the weight of a 30 cm female and male differ?
+exp(m1b_est$b_j[1])*30^m1b_est$b_j[2]
+exp(m1b_est$b_j[1] + m1b_est$b_j[3])*30^m1b_est$b_j[2]
+# Females are approximately 0.5 g heavier, not that much maybe [in other models ~1 g for the same size]! I could consider perhaps dropping that term and then compare that model using AIC.
+```
+
+### Plot the residuals
+First we can plot them against predictions and then over length:
+
+```{r residuals vs fitted and x}
+pred_m1b <- predict(m1b)
+df$pred_m1b <- pred_m1b$est
+
+ggplot(df, aes(pred_m1b, residuals_m1b)) +
+  geom_point(shape = 21, fill = "black", color = "white")
+
+ggplot(df, aes(ln_length_cm, residuals_m1b)) +
+  geom_point(shape = 21, fill = "black", color = "white")
+```
+
+They look a little bit funny at small lengths (and small predicted weights). I think that's because a) the small ones are quite rare and b) data are in cm size-classes (a bit coarse for a ~5 cm fish, hence many are assigned the same length). Besides that I do not think they are too troublesome.
+
+Check the residuals for the Student-t model on a map.
 
 ```{r student residuals on map, fig.width=12}
-ggplot(df, aes(lon, lat, colour = residuals_m1)) +
+ggplot(df, aes(lon, lat, colour = residuals_m1b)) +
   geom_point(size = 1) +
   facet_wrap(~year, ncol = 6) +
   scale_color_gradient2() +
@@ -160,38 +339,21 @@ ggplot(df, aes(lon, lat, colour = residuals_m1)) +
   coord_sf(xlim = c(12.5, 21.5), ylim = c(54, 58))
 ```
 
-Maybe some clustering remains...
+Maybe some clustering remains... But overall OK I think!
 
-However, moving on we can also look at the AR1 parameter to ensure it is warranted.
+### Plot predictions on map
 
-```{r check parameter estimates}
-# SA: Note that this is in -Inf to Inf space, although you are probably aware of that; `2 * plogis(ar_phi) - 1` will transform it
-# SA: also note that you can use (1) the already calculated sdreport and (2) the as.list S3 method for a handy named list... no more row.names()!:
-# ML: Right, that's what you wrote in the e-mail, forgot to correct that.
-# ML: Perfect, will se as.list on the repot. Thanks!
-m1_est <- as.list(m1$sd_report, "Estimate")
-m1_se <- as.list(m1$sd_report, "Std. Error")
-# Transform back to -1 to 1 scale
-2 * plogis(m1_est$ar1_phi) - 1
-2 * plogis(m1_est$ar1_phi + c(-2, 2) * m1_se$ar1_phi) - 1
-```
+Now we can predict and plot estimates using all fixed and random effects on pre-made grid. This grid is created by doing an `expand.grid` over the survey range, then filtering out areas that are actually in the ocean using ICES shapefiles. Lastly some areas are too deep for sampling (-135 m). I've added a depth column so that I can make those predictions NA so it's clear they are different from e.g. land and islands (and so that the color gradient isn't going too far because of the extreme predictions at these depths).
 
-Strong support for it, will not run model without AR1 process in the spatiotemporal field for now.
-
-Hence, I will proceed with this model, makes some predictions and compare it to a model with covariates.
-
-# Update here, add in the fixed effect and random walk on time !
-
-So, now we can predict and plot estimates using all fixed and random effects on pre-made grid. This grid is made by doing an expand grid over survey ranges, then filtering out areas that are actually in the ocean using ICES shapefiles. Lastly some areas are too deep for sampling (-135 m). I've added a depth column so that I can make those predictions NA so it's clear they are different from e.g. land and islands (maybe unnessecary but it makes them grey, i.e. different from land. 
-
-```{r predict on grid}
-p <- predict(m1, newdata = pred_grid)
+```{r predict on grid, message=FALSE}
+p <- predict(m1b, newdata = pred_grid)
 
 # Replace too-deep predictions with NA
-p <- p %>% mutate(est2 = ifelse(depth < -130, NA, est),
-                  eps_st2 = ifelse(depth < -130, NA, epsilon_st),
-                  omega_s2 = ifelse(depth < -130, NA, omega_s),
-                  est_non_rf2 = ifelse(depth < -130, NA, est_non_rf))
+p <- p %>% mutate(est2 = ifelse(depth < -130, NA, est), # prediction (fixed + random)
+                  eps_st2 = ifelse(depth < -130, NA, epsilon_st), # spatiotemporal effects
+                  omega_s2 = ifelse(depth < -130, NA, omega_s), # spatial random effect
+                  est_non_rf2 = ifelse(depth < -130, NA, est_non_rf), # fixed effects
+                  zeta_s2 = ifelse(depth < -130, NA, zeta_s)) # spatial trend
 ```
 
 Plot the predicted condition with fixed and random effects:
@@ -210,30 +372,21 @@ ggplot(p, aes(lon, lat, fill = est2)) +
 Plot the spatiotemporal random effects:
 
 SA: Note that these are the spatial (omega) + spatiotemporal (epsilon) effects. If you just want the spatiotemporal ones, then you want `p$epsilon_st`. I have done that above.
-
 ML: Oh didn't realize that. Good, perhaps that was the reason they seemed similar...
-
 SA: You likely want a diverging colour scheme for these since they will be centered on 0. I have done that.
-
-ML: Yes makes sense and loks good!
-
+ML: Yes makes sense and looks good!
 SA: typically each time slice would be centered on zero, however you have a moderately large AR1 phi parameter, which is letting it wander off a bit
-
 SA: an alternative might be the spatial_trend (since what you have look roughly linear) likely instead of the AR1 form, I would be interested to hear if that works well. If everything is generally decreasing, you could also try just having a fixed effect for year, which might be simplest of all and useful for inference... or let the intercept be a random walk through time:
 `formula = ln_weight_g ~ 0 + ln_length_cm, time_varying = ~ 1`
-
 SA: hopefully that's right, I haven't tried it here
-
 SA: All depends on what the end goal is for inference and what is most useful.
+ML: Those are good ideas! I have implemented that above.
 
-ML: Those are good ideas! 
-
-```{r plot spatiotemporal on grid, fig.width=12}
+```{r plot spatiotemporal on grid, fig.width=12, message=FALSE}
 ggplot(p, aes(lon, lat, fill = eps_st2)) +
   geom_raster() +
   facet_wrap(~year, ncol = 6) +
-  scale_fill_gradient2(
-                     name = "log(condition factor)") + 
+  scale_fill_gradient2(name = "eps_st") + 
   geom_sf(data = world, inherit.aes = F, size = 0.2) +
   coord_sf(xlim = c(12.5, 21.5), ylim = c(54, 58)) +
   ggtitle("Spatiotemporal random effects")
@@ -244,32 +397,14 @@ Plot the spatial random effects:
 ```{r plot spatial on grid}
 ggplot(filter(p, year == 2000), aes(lon, lat, fill = omega_s2)) +
   geom_raster() +
-  scale_fill_gradient2(
-                     name = "log(condition factor)") + 
+  scale_fill_gradient2(name = "omega_s") + 
   geom_sf(data = world, inherit.aes = F, size = 0.2) +
   coord_sf(xlim = c(12.5, 21.5), ylim = c(54, 58)) +
-  geom_point(data = d, aes(lon, lat), color = "green", inherit.aes = FALSE, size = 0.2) +
+  geom_point(data = d, aes(lon, lat), color = "black", inherit.aes = FALSE, size = 0.1) +
   ggtitle("Spatial random effects + data")
 ```
 
-SA: there are also the `p$est_non_rf` for just the fixed effects (and time-varying effects) if you want to look at that
-
-ML: Sounds good, will plot that too!
-
-Plot fixed effects on grid:
-
-```{r plot fixed effects on grid, fig.width=12}
-# Filter 1 year if I end up with a model like this where all years are identical
-ggplot(p, aes(lon, lat, fill = est_non_rf2)) +
-  geom_raster() +
-  facet_wrap(~year, ncol = 6) +
-  scale_fill_viridis(name = "log(condition factor)") + 
-  geom_sf(data = world, inherit.aes = F, size = 0.2) +
-  coord_sf(xlim = c(12.5, 21.5), ylim = c(54, 58)) +
-  ggtitle("Spatiotemporal random effects")
-```
-
-Predictions with fixed and random effects and the spatiotemporal random effect are quite similar. I guess this is because I don't have any other strong covariates yet (and the length-variable is set to 0 for this prediction). All random effects (and predictions) also seem to largely follow depth. Not really sure how to interpret that. At the deeper areas there is less oxygen and less benthic food so in theory it can make sense).
+The spatial random field seems to largely follow depth, which makes sense since it's constant across years and reflects e.g. oxygen concentration and overall habitat quality (deep areas are even anoxic).
 
 ```{r compare with bathymetry}
 baltic_sea <- getNOAA.bathy(lon1 = min(d$lon), lon2 = max(d$lon),
@@ -279,124 +414,200 @@ autoplot(baltic_sea, geom = c("r", "c")) +
   scale_fill_gradient2(low = "darkblue", high = "gray", midpoint = 0)
 ```
 
-Now we want to refit the same model with the additional fixed effects outlined above.
+SA: there are also the `p$est_non_rf` for just the fixed effects (and time-varying effects) if you want to look at that
+ML: Sounds good, will plot that too!
 
-```{r spatiotemporal glmm with covariates, results='hide', cache=TRUE}
-# Fit model with cod cpue as covariate
-mcod <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + CPUE_cod_st, data = d, time = "year",
-               spde = spde, family = student(link = "identity"), 
-               ar1_fields = TRUE,
-               include_spatial = TRUE, 
-               spatial_trend = FALSE, 
-               spatial_only = FALSE,
-               silent = FALSE)
+Plot fixed effects on grid (note this is for female cod). If using year as a continuous variable, the overall result is not that different.
 
-# Run extra optimization steps to help convergence:
-# mcod2 <- run_extra_optimization(mcod, nlminb_loops = 1, newton_steps = 1)
-
-# SA: interesting; you might try more knots (or sometimes fewer) or even a different seed on the make_spde function.
-## ---------- Actually this did not improve convergence this time!
-# I landed on fewer knots because I had convergence issues also with the first models with more knots
-
-#... And with flounder 
-mfle <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + CPUE_fle_st, data = d, time = "year",
-               spde = spde, family = student(link = "identity"), 
-               ar1_fields = TRUE,
-               include_spatial = TRUE, 
-               spatial_trend = FALSE, 
-               spatial_only = FALSE,
-               silent = FALSE) # sorry if this ruined the .Rmd output!
-
-# Run extra optimization steps to help convergence:
-# mfle2 <- run_extra_optimization(mfle, nlminb_loops = 1, newton_steps = 1)
-# max(mfle2$gradients)
-
-# Check the models
-print(mcod)
-print(mfle)
+```{r plot fixed effects on grid, fig.width=12}
+# Filter 1 year if I end up with a model like this where all years are identical
+ggplot(p, aes(lon, lat, fill = est_non_rf2)) +
+  geom_raster() +
+  facet_wrap(~year, ncol = 6) +
+  scale_fill_viridis(name = "log(condition factor)") + 
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(12.5, 21.5), ylim = c(54, 58)) +
+  ggtitle("Fixed effects")
 ```
 
-Check the new fixed effect estimates:
+
+```{r plot year intercepts}
+# A bit clumpsy way to append the intercept (year 1991, female) to the other year-effects (coefficients 5:32)
+year_intercept <- data.frame(Year = sort(unique(d$year)),
+                             "est" = c(as.list(m1b$sd_report, "Estimate")$b_j[1],
+                                       as.list(m1b$sd_report, "Estimate")$b_j[5:32] + as.list(m1b$sd_report, "Estimate")$b_j[1]),
+                             "std.error" = c(as.list(m1b$sd_report, "Std. Error")$b_j[1], 
+                                             as.list(m1b$sd_report, "Std. Error")$b_j[5:32] + as.list(m1b$sd_report, "Std. Error")$b_j[1]))
+
+year_intercept %>% 
+  mutate(ymin = est - 1.96*std.error,
+         ymax = est + 1.96*std.error) %>% 
+  ggplot(., aes(Year, est)) + 
+  ylab("Average log(female condition)") + 
+  geom_point() + 
+  geom_errorbar(aes(ymin = ymin, ymax = ymax), width = 0.4)
+```
+
+Here we see in more detail how the average condition for a female has changed. 1996 was a particularly good year for condition, and it happens to also be with with relatively good oxygen conditions. After I saw this plot, I also tried fitting a model with a spline for year (centered to 0 at 1991), but it did not have a lower AIC than this model (but lower then m3b and m3.1b)
+
+Now we want to refit the same model with the additional fixed effects outlined above.
+
+## Add covariates to default model
+
+Here is an example of how the importance of additional covariates can be evaluated. To keep it simple I contrast only two covariates (cod and oxygen). The rest of this analysis (i.e. with all covariates) will be done in different rmarkdown file. 
+
+```{r spatiotemporal glmm with covariates, cache=TRUE}
+# Fit model with cod cpue as covariate
+mcod <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + sex_f + cpue_cod_st + year_f, data = d,
+               time = "year",
+               spde = spde, family = student(link = "identity"), 
+               ar1_fields = TRUE,
+               include_spatial = TRUE, 
+               spatial_trend = FALSE, 
+               spatial_only = FALSE,
+               silent = TRUE)
+
+# Run extra optimization steps to help convergence:
+mcodb <- run_extra_optimization(mcod, nlminb_loops = 0, newton_steps = 1)
+
+max(mcod$gradients)
+max(mcodb$gradients)
+
+# SA: interesting; you might try more knots (or sometimes fewer) or even a different seed on the make_spde function.
+# ML I landed on fewer knots because I had convergence issues also with the first models with more knots (that I couldn't resolve with ´run_extra_optimization´, as with this model originally!)
+
+# And one with oxygen concentration as covariate
+moxy <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + sex_f + mean_DOXY_st + year_f, data = d,
+               time = "year",
+               spde = spde, family = student(link = "identity"), 
+               ar1_fields = TRUE,
+               include_spatial = TRUE, 
+               spatial_trend = FALSE, 
+               spatial_only = FALSE,
+               silent = TRUE) 
+
+# Run extra optimization steps to help convergence:
+moxyb <- run_extra_optimization(moxy, nlminb_loops = 2, newton_steps = 2)
+max(moxy$gradients)
+max(moxyb$gradients)
+
+# Check the models
+print(mcodb)
+print(moxyb)
+```
+
+Check the new fixed effect estimates and their confidence interval:
 
 ```{r check new fixed effects}
 # Look at the new parameter (cod)
 # SA: use mcod$sdreport !
-# ML: Yes, thanks!
-cod_est <- as.list(mcod$sd_report, "Estimate")
-cod_se <- as.list(mcod$sd_report, "Std. Error")
-cod_est$b_j.2
-cod_est$b_j.2 + c(-2, 2) * cod_se$b_j.2
+# ML: Will do, thanks!
+cod_est <- as.list(mcodb$sd_report, "Estimate")
+cod_se <- as.list(mcodb$sd_report, "Std. Error")
+cod_est$b_j[5] # 5 is index for cod parameter
+cod_est$b_j[5] + c(-2, 2) * cod_se$b_j[5] # C.I
 
-fle_est <- as.list(mfle$sd_report, "Estimate")
-fle_se <- as.list(mfle$sd_report, "Std. Error")
-fle_est$b_j.2
-fle_est$b_j.2 + c(-2, 2) * fle_est$b_j.2
+oxy_est <- as.list(moxyb$sd_report, "Estimate")
+oxy_se <- as.list(moxyb$sd_report, "Std. Error")
+oxy_est$b_j[5] # 6 is index for oxygen
+oxy_est$b_j[5] + c(-2, 2) * oxy_se$b_j[5]
 ```
 
+Now compare the models using AIC:
 
 ```{r model comparison with AIC}
 # Compare the models with AIC (unsure actually if this is correct for a sdmTMB model...)
 # SA: as long as only the fixed effects change and reml = FALSE, then yes
 # SA: if random effects change and reml = TRUE, then yes
 # SA: all conditional on whether AIC is a good thing to use for this type of model... but people do
-# ML: 
-aic_m1 <- extractAIC(m1)
-aic_mcod <- extractAIC(mcod)
-aic_mfle <- extractAIC(mfle)
+# ML: I don't use restricted maximum likelihood and only fixed effects change, so I'll continue with this
+aic_m1b <- extractAIC(m1b)
+aic_mcodb <- extractAIC(mcodb)
+aic_moxyb <- extractAIC(moxyb)
 
-aic_m1
-aic_mcod
-aic_mfle
+aic_m1b
+aic_mcodb
+aic_moxyb
 ```
 
-The model with flounder has a smaller AIC, even though the 95% confidence interval for it's coefficient crosses 0 (unlike the coefficient for cod).
+The model with oxygen has the smallest AIC, and the coefficient for oxygen seems significant (unlike the cod coefficient). 
 
 Now let's look more closely at the our estimates. If I understand Thorson (2015) correctly:
 
 *"This implies that $\gamma X$ (the covariate times its coefficient) has a standard deviation of $\gamma$ such that coefficients can be interpreted via comparison with the standard deviation of spatial, temporal and spatiotemporal variation, as well as that of residual variation."*
 
-I can now compare the coefficient of flounder with the standard deviation of the spatial and spatiotemporal effects, i.e. $\sigma_E$ and $\sigma_A$ in Thorson (2015) (Eqns. 6b-7). These terms are the square roots of the marginal variances of the random fields, i.e. $\sigma_E^2$ and $\sigma_A^2$.
+I can now compare the coefficients of the additional covariates (since they are standardized to have mean 0 and variance of 1) with the standard deviation of the spatial, spatial trend and spatiotemporal effects, i.e. $\sigma_E$ and $\sigma_A$ in Thorson (2015) for the spatial and spatiotemporal effects, respectively (Eqns. 6b-7). These terms are the square roots of the marginal variances of the random fields, i.e. $\sigma_E^2$ and $\sigma_A^2$ (denoted $\tau^2$ above).
 
 In sdmTMB I think $\sigma_E$ and $\sigma_A$ above correspond to Spatiotemporal SD (sigma_E) and Spatial SD (sigma_O) seen in `print(model)`. I think the non-rounded values can be extracted from:
+`moxyb$sd_report$value`
+`# SA: correct, or as a named list (note the last argument):`
 
-```{r extract sds of random fields}
-mfle$sd_report$value
-# SA: correct, or as a named list (note the last argument):
-est <- as.list(mfle$sd_report, "Estimate", report = TRUE)
-se <- as.list(mfle$sd_report, "Std. Error", report = TRUE)
-est$sigma_O
-se$sigma_O
-est$sigma_E
-se$sigma_E
+Ok, so for the sake of model comparison, I will now extract the estimates of 1) spatial standard deviation 2) from all models, and the coefficients of the additional covariates, together with their standard errors. The point is to compare the relative magnitude of the covariates and spatial and spatiotemporal variation, as well as comparing how the latter change with the inclusion of covariates.
+
+```{r extract sds of random fields, message=FALSE}
+# Extract coefficients from cod model
+cod_est <- as.list(mcodb$sd_report, "Estimate", report = TRUE)
+cod_se <- as.list(mcodb$sd_report, "Std. Error", report = TRUE)
+b_cod_est <- as.list(mcodb$sd_report, "Estimate")
+b_cod_se <- as.list(mcodb$sd_report, "Std. Error")
+
+# Extract coefficients from oxygen model
+oxy_est <- as.list(moxyb$sd_report, "Estimate", report = TRUE)
+oxy_se <- as.list(moxyb$sd_report, "Std. Error", report = TRUE)
+b_oxy_est <- as.list(moxyb$sd_report, "Estimate")
+b_oxy_se <- as.list(moxyb$sd_report, "Std. Error")
+
+# Extract coefficients from default model
+def_est <- as.list(m1b$sd_report, "Estimate", report = TRUE)
+def_se <- as.list(m1b$sd_report, "Std. Error", report = TRUE)
+
+# Here are the estimates from the AIC-selected model (i.e. with cod) put in a data frame
+cod_df <- data.frame(coef = c("sigma_O", "sigma_E", "cod", "oxygen"),
+                     est = c(cod_est$sigma_O, cod_est$sigma_E, b_cod_est$b_j[5], NA), 
+                     se = c(cod_se$sigma_O, cod_se$sigma_E, b_cod_se$b_j[5], NA),
+                     model = "cod model")
+
+# Here are the estimates from the oxygen model put in a data frame
+oxy_df <- data.frame(coef = c("sigma_O", "sigma_E", "cod", "oxygen"),
+                     est = c(oxy_est$sigma_O, oxy_est$sigma_E, NA, b_oxy_est$b_j[5]), 
+                     se = c(oxy_se$sigma_O, oxy_se$sigma_E, NA, b_oxy_se$b_j[5]),
+                     model = "oxygen (lowest AIC)")
+
+# Here are the estimates from the default model put in a data frame
+def_df <- data.frame(coef = c("sigma_O", "sigma_E", "cod", "oxygen"),
+                     est = c(def_est$sigma_O, def_est$sigma_E, NA, NA), 
+                     se = c(def_se$sigma_O, def_se$sigma_E, NA, NA),
+                     model = "default model")
+
+coef_df <- rbind(cod_df, oxy_df, def_df)
+  
+# Finally calculate C.I's
+coef_df$lwr <- coef_df$est - 1.96*coef_df$se
+coef_df$upr <- coef_df$est + 1.96*coef_df$se
+
+dodge <- position_dodge(width = 0.3)
+
+ggplot(coef_df, aes(coef, est, color = model, group = model)) + 
+  geom_point(size = 2, position = dodge) +
+  geom_errorbar(aes(ymin = lwr, ymax = upr), position = dodge, width = 0.2) + 
+  scale_color_brewer(palette = "Dark2")
 ```
 
-These standard deviations can now be compared with the coefficients of the flounder model:
+I interpret this as follows: the spatial, spatial trend and spatiotemporal variation is not affected by additional covariates, apart from oxygen explaining some spatial variation that is constant in time. This makes sense since oxygen concentration largely follows depth and does not show strong spatiotemporal variation. I also find the magnitude of spatial and spatiotemporal variation to be considerably larger than that of the additional covariates. 
 
-```{r flounder coefficient}
-fle_est$b_j.2
-```
+For the sake of comparison, I can also produce a map to look at the differences there. Here I'm using the cod model.
 
-I interpret this as that the flounder coefficient is small relative to other sources of temporally constant variation across space (omega) and factors varying in space from year to year (epsilon). Further, I don't think inclusion of the flounder covariate leads to less variation explained by the spatial and spatiotemporal effects. Compare those standard deviations with the model without covariates:
-
-```{r compare with base model sds on random fields}
-m1$sd_report$value
-m1_est$sigma_O
-m1_est$sigma_E
-```
-
-For the sake of comparison, I can also produce a map to look at the differences there.
-
-```{r map prediction for covariate model, fig.width=12}
+```{r map prediction for covariate model, message=FALSE, fig.width=12}
 # Add in a fixed covariate here
-pred_grid_fle <- pred_grid
-pred_grid_fle$CPUE_fle_st <- 0 # Mean since standardized
+pred_grid_cod <- pred_grid
+pred_grid_cod$mean_DOXY_st <- 0 # Mean since standardized
 
-pfle <- predict(mfle, newdata = pred_grid_fle)
+pcod <- predict(moxyb, newdata = pred_grid_cod)
 
 # Replace too-deep predictions with NA
-pfle <- pfle %>% mutate(est2 = ifelse(depth < -130, NA, est))
+pcod <- pcod %>% mutate(est2 = ifelse(depth < -130, NA, est))
 
-ggplot(pfle, aes(X, Y, fill = est2)) +
+ggplot(pcod, aes(X, Y, fill = est2)) +
   geom_raster() +
   facet_wrap(~year, ncol = 6) +
   scale_fill_viridis(option = "magma", 
@@ -416,8 +627,13 @@ SA: it is a random field that represents a slope over the time variable; yes it 
 
 SA: extracted correctly, yes, although see my suggested list version
 
-SA: as for that Thorson 2015 paragraph, hmm, perhaps yes, although I hadn't thought of it that way before. I've more commonly seen assessment of covariates via the magnitude (ecological relavance), confidence interval, and/or AIC, but yes, that could be a useful scale comparison. That assumes you have scaled your predictor to have variance = 1, which might make less sense if it's a log variable.
+SA: as for that Thorson 2015 paragraph, hmm, perhaps yes, although I hadn't thought of it that way before. I've more commonly seen assessment of covariates via the magnitude (ecological relevance), confidence interval, and/or AIC, but yes, that could be a useful scale comparison. That assumes you have scaled your predictor to have variance = 1, which might make less sense if it's a log variable.
 
+**Updated** 
+
+- n_knots around 110 seems to work for all/most models and seems to be my upper limit until I hit "`Warning messages:` `1: In sqrt(diag(cov)) : NaNs produced` `2: The model may not have converged: non-positive-definite Hessian matrix.`". Is there a way to overcome this warning os should I view ~110 knots as the maximum the model can handle given the data?
+
+- The random walk on intercept: Would you recommend modeling only the intercept as random walk (i.e. female condition factor in 1991), or all the offets for the other sexes as well? Is there anything I can do to overcome the convergence issue?
 
 ## References
 
@@ -425,16 +641,18 @@ Anderson, S.C., Keppel, E.A., Edwards, A.M. 2019. A reproducible data synopsis f
 
 Casini, M., Käll, F., Hansson, M., Plikshs, M., Baranova, T., Karlsson, O., Lundström, K., Neuenfeldt, S., Gårdmark, A. and Hjelm, J., 2016. Hypoxic areas, density-dependence and food limitation drive the body condition of a heavily exploited marine fish predator. *Royal Society open science*, 3(10), p.160416.
 
+Froese, R., Thorson, J.T. and Reyes Jr, R.B., 2014. A Bayesian approach for estimating length‐weight relationships in fishes. *Journal of Applied Ichthyology*, 30(1), pp.78-85.
+
+Grüss, A., Gao, J., Thorson, J.T., Rooper, C.N., Thompson, G., Boldt, J.L. and Lauth, R., 2020. Estimating synchronous changes in condition and density in eastern Bering Sea fishes. *Marine Ecology Progress Series*, 635, pp.169-185.
+
 Gårdmark, A., Casini, M., Huss, M., van Leeuwen, A., Hjelm, J., Persson, L. and de Roos, A.M., 2015. Regime shifts in exploited marine food webs: detecting mechanisms underlying alternative stable states using size-structured community dynamics theory. *Philosophical Transactions of the Royal Society B: Biological Sciences*, 370(1659), p.20130262.
 
 Neuenfeldt, S., Bartolino, V., Orio, A., Andersen, K.H., Andersen, N.G., Niiranen, S., Bergström, U., Ustups, D., Kulatska, N. and Casini, M., 2020. Feeding and growth of Atlantic cod (Gadus morhua L.) in the eastern Baltic Sea under environmental change. ICES Journal of Marine Science, 77(2), pp.624-632.
 
 Orio, A., Bergström, U., Florin, A.B., Lehmann, A., Šics, I. and Casini, M., 2019. Spatial contraction of demersal fish populations in a large marine ecosystem. *Journal of Biogeography*, 46(3), pp.633-645.
 
-Orior, A., Bergströn, U., Floring, Ann-Britt., Sics, I. and Casini, M., 2020. Long-term changes in spatial overlap between interacting cod and flounder in the Baltic Sea. Hydrobiologia, 847(11), pp.2541-2553.
+Orio, A., Bergström, U., Florin, A-B., Sics, I. and Casini, M., 2020. Long-term changes in spatial overlap between interacting cod and flounder in the Baltic Sea. *Hydrobiologia*, 847(11), pp.2541-2553.
 
 Svedäng, H. and Hornborg, S., 2014. Selective fishing induces density-dependent growth. *Nature communications*, 5(1), pp.1-6.
 
 Thorson, J.T., 2015. Spatio-temporal variation in fish condition is not consistently explained by density, temperature, or season for California Current groundfishes. *Marine Ecology Progress Series*, 526, pp.101-112.
-
-
