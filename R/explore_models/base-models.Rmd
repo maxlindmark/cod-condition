@@ -258,7 +258,7 @@ I then tried omitting the sex-effect and modeled only the intercept as time-vary
 `Error in solve.default(h, g) : `
   `system is computationally singular: reciprocal condition number = 2.12999e-16`
   
-SA: Did you make sure to ommit the intercept from at least one formula or the other: `-1` or `0`? Because that'll do it!
+SA: Did you make sure to omit the intercept from at least one formula or the other: `-1` or `0`? Because if you left an intercept in both... that'll do it!
 
 I'm proceeding with m1b, m1.1b, m3b and m3.1b though. Look at the residuals:
 ```{r extract student residuals}
