@@ -164,14 +164,14 @@ dat <- left_join(bits_ca, bits_hh_filter)
 dat <- dat %>% drop_na(ShootLat)
 
 # Plot spatial distribution of samples
-dat %>% 
-  ggplot(., aes(y = ShootLat, x = ShootLong)) +
-  geom_point(size = 0.3) +
-  facet_wrap(~ Year) + 
-  theme_bw() +
-  geom_sf(data = world, inherit.aes = F, size = 0.2) +
-  coord_sf(xlim = c(8, 25), ylim = c(54, 60)) +
-  NULL
+# dat %>% 
+#   ggplot(., aes(y = ShootLat, x = ShootLong)) +
+#   geom_point(size = 0.3) +
+#   facet_wrap(~ Year) + 
+#   theme_bw() +
+#   geom_sf(data = world, inherit.aes = F, size = 0.2) +
+#   coord_sf(xlim = c(8, 25), ylim = c(54, 60)) +
+#   NULL
 
 # Lastly we can remove hauls from outside the study area (Kattegatt basically)
 # select only quarter 4 and remove non-valid hauls
@@ -185,16 +185,16 @@ dat <- dat %>%
 
 # Plot again:
 # Plot spatial distribution of samples
-dat %>% 
-  ggplot(., aes(y = ShootLat, x = ShootLong)) +
-  geom_point(size = 0.3) +
-  facet_wrap(~ Year) + 
-  theme_bw() +
-  geom_sf(data = world, inherit.aes = F, size = 0.2) +
-  #coord_sf(xlim = c(12.5, 21.5), ylim = c(54, 58)) +
-  coord_sf(xlim = c(8, 25), ylim = c(54, 60)) +
-  NULL
+# dat %>% 
+#   ggplot(., aes(y = ShootLat, x = ShootLong)) +
+#   geom_point(size = 0.3) +
+#   facet_wrap(~ Year) + 
+#   theme_bw() +
+#   geom_sf(data = world, inherit.aes = F, size = 0.2) +
+#   coord_sf(xlim = c(8, 25), ylim = c(54, 60)) +
+#   NULL
 
+min(dat$ShootLon)
 
 # E. READ AND JOIN THE COD AND FLOUNDER COVARIATES =================================
 cov_dat <- read.csv("data/DATRAS_cpue_length_haul/CPUE per length per haul per hour_2020-09-25 16_15_36.csv")
@@ -535,9 +535,8 @@ ggplot(dat, aes(abun_her)) + geom_histogram()
 # Extract raster points: https://gisday.wordpress.com/2014/03/24/extract-raster-values-from-points-using-r/comment-page-1/
 # https://rpubs.com/boyerag/297592
 # https://pjbartlein.github.io/REarthSysSci/netCDF.html#get-a-variable
-git commit --amend
 # Open the netCDF file
-ncin <- nc_open("data/NEMO_Nordic_SCOBI/dataset-reanalysis-scobi-monthlymeans_1603376508772.nc")
+ncin <- nc_open("data/NEMO_Nordic_SCOBI/dataset-reanalysis-scobi-monthlymeans_1603971995426.nc")
 
 print(ncin)
 
@@ -718,7 +717,8 @@ for(i in unique(d_sub_oxy$Year_f)) {
                color = "black", size = 5, shape = 21) +
     theme_bw() +
     geom_sf(data = world, inherit.aes = F, size = 0.2) +
-    coord_sf(xlim = c(12.5, 21.5), ylim = c(54, 58)) +
+    coord_sf(xlim = c(min(dat$ShootLong), max(dat$ShootLong)),
+             ylim = c(min(dat$ShootLat), max(dat$ShootLat))) +
     scale_colour_gradientn(colours = rev(terrain.colors(10)),
                            limits = c(-200, 400)) +
     scale_fill_gradientn(colours = rev(terrain.colors(10)),
@@ -778,17 +778,6 @@ big_dat_sub_oxy2 <- big_dat_sub_oxy %>% distinct(id_oxy, .keep_all = TRUE)
 
 # Join the data with raster-derived oxygen with the full condition data
 dat <- left_join(dat, big_dat_sub_oxy2, by = "id_oxy")
-
-dat %>% 
-  mutate(Fulton = IndWgt/(0.01*length_cm^3)) %>% 
-  group_by(Year) %>% 
-  filter(Fulton < 3) %>% 
-  ggplot(., aes(oxy, Fulton)) + 
-  geom_point() +
-  stat_smooth(method = "lm") + 
-  facet_wrap(~ Year) + 
-  NULL
-
 
 # ** Temperature ===================================================================
 # Open the netCDF file
@@ -914,219 +903,6 @@ dat %>%
 # head(tmp_array1)
 # head(tmp_array2)
 # head(tmp_array3)
-# 
-# # We only use Quarter 4 in this analysis, so now we want to loop through each time step,
-# # and if it is a good month save it as a raster.
-# # First get the index of months that correspond to Q4
-# months
-# 
-# index_keep <- which(months > 9)
-# 
-# tmp_q4 <- tmp_array[, , index_keep]
-# 
-# months_keep <- months[index_keep]
-# 
-# years_keep <- years[index_keep]
-# 
-# # Now we have an array with only Q4 data...
-# # We need to now calculate the average within a year.
-# # Get a sequence that takes every third value between 1: number of months (length)
-# loop_seq <- seq(1, dim(tmp_q4)[3], by = 3)
-# 
-# # Create objects that will hold data
-# dlist <- list()
-# tmp_10 <- c()
-# tmp_11 <- c()
-# tmp_12 <- c()
-# tmp_ave <- c()
-# 
-# # Loop through the vector sequence with every third value, then take the average of 
-# # three consecutive months (i.e. q4)
-# for(i in loop_seq) {
-#   
-#   tmp_10 <- tmp_q4[, , (i)]
-#   tmp_11 <- tmp_q4[, , (i + 1)]
-#   tmp_12 <- tmp_q4[, , (i + 2)]
-#   
-#   tmp_ave <- (tmp_10 + tmp_11 + tmp_12) / 3
-#   
-#   list_pos <- ((i/3) - (1/3)) + 1 # to get index 1:n(years)
-#   
-#   dlist[[list_pos]] <- tmp_ave
-#   
-# }
-# 
-# # Now name the lists with the year:
-# names(dlist) <- unique(years_keep)
-# 
-# # Now I need to make a loop where I extract the raster value for each year...
-# # The condition data is called dat so far in this script
-# 
-# # For adding maps to plots
-# world <- ne_countries(scale = "medium", returnclass = "sf")
-# 
-# # Filter years in the condition data frame to only have the years I have temperature for
-# d_sub <- dat %>% filter(Year %in% names(dlist)) %>% droplevels()
-# 
-# # Create data holding object
-# data_list <- list()
-# 
-# # ... And for the temperature raster
-# raster_list <- list()
-# 
-# # Create factor year for indexing the list in the loop
-# d_sub$Year_f <- as.factor(d_sub$Year)
-# 
-# ## TEST
-# # get a single slice or layer
-# tmp_array2 <- dlist[["2006"]]
-# # Now we want to loop through each time step, and if it is a good month save it as a raster
-# r <- raster(t(tmp_array2), xmn=min(lon), xmx=max(lon), ymn=min(lat), ymx=max(lat),
-#             crs=CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs+"))
-# r <- flip(r, direction='y')
-# plot(r)
-# ##
-# 
-# 
-# 
-# # Loop through each year and extract raster values for the condition data points
-# for(i in unique(d_sub$Year_f)) {
-#   
-#   # Subset a year
-#   tmp_slice <- dlist[[i]]
-#   
-#   # Create raster for that year (i)
-#   r <- raster(t(tmp_slice), xmn = min(lon), xmx = max(lon), ymn = min(lat), ymx = max(lat),
-#               crs = CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs+ towgs84=0,0,0"))
-#   
-#   # Flip...
-#   r <- flip(r, direction = 'y')
-#   
-#   plot(r, main = i)
-#   
-#   # Filter the same year (i) in the condition data and select only coordinates
-#   d_slice <- d_sub %>% filter(Year_f == i) %>% dplyr::select(ShootLong, ShootLat)
-#   
-#   # Make into a SpatialPoints object
-#   data_sp <- SpatialPoints(d_slice)
-#   
-#   # Extract raster value (temperature)
-#   rasValue <- raster::extract(r, data_sp) 
-#   
-#   # Now we want to plot the results of the raster extractions by plotting the condition
-#   # data points over a raster and saving it for each year.
-#   # Make the SpatialPoints object into a raster again (for pl)
-#   df <- as.data.frame(data_sp)
-#   
-#   # Add in the raster value in the df holding the coordinates for the condition data
-#   d_slice$tmp <- rasValue
-#   
-#   # Add in which year
-#   d_slice$year <- i
-#   
-#   # Create a index for the data last where we store all years (because our loop index
-#   # i is not continuous, we can't use it directly)
-#   index <- as.numeric(d_slice$year)[1] - 1992
-#   
-#   # Add each years' data in the list
-#   data_list[[index]] <- d_slice
-#   
-#   # Save to check each year is ok! First convert the raster to points for plotting
-#   # (so that we can use ggplot)
-#   map.p <- rasterToPoints(r)
-#   
-#   # Make the points a dataframe for ggplot
-#   df_rast <- data.frame(map.p)
-#   
-#   # Rename y-variable and add year 
-#   df_rast <- df_rast %>% rename("tmp" = "layer") %>% mutate(year = i)
-#   
-#   # Add each years' raster data frame in the list
-#   raster_list[[index]] <- df_rast
-#   
-#   # Make appropriate column headings
-#   colnames(df_rast) <- c("Longitude", "Latitude", "tmp")
-#   
-#   # Now make the map
-#   ggplot(data = df_rast, aes(y = Latitude, x = Longitude)) +
-#     geom_raster(aes(fill = tmp)) +
-#     geom_point(data = d_slice, aes(x = ShootLong, y = ShootLat, fill = tmp),
-#                color = "black", size = 5, shape = 21) +
-#     theme_bw() +
-#     geom_sf(data = world, inherit.aes = F, size = 0.2) +
-#     coord_sf(xlim = c(12.5, 21.5), ylim = c(54, 58)) +
-#     scale_colour_gradientn(colours = rev(heat.colors(10)),
-#                            limits = c(0, 20)) +
-#     scale_fill_gradientn(colours = rev(heat.colors(10)),
-#                          limits = c(0, 20)) +
-#     NULL
-#   
-#   ggsave(paste("figures/supp/temperature_rasters/", i,".png", sep = ""),
-#          width = 6.5, height = 6.5, dpi = 600)
-#   
-# }
-# 
-# ## TEST
-# # get a single slice or layer
-# tmp_slice <- dlist[["1997"]]
-# # Now we want to loop through each time step, and if it is a good month save it as a raster
-# r <- raster(t(tmp_slice), xmn=min(lon), xmx=max(lon), ymn=min(lat), ymx=max(lat),
-#             crs=CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs+ towgs84=0,0,0"))
-# r <- flip(r, direction='y')
-# plot(r)
-# ## 
-# 
-# 
-# # Plot data, looks like there's big inter-annual variation but a negative 
-# big_raster_dat_tmp %>% 
-#   group_by(year) %>% 
-#   drop_na(tmp) %>% 
-#   summarise(mean_tmp = mean(tmp)) %>% 
-#   mutate(year_num = as.numeric(year)) %>% 
-#   ggplot(., aes(year_num, mean_tmp)) + 
-#   geom_point(size = 2) +
-#   stat_smooth(method = "lm") +
-#   NULL
-# 
-# big_raster_dat_tmp %>% 
-#   group_by(year) %>% 
-#   drop_na(tmp) %>% 
-#   mutate(dead = ifelse(tmp < 0, "Y", "N")) %>% 
-#   filter(dead == "Y") %>% 
-#   mutate(n = n(),
-#          year_num = as.numeric(year)) %>% 
-#   ggplot(., aes(year_num, n)) + 
-#   geom_point(size = 2) +
-#   stat_smooth(method = "lm") +
-#   NULL
-# 
-# # Now add in the new oxygen column in the original data:
-# str(d_sub)
-# str(big_dat_tmp)
-# 
-# # Create an ID for matching
-# d_sub$id_tmp <- paste(d_sub$Year_f, d_sub$ShootLong, d_sub$ShootLat, sep = "_")
-# big_dat_tmp$id_tmp <- paste(big_dat_tmp$year, big_dat_tmp$ShootLong, big_dat_tmp$ShootLat, sep = "_")
-# 
-# big_dat_sub_tmp <- big_dat_tmp %>% dplyr::select(id_tmp, tmp)
-# 
-# # Remove duplicate ID (one tmp value per id)
-# big_dat_sub_tmp2 <- big_dat_sub_tmp %>% distinct(id_tmp, .keep_all = TRUE)
-# 
-# # Test if the same length (yes, they have the same ID's)
-# length(unique(big_dat_sub_tmp2$id_tmp))
-# length(unique(big_dat_sub_tmp$id_tmp))
-# 
-# # Join the data with raster-derived oxygen with the condition data (that was subset to
-# # match the years of the model output)
-# d_sub2 <- left_join(d_sub, big_dat_sub_tmp2, by = "id_tmp")
-# 
-# # Check if the subset data is the same as the filtered raw data
-# t <- dat %>% filter(Year %in% unique(d_sub2$Year))
-# 
-# str(t)
-# str(d_sub2)
-
 
 
 # H. PREPARE DATA FOR ANALYSIS =====================================================
@@ -1162,7 +938,7 @@ d <- dat %>%
               "abun_spr_st", "abun_her_st",
               "oxy_st"),
             ~(scale(.) %>% as.vector)) %>% 
-  dplyr::select(-abun_spr, -abun_her) %>% 
+  dplyr::select(-abun_spr, -abun_her) %>% # Add these back later once I get data from Olavi
   filter(Fulton_K < 3 & Fulton_K > 0.15) %>%  # Visual exploration, larger values likely data entry errors
   drop_na(oxy_st) %>% 
   ungroup()
@@ -1170,9 +946,8 @@ d <- dat %>%
 # filter(d, Fulton_K < 0.5) %>% dplyr::select(Fulton_K, length_cm, weight_g) %>% arrange(Fulton_K) %>% as.data.frame()
 # filter(d, Fulton_K > 2.5) %>% dplyr::select(Fulton_K, length_cm, weight_g) %>% arrange(Fulton_K) %>% as.data.frame()
 
-# write.csv(d, file = "data/for_analysis/mdat_cond.csv", row.names = FALSE)
+write.csv(d, file = "data/for_analysis/mdat_cond.csv", row.names = FALSE)
 
-str(d)
 
 # I. EXPLORE DATA ==================================================================
 
