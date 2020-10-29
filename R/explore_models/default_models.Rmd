@@ -35,29 +35,29 @@ In this script, I aim to find a good default model explaining spatiotemporal var
 
 
 ## Methods
-### Modeling framwork
+### Modeling framework
 In fishes, weight is typically assumed to vary log-normally around an average allometric function of length: $w=al^b$, where $w$ is weight in grams, $l$ is length in cm, $b$ is the allometric length exponent and $a$ is the condition factor in unit $g/L^b$ (Froese *et al*., 2014; Grüss *et al*., 2020). Typically this relationship is linearized by taking logs on both sides: $\operatorname{log}(w)=a+b\operatorname{log}(l)$. Le Cren's condition index is defined as the residuals from this length-weight relationship.
 
 We model this individual-level relationship with a spatiotemporal GLMM of the form:
 
 $$
-\operatorname{log}(w_{s,t}) = \alpha_0 + \alpha_mS_m + \alpha_uS_u + \omega_s + \epsilon_{s,t} + \sum^{n_k}_{k=1}\gamma_k\boldsymbol{X_k} + \beta \operatorname{log}(l)
+\operatorname{log}(w_{s,t}) = \alpha_0 + \alpha_mS_m + \alpha_uS_u + \omega_s + \epsilon_{s,t} + \sum^{n_k}_{k=1}\boldsymbol\gamma_k\boldsymbol{X_k} + \beta \operatorname{log}(l)
 $$ 
 
-where $\alpha_0$ is the female condition factor, $\alpha_m$ is the offset for males and $\alpha_u$ for unsexed individuals. $\omega_s$ and $\epsilon_{s,t}$ represent spatial and spatiotemporal random effects, respectively. $\boldsymbol{X_k}$ is a matrix of $n_k$ measured *additional* covariates and $\gamma_k$ is the effect of the $k$-th *additional* covariate. $\beta$ is the length-coefficient, corresponding to the allometric exponent. The spatial and spatiotemporal random effects are assumed to be drawn from a multivariate normal distribution:
+where $\alpha_0$ is the female condition factor, $\alpha_m$ is the offset for males and $\alpha_u$ for unsexed individuals. $\omega_s$ and $\epsilon_{s,t}$ represent spatial and spatiotemporal random effects, respectively. $\boldsymbol{X_k}$ is a matrix of $n_k$ measured *additional* covariates and $\boldsymbol\gamma_k$ is the effect of the $k$-th *additional* covariate. $\beta$ is the length-coefficient, corresponding to the allometric exponent. The spatial and spatiotemporal random effects are assumed to be drawn from a multivariate normal distribution:
 
 SA: You might want bold the vectors/matrices. e.g. https://github.com/pbs-assess/sdmTMB/blob/master/vignettes/model-description.Rmd
-
+ML: Right! Forgot about that, I did see your new model description which is great
 $$
-\omega \sim \operatorname{MVNormal}(0, \Sigma_\omega)\\
-\epsilon \sim \operatorname{MVNormal}(0, \Sigma_\epsilon).
+\boldsymbol\omega \sim \operatorname{MVNormal}(\boldsymbol0, \boldsymbol\Sigma_\omega)\\
+\boldsymbol\epsilon \sim \operatorname{MVNormal}(\boldsymbol0, \boldsymbol\Sigma_\epsilon).
 $$
 
 I also consider the spatiotemporal random effects to be drawn from a multivariate normal distribution following an AR1 process:
 
 $$
-\delta_{t=1} \sim \operatorname{MVNormal}(0, \Sigma_\epsilon)\\
-\delta_{t>1} = \phi\delta_{t-1} + \sqrt{1-\phi^2}\epsilon_t, \epsilon_t \sim \operatorname{MVNormal}(0, \Sigma_\epsilon).
+\boldsymbol\delta_{t=1} \sim \operatorname{MVNormal}(\boldsymbol0, \boldsymbol\Sigma_\epsilon)\\
+\boldsymbol\delta_{t>1} = \phi\boldsymbol\delta_{t-1} + \sqrt{1-\phi^2}\boldsymbol\epsilon_t, \boldsymbol\epsilon_t \sim \operatorname{MVNormal}(\boldsymbol0, \boldsymbol\Sigma_\epsilon).
 $$
 
 In the spatial and spatiotemporal random fields, $\Sigma_\omega$ and $\Sigma_\epsilon$ are covariance matricies, where the covariance ($\Phi(s, s')$) between spatial points $s$ and $s'$ is given by a Matérn function:
@@ -70,13 +70,16 @@ where $\tau^2$ is the spatial (marginal) variance.
 This model (first equation) can be viewed as an approximation of Le Cren's condition index (Grüss *et al*., 2020), as the log of the condition factor, i.e. $\operatorname{log}(a)$ or the constant in the allometric relationship, can be defined as: $\operatorname{log}(a) = \alpha_0 + \alpha_sS + \omega_s + \delta_{s,t} + \sum^{n_k}_{k=1}\gamma_k\boldsymbol{X_k}$. Thus, Eq. 1 is a model for a spatially and temporally varying condition factor.
 
 ### Finding a default model
-I aim to find an appropriate model structure for Eq. 1, to which I later can include and evaluate additional covariates ($\gamma_k\boldsymbol{X_k}$). To find this default model, I fit a model with only length at sex as covariates, and assume errors are Student-t distributed to account for the presence of heavy tails.
+I aim to find an appropriate model structure for Eq. 1, to which I later can include and evaluate additional covariates ($\gamma_k\boldsymbol{X_k}$). To find this default model, I fit a Student-t model (to account for the presence of heavy tails.) with only length as a covariate with different random effects (fitted with `reml = TRUE`). Then I will fit the selected model with different fixed effects: year and sex using `reml = FALSE`.
 
-I fit different versions of this model:
-
-* Fixed effect of year
+The different models are:
 * Time-varying intercept through random walk
-* Spatial trend, which is a random field representing a slope over the time variable.
+* With spatial trend (random field representing a slope over the time variable)
+* Autoregressive spatiotemporal field 
+
+Followed by:
+* Fixed effect of year
+* Fixed effect of sex
 
 These models are fit with the spatiotemporal field being independent each year or following an AR1 process.
 
@@ -104,7 +107,7 @@ The covariates are standardized to have a mean of 0 and a standard deviation of 
 library(tidyverse); theme_set(theme_classic())
 library(tidylog)
 library(viridis)
-library(sdmTMB)
+library(sdmTMB) # remotes::install_github("pbs-assess/sdmTMB")
 library(marmap)
 library(rnaturalearth)
 library(rnaturalearthdata)
@@ -119,12 +122,8 @@ Now read data:
 d <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/clean_for_analysis/mdat_cond.csv")
 
 # These should be factors...
-d <- d %>% mutate(year_f = as.factor(year), # Actually I'm modelling this as a continous variable for now
+d <- d %>% mutate(year_f = as.factor(year), 
                   sex_f = as.factor(sex))
-
-# Since I also use year as a continuous variable, I will center it to start at 1991 (start of time series)
-# (*** Not used currently, I opted for the factor effect of year instead as that lead to better convergence as in smaller max gradient. To use a continuous year variable I had to use fewer knots, and then the models without year had some issues with convergence (m3 below))
-d <- d %>% mutate(year_ct = year - 1991)
 ```
 
 Read the prediction grid:
@@ -133,12 +132,10 @@ Read the prediction grid:
 pred_grid <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/clean_for_analysis/pred_grid.csv")
 
 # SA: You likely want to work in UTMs so distance is constant with space
-# ML: I did not think so much about this, but that sounds like a good idea. Although for now I can't choose which of the two UTM zones to use... (I did change from X and Y to lon and lat to make it more clear in case I switch
-# later!)
+# ML: I did not think so much about this, but that sounds like a good idea. Although for now I can't choose which of the two UTM zones to use... (I did change from X and Y to lon and lat to make it more clear in case I switch later!)
 pred_grid <- pred_grid %>%
   mutate(ln_length_cm = log(1),
-         year_f = as.factor(year), # Using year as a continious variable in the model as there seems to be a
-         # linear decline
+         year_f = as.factor(year), 
          sex_f = "F") %>% # For now we'll predict changes in the intercept ("female condition factor")
   mutate(X = lon,
          Y = lat,
@@ -178,7 +175,7 @@ After some exploration of all models considered here, I found that ~110 knots wa
 # ML: Thanks! I did increase from 70 up to 110, but see above 
 
 spde <- make_mesh(data = d, xy_cols = c("lon", "lat"), n_knots = 110,
-                  type = c("kmeans", "cutoff", "cutoff_search"))
+                  type = "kmeans", seed = 42)
 plot(spde)
 ```
 
@@ -186,9 +183,26 @@ SA: it's using the first option here; you might try cutoff_search to find an app
 
 SA: I added barrier meshes since you started this. It looks like you might have a few islands within the mesh. I think it's totally fine if you want to ignore this since it doesn't do very much in practice and this is a pretty cutting edge approach, but it is there if you want to use it. See the example in ?add_barrier_mesh. See the references there for more details. You need to pick a ratio of how much faster the correlation decays across land than water. 0.1 or 0.2 might be reasonable values.
 
-I assume use a Student-t distribution with 3 degrees of freedom (default), because initial exploration suggest presence of heavy tails in residuals. Now, fit the models outlined above.
+ML: Interesting options! I will explore them separately I think, can report back if you'd like!
 
 SA: I just updated it so you can specify the DF: https://github.com/pbs-assess/sdmTMB/commit/ac12ae5687113627216bc2afad9cbffff1c3a849
+ML: Perfect! I assume use a Student-t distribution with 5 degrees of freedom (initial exploration suggested the default df=3 was too heavy-tailed).
+
+**To reiterate**: first we select the random structure by fitting the following models with `reml = TRUE`
+
+1) Time-varying intercept through random walk
+
+2) With spatial trend (random field representing a slope over the time variable)
+
+3) Autoregressive spatiotemporal field 
+
+
+Followed by fitting models with the following fixed effects and `reml = FALSE`:
+1) Fixed effect of year
+
+2) Fixed effect of year
+
+3) Maybe: Temperature
 
 ```{r fit Student-t spatiotemporal glmm, cache=TRUE}
 # SA: note that the degrees of freedom on the Student-t are fixed out 3 currently; we can tweak that so you could specify it if you want.
@@ -196,56 +210,46 @@ SA: I just updated it so you can specify the DF: https://github.com/pbs-assess/s
 # SA: working in log space and Student-t might be fine here, though it's possible that something like Gamma(link = "log") or lognormal might capture the mean-variance relationship better and not require the transformation.
 # ML: Ok, I see! In this case the main reason for taking the logs is transform the allometric model to a linear form, so maybe that wouldn't work
 # SA: I think the 'link' would do something similar, but do whatever is standard for this particular problem
+# Ok! I think with a glm the predicted weight would be exp(a + b*length), so the length-coefficient would not be the allometric exponent b. Log-transforming is pretty standard (Froese & Thorson, 2014), but some argue for non-linear models also (e.g. papers by Packard). I think Thorson (2015) uses an identity link, but Grüss et al (2020) use a log link function... but then they anyway use log-transformed length and weight, so I'm a little confused by that. Anyway, I'll likely stick with the log-transformation!
 
 # Model 1
-m1 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + sex_f + year_f, data = d, time = "year",
-             spde = spde, family = student(link = "identity"), ar1_fields = TRUE,
+m1 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm -1,  time_varying = ~ 1, data = d, time = "year",
+             spde = spde, family = student(link = "identity", df = 2), ar1_fields = FALSE,
              include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
-             silent = TRUE) 
-
-m1b <- run_extra_optimization(m1, nlminb_loops = 1, newton_steps = 2)
-max(m1$gradients)
-max(m1b$gradients)
-
-# Model 1.1
-m1.1 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + sex_f + year_f, data = d, time = "year",
-               spde = spde, family = student(link = "identity"), ar1_fields = FALSE,
-               include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
-               silent = TRUE) 
-
-m1.1b <- run_extra_optimization(m1.1, nlminb_loops = 0, newton_steps = 1)
-max(m1.1$gradients)
-max(m1.1b$gradients)
+             silent = TRUE, newton_steps = 1, reml = TRUE)
 
 # Model 2
-# m2 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + sex_f, time_varying = ~ 1 + sex_f,
-#              data = d, time = "year",
-#              spde = spde, family = student(link = "identity"), ar1_fields = TRUE,
-#              include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
-#              silent = TRUE)
+m2 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm, data = d, time = "year",
+             spde = spde, family = student(link = "identity", df = 2), ar1_fields = FALSE,
+             include_spatial = TRUE, spatial_trend = TRUE, spatial_only = FALSE,
+             silent = TRUE, newton_steps = 1, reml = TRUE)
+
+m2b <- sdmTMB(formula = ln_weight_g ~ ln_length_cm-1, data = d, time = "year",
+             spde = spde, family = student(link = "identity", df = 2), ar1_fields = FALSE,
+             include_spatial = TRUE, spatial_trend = TRUE, spatial_only = FALSE,
+             silent = TRUE, newton_steps = 1, reml = TRUE)
 
 # Model 3
-m3 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + sex_f, data = d, time = "year",
-             spde = spde, family = student(link = "identity"), ar1_fields = TRUE,
-             include_spatial = TRUE, spatial_trend = TRUE, spatial_only = FALSE,
-             silent = TRUE) 
+m3 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm, data = d, time = "year",
+             spde = spde, family = student(link = "identity", df = 2), ar1_fields = TRUE,
+             include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
+             silent = TRUE, newton_steps = 1, reml = TRUE) 
 
-m3b <- run_extra_optimization(m3, nlminb_loops = 0, newton_steps = 1)
-max(m3$gradients)
-max(m3b$gradients)
+print(m1)
+print(m2)
+print(m3)
 
-# Model 3.1 - spatial trend instead of AR1 spatiotemporal
-m3.1 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + sex_f, data = d, time = "year",
-               spde = spde, family = student(link = "identity"), ar1_fields = FALSE,
-               include_spatial = TRUE, spatial_trend = TRUE, spatial_only = FALSE,
-               silent = TRUE) 
+m1$tmb_params$b_j
+m2$tmb_params$b_j
 
-m3.1b <- run_extra_optimization(m3.1, nlminb_loops = 0, newton_steps = 1)
-max(m3.1$gradients)
-max(m3.1b$gradients)
+m1$tmb_random
+m2$tmb_random
+
+
 ```
 
 SA: if you always have to run extra optimization steps, you can just take it into the original fitting call (`newton_steps = 1`), which will be a bit faster since it doesn't have to run the sdreport twice.
+ML: Great! At the moment I do have to run it for all (with the fewer knots I had in the beginning this only occured for some some models). Thanks!
 
 Regarding model 2 here: I'm a bit uncertain on what model I'm actually fitting here. Since I have the sex effect, which represent the intercept when `sex="F"` and an offset when `"M"` or `"U"`, I'm guessing it would only make sense to have all those coefficients as time varying. It doesn't converge, however, and I've also tried: `ar1_fields = FALSE`. I get:
 
@@ -259,17 +263,23 @@ I then tried omitting the sex-effect and modeled only the intercept as time-vary
   `system is computationally singular: reciprocal condition number = 2.12999e-16`
   
 SA: Did you make sure to omit the intercept from at least one formula or the other: `-1` or `0`? Because if you left an intercept in both... that'll do it!
+ML: Hmm, no I didn't
+
 
 I'm proceeding with m1b, m1.1b, m3b and m3.1b though. Look at the residuals:
 ```{r extract student residuals}
 df <- d
 
-df$residuals_m1b <- residuals(m1b)
-df$residuals_m1.1b <- residuals(m1.1b)
+df$residuals_m2b <- residuals(m2b)
+
+qqnorm(df$residuals_m2b); abline(a = 0, b = 1)
+
+
+
 df$residuals_m3b <- residuals(m3b)
 df$residuals_m3.1b <- residuals(m3.1b)
 
-qqnorm(df$residuals_m1b); abline(a = 0, b = 1)
+qqnorm(df$residuals_m1); abline(a = 0, b = 1)
 qqnorm(df$residuals_m1.1b); abline(a = 0, b = 1)
 qqnorm(df$residuals_m3b); abline(a = 0, b = 1)
 qqnorm(df$residuals_m3.1b); abline(a = 0, b = 1)
@@ -278,6 +288,7 @@ qqnorm(df$residuals_m3.1b); abline(a = 0, b = 1)
 While the Student-t models looks a lot better (than the Gaussian [not shown]) they could perhaps be improved further by tweaking the df parameter (see comment above). Otherwise, they look identical to me (I am a bit surprised by that actually). I will next compare their AIC:
 
 SA: check to make sure the residuals aren't actually identical; some are pretty similar models that are really just moving the variance around to different terms
+ML: I tried plotting them against each other and they are not *exactly* on a 1:1 line, so there's some difference  
 
 ```{r extract student aic}
 AIC(m1b)
@@ -286,7 +297,9 @@ AIC(m3b)
 AIC(m3.1b)
 ```
 
-**SA: note that if the random effects change than you will want to fit the models with REML = TRUE and if the fixed effects change then you will want it at the models with REML = FALSE and you will not want to compare across models where both the fixed and random me facts change. So, I would nail down one and then the other. I think Zuur suggests getting the random effects reasonable first, obviously with semi-reasonable fixed effects.  If you really want to compare across both at once that I think you need to get into some sort of cross validation. We have that in sdmTMB_cv(), but note that you might want to think about how you are setting up the folds (if random within time is fine) and note that you may need to run many folded-tests for your answer to converge.**
+**SA: note that if the random effects change than you will want to fit the models with REML = TRUE and if the fixed effects change then you will want it at the models with REML = FALSE and you will not want to compare across models where both the fixed and random me facts change. So, I would nail down one and then the other. I think Zuur suggests getting the random effects reasonable first, obviously with semi-reasonable fixed effects. If you really want to compare across both at once that I think you need to get into some sort of cross validation. We have that in sdmTMB_cv(), but note that you might want to think about how you are setting up the folds (if random within time is fine) and note that you may need to run many folded-tests for your answer to converge.**
+
+ML: Damn, I forgot about that! I didn't plan to change fixed effects, but ofc I did that later when adding the fixed year effect... I will sort this out and start with the random effects!
 
 Model m1b, i.e. with an autoregressive spatiotemporal field and with a fixed (factor) year effect is most parsimonious and seems like a good option to proceed with now (given that I can't detect any different in the QQ plot between the alternative models).
 
@@ -307,6 +320,7 @@ m1b_se <- as.list(m1b$sd_report, "Std. Error")
 ```
 
 SA: note that since you started this I added a tidy() method. ?sdmTMB:::tidy.sdmTMB Try `tidy(m1b_est, confint = TRUE)` and `tidy(m1b_est, effects = "ran_pars", confint = TRUE).`
+ML: Great! Very hand function
 
 Strong support for it (and the AIC-selected model also had it). What about the `sex_f`-effect?
 
@@ -456,6 +470,41 @@ ggplot(p, aes(lon, lat, fill = est_non_rf2)) +
 SA: tidy() will help in the next chunk.
 
 SA: Note that I don't think these standard errors are additive like this. There may be a way to set up the formula and therefore model matrix to get these directly as parameter estimates. (-1 or 0 + and then the order the things go into the formula). If you really have to do them after the fact, then follow https://besjournals.onlinelibrary.wiley.com/doi/10.1111/j.2041-210X.2010.00012.x
+ML: That's a very interesting paper! I didn't realize it was like that... If I understand it correctly, I can't do the trick in the paper with removing the intercept, since I in addition have the categorical sex effect (and the -1 will then remove the female intercept). So, if I keep the sex-variable, I will calculate the correct standard 
+
+```{r plot fixed effects on grid, fig.width=12}
+spde <- make_mesh(data = d, xy_cols = c("lon", "lat"), n_knots = 5,
+                 type = "kmeans", seed = 42)
+m1 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + year_f, data = d,
+            spde = spde, family = student(link = "identity"), ar1_fields = FALSE,
+            include_spatial = FALSE, spatial_trend = FALSE, spatial_only = TRUE,
+            silent = TRUE)
+
+m2 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + year_f -1, data = d,
+            spde = spde, family = student(link = "identity"), ar1_fields = FALSE,
+            include_spatial = FALSE, spatial_trend = FALSE, spatial_only = TRUE,
+            silent = TRUE)
+
+m3 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + sex_f + year_f -1, data = d,
+            spde = spde, family = student(link = "identity"), ar1_fields = FALSE,
+            include_spatial = FALSE, spatial_trend = FALSE, spatial_only = TRUE,
+            silent = TRUE)
+
+m4 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + year_f + sex_f -1, data = d,
+            spde = spde, family = student(link = "identity"), ar1_fields = FALSE,
+            include_spatial = FALSE, spatial_trend = FALSE, spatial_only = TRUE,
+            silent = TRUE)
+
+print(m1) # year 1991 is intercept, can't compare s.e's of reference and contrasts directly
+print(m2) # no intercept, can compare years directly
+print(m3) # can't compare, since 1991 is still intercept and other years are contrasts (since -1 removes the female intercept)
+print(m4)
+
+test <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + year_f -1, data = d,
+            spde = spde, family = student(link = "identity", df = 5))
+```
+
+
 
 ```{r plot year intercepts}
 # A bit clumpsy way to append the intercept (year 1991, female) to the other year-effects (coefficients 5:32)
@@ -627,7 +676,7 @@ I interpret this as follows: the spatial, spatial trend and spatiotemporal varia
 
 SA: yes
 
-For the sake of comparison, I can also produce a map to look at the differences there. Here I'm using the cod model.
+For the sake of comparison, I can also produce a map to look at the differences there. Here I'm using the oxygen model.
 
 SA: you can even compare the predictions of one minus the other, but maybe that is where you were going.
 
