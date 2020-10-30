@@ -137,11 +137,20 @@ p2 <- pred_grid %>%
   coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
   geom_point(size = 0.3) +
   geom_point(data = point, aes(y = lat, x = lon), color = "red") +
-  
   NULL
 
 p1 / p2
 
+# Plot depths
+pred_grid %>%
+  filter(year == "1999") %>% 
+  mutate(deep = ifelse(depth < -70, "Y", "N")) %>% 
+  ggplot(., aes(y = lat, x = lon, color = deep)) +
+  theme_bw() +
+  geom_sf(data = world, inherit.aes = F, size = 0.2, alpha = 0) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  geom_point(size = 0.1) +
+  NULL
+
 # Save
 write.csv(pred_grid, file = "data/for_analysis/pred_grid.csv", row.names = FALSE)
-
