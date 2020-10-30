@@ -392,26 +392,27 @@ dat %>% filter(ID2 == "1991.4.SOL.H20.30.26.54.6.14.25") %>%
 
 
 # F. READ AND JOIN PELAGIC COVARIATES ==============================================
-spr <- read_xlsx("data/from_mich/Abundances_rectangles_1984-2019_corrected.xlsx",
+spr <- read_xlsx("data/BIAS/abundances_rectangles_1991-2019.xlsx",
                  sheet = 1) %>%
-  filter(Year > 1990) %>% 
   rename("StatRec" = "Rec") %>%
   mutate(StatRec = as.factor(StatRec),
          Species = "Sprat",
          abun_spr = `Age 0`+`Age 1`+`Age 2`+`Age 3`+`Age 4`+`Age 5`+`Age 6`+`Age 7`+`Age 8+`+`1+`,
          ID3 = paste(StatRec, Year, sep = ".")) # Make new ID)
   
-head(spr)
-
-her <- read_xlsx("data/from_mich/Abundances_rectangles_1984-2019_corrected.xlsx",
+her <- read_xlsx("data/BIAS/abundances_rectangles_1991-2019.xlsx",
                  sheet = 2) %>%
   as.data.frame() %>%
-  filter(Year > 1990) %>% 
   rename("StatRec" = "Rect2") %>% # This is not called Rec in the data for some reason
   mutate(StatRec = as.factor(StatRec),
          Species = "Herring",
          abun_her = `Age 0`+`Age 1`+`Age 2`+`Age 3`+`Age 4`+`Age 5`+`Age 6`+`Age 7`+`Age 8+`+`1+`,
          ID3 = paste(StatRec, Year, sep = ".")) # Make new ID
+
+# Check distribution of data
+# https://www.researchgate.net/publication/47933620_Environmental_factors_and_uncertainty_in_fisheries_management_in_the_northern_Baltic_Sea/figures?lo=1
+sort(unique(spr$SD))
+sort(unique(her$SD))
 
 # How many unique rows per ID3?
 her %>%
@@ -781,128 +782,7 @@ dat <- left_join(dat, big_dat_sub_oxy2, by = "id_oxy")
 
 # ** Temperature ===================================================================
 # Open the netCDF file
-
-# This is currently very bugged... see example below!
-# For now I hashtag it out...
-
-# ncin <- nc_open("data/NEMO_Nordic_SCOBI/dataset-reanalysis-nemo-monthlymeans_1603456082459.nc")
-# 
-# print(ncin)
-# 
-# # Get longitude and latitude
-# lon <- ncvar_get(ncin,"longitude")
-# nlon <- dim(lon)
-# head(lon)
-# 
-# lat <- ncvar_get(ncin,"latitude")
-# nlat <- dim(lat)
-# head(lat)
-# 
-# # Get time
-# time <- ncvar_get(ncin,"time")
-# time
-# 
-# tunits <- ncatt_get(ncin,"time","units")
-# nt <- dim(time)
-# nt
-# tunits
-# 
-# # Get temperature
-# dname <- "bottomT"
-# 
-# tmp_array <- ncvar_get(ncin,dname)
-# 
-# dlname <- ncatt_get(ncin,dname,"long_name")
-# dunits <- ncatt_get(ncin,dname,"units")
-# fillvalue <- ncatt_get(ncin,dname,"_FillValue")
-# dim(tmp_array)
-# 
-# # Get global attributes
-# title <- ncatt_get(ncin,0,"title")
-# institution <- ncatt_get(ncin,0,"institution")
-# datasource <- ncatt_get(ncin,0,"source")
-# references <- ncatt_get(ncin,0,"references")
-# history <- ncatt_get(ncin,0,"history")
-# Conventions <- ncatt_get(ncin,0,"Conventions")
-# 
-# # Convert time: split the time units string into fields
-# tustr <- strsplit(tunits$value, " ")
-# tdstr <- strsplit(unlist(tustr)[3], "-")
-# tmonth <- as.integer(unlist(tdstr)[2])
-# tday <- as.integer(unlist(tdstr)[3])
-# tyear <- as.integer(unlist(tdstr)[1])
-# 
-# # Here I deviate from the guide a little bit. Save this info:
-# dates <- chron(time, origin = c(tmonth, tday, tyear))
-# 
-# # Crop the date variable
-# months <- as.numeric(substr(dates, 2, 3))
-# years <- as.numeric(substr(dates, 8, 9))
-# years <- ifelse(years > 90, 1900 + years, 2000 + years)
-# 
-# # Replace netCDF fill values with NA's
-# tmp_array[tmp_array == fillvalue$value] <- NA
-# 
-# str(tmp_array)
-# 
-# tmp_array[,,318]
-# 
-# ## TEST
-# # get a single slice or layer
-# tmp_array2 <- tmp_array[,,318]
-# # Now we want to loop through each time step, and if it is a good month save it as a raster
-# r <- raster(t(tmp_array2), xmn=min(lon), xmx=max(lon), ymn=min(lat), ymx=max(lat),
-#             crs=CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs+"))
-# r <- flip(r, direction='y')
-# plot(r)
-# 
-# tmp_array2 <- tmp_array[,,50]
-# # Now we want to loop through each time step, and if it is a good month save it as a raster
-# r <- raster(t(tmp_array2), xmn=min(lon), xmx=max(lon), ymn=min(lat), ymx=max(lat),
-#             crs=CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs+"))
-# r <- flip(r, direction='y')
-# plot(r)
-# 
-# # Which one is messing up??
-# tmp_array2 <- tmp_array[,,220]
-# # Now we want to loop through each time step, and if it is a good month save it as a raster
-# r <- raster(t(tmp_array2), xmn=min(lon), xmx=max(lon), ymn=min(lat), ymx=max(lat),
-#             crs=CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs+"))
-# r <- flip(r, direction='y')
-# plot(r)
-# 
-# # Which one is messing up??
-# tmp_array2 <- tmp_array[,,221]
-# # Now we want to loop through each time step, and if it is a good month save it as a raster
-# r <- raster(t(tmp_array2), xmn=min(lon), xmx=max(lon), ymn=min(lat), ymx=max(lat),
-#             crs=CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs+"))
-# r <- flip(r, direction='y')
-# plot(r)
-# 
-# # Which one is messing up??
-# tmp_array2 <- tmp_array[,,222]
-# # Now we want to loop through each time step, and if it is a good month save it as a raster
-# r <- raster(t(tmp_array2), xmn=min(lon), xmx=max(lon), ymn=min(lat), ymx=max(lat),
-#             crs=CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs+"))
-# r <- flip(r, direction='y')
-# plot(r)
-# ##
-# 
-# 
-# # Last good
-# tmp_array1 <- tmp_array[,,220]
-# # Weird
-# tmp_array2 <- tmp_array[,,221]
-# # Wrong
-# tmp_array3 <- tmp_array[,,222]
-# 
-# str(tmp_array1)
-# str(tmp_array2)
-# str(tmp_array3)
-# 
-# head(tmp_array1)
-# head(tmp_array2)
-# head(tmp_array3)
+# This is currently very bugged... see example below in local folder!
 
 
 # H. PREPARE DATA FOR ANALYSIS =====================================================
@@ -911,14 +791,15 @@ d <- dat %>%
          "lat" = "ShootLat",
          "lon" = "ShootLong",
          "year" = "Year",
-         "sex" = "Sex") %>% 
+         "sex" = "Sex",
+         "depth" = "Depth") %>% 
   mutate(ln_weight_g = log(weight_g),
          ln_length_cm = log(length_cm),
          Fulton_K = weight_g/(0.01*length_cm^3), # cod-specific, from FishBase
          sex = ifelse(sex == -9, "U", sex),
          sex = as.factor(sex),
          year_f = as.factor(year)) %>% 
-  dplyr::select(year, year_f, StatRec, lat, lon, sex, length_cm, weight_g, ln_length_cm, ln_weight_g,
+  dplyr::select(year, year_f, depth, StatRec, lat, lon, sex, length_cm, weight_g, ln_length_cm, ln_weight_g,
                 Quarter, Fulton_K,
                 cpue_cod_above_30cm, cpue_cod_below_30cm, cpue_cod, 
                 cpue_fle_above_20cm, cpue_fle_below_20cm, cpue_fle,
@@ -938,144 +819,12 @@ d <- dat %>%
               "abun_spr_st", "abun_her_st",
               "oxy_st"),
             ~(scale(.) %>% as.vector)) %>% 
-  dplyr::select(-abun_spr, -abun_her) %>% # Add these back later once I get data from Olavi
   filter(Fulton_K < 3 & Fulton_K > 0.15) %>%  # Visual exploration, larger values likely data entry errors
   drop_na(oxy_st) %>% 
+  filter(depth > 0) %>% 
   ungroup()
 
 # filter(d, Fulton_K < 0.5) %>% dplyr::select(Fulton_K, length_cm, weight_g) %>% arrange(Fulton_K) %>% as.data.frame()
 # filter(d, Fulton_K > 2.5) %>% dplyr::select(Fulton_K, length_cm, weight_g) %>% arrange(Fulton_K) %>% as.data.frame()
 
 write.csv(d, file = "data/for_analysis/mdat_cond.csv", row.names = FALSE)
-
-
-# I. EXPLORE DATA ==================================================================
-
-# - Do the exploratory plots like this:
-#   - https://dpananos.github.io/posts/2018/04/blog-post-8/
-
-# Plot condition over time
-ggplot(d, aes(year, Fulton_K)) +
-  geom_point(shape = 21, fill = "black", color = "white") + 
-  stat_smooth(method = "lm") + 
-  ggtitle("condition over time") 
-
-# Plot condition vs oxygen
-ggplot(d, aes(oxy_st, Fulton_K)) +
-  geom_point(shape = 21, fill = "black", color = "white") + 
-  stat_smooth(method = "lm") + 
-  ggtitle("condition vs oxygen") 
-
-# Check if slope changes by year
-# https://community.rstudio.com/t/extract-slopes-by-group-broom-dplyr/2751/7
-d %>% 
-  split(.$year) %>% 
-  purrr::map(~lm(Fulton_K ~ oxy_st, data = .x)) %>% 
-  purrr::map_df(broom::tidy, .id = 'year') %>%
-  filter(term == 'oxy_st') %>% 
-  mutate(ci_low = estimate + -1.96*std.error,
-         ci_high = estimate + 1.96*std.error) %>% 
-  mutate(year_n = as.numeric(year)) %>%
-  ggplot(., aes(year_n, estimate)) +
-  stat_smooth(method = "lm", color = "black") + 
-  geom_point() + 
-#  geom_errorbar(aes(ymin = ci_low, ymax = ci_high, x = year_n)) + 
-  NULL
-
-# Plot condition vs herring
-ggplot(d, aes(abun_her_st, Fulton_K)) +
-  geom_point(shape = 21, fill = "black", color = "white") + 
-  stat_smooth(method = "lm") + 
-  ggtitle("condition vs herring") 
-
-# Plot condition vs sprat
-ggplot(d, aes(abun_spr_st, Fulton_K)) +
-  geom_point(shape = 21, fill = "black", color = "white") + 
-  stat_smooth(method = "lm") + 
-  ggtitle("condition vs sprat")
-
-# Plot condition vs cod and flounder - average over rectangle
-d %>% 
-  group_by(StatRec, year_f) %>% 
-  mutate(Fulton_K_mean = mean(Fulton_K),
-         cpue_cod_st_mean = mean(cpue_cod_st)) %>% 
-  ungroup() %>% 
-  distinct(.keep_all = TRUE) %>% 
-  ggplot(., aes(cpue_cod_st_mean, Fulton_K_mean)) +
-  geom_point(shape = 21, fill = "black", color = "white") + 
-  stat_smooth(method = "lm") +
-  facet_wrap(~year_f, scales = "free") + 
-  ggtitle("cpue_cod_st_mean rect") + 
-  NULL
-
-# Plot condition vs cod and flounder
-d %>% 
-  group_by(StatRec, year_f) %>% 
-  mutate(Fulton_K_mean = mean(Fulton_K),
-         cpue_fle_st_mean = mean(cpue_fle_st)) %>% 
-  ungroup() %>% 
-  distinct(.keep_all = TRUE) %>% 
-  ggplot(., aes(cpue_fle_st_mean, Fulton_K_mean)) +
-  geom_point(shape = 21, fill = "black", color = "white") + 
-  stat_smooth(method = "lm") +
-  facet_wrap(~year_f, scales = "free") + 
-  ggtitle("cpue_fle_st_mean rect") + 
-#  coord_cartesian(xlim = c(0, 11)) +
-  NULL
-
-
-p1 <- ggplot(d, aes(cpue_cod_above_30cm_st, Fulton_K)) +
-  geom_point(shape = 21, fill = "black", color = "white") + 
-  stat_smooth() +
-  ggtitle("cod_above_30cm") + 
-  #coord_cartesian(xlim = c(0.001, 5)) +
-  NULL
-
-p2 <- ggplot(d, aes(cpue_cod_below_30cm_st, Fulton_K)) +
-  geom_point(shape = 21, fill = "black", color = "white") + 
-  stat_smooth() +
-  ggtitle("cod_below_30cm") + 
-  #coord_cartesian(xlim = c(0.001, 5)) +
-  NULL
-
-p3 <- ggplot(d, aes(cpue_cod_st, Fulton_K)) +
-  geom_point(shape = 21, fill = "black", color = "white") + 
-  stat_smooth() +
-  ggtitle("cpue_cod_st") + 
-  #coord_cartesian(xlim = c(0.001, 5)) +
-  NULL
-
-p4 <- ggplot(d, aes(cpue_fle_above_20cm_st, Fulton_K)) +
-  geom_point(shape = 21, fill = "black", color = "white") + 
-  stat_smooth() +
-  ggtitle("cpue_fle_above_20cm_st") + 
-  #coord_cartesian(xlim = c(0, 5)) +
-  NULL
-
-p5 <- ggplot(d, aes(cpue_fle_below_20cm_st, Fulton_K)) +
-  geom_point(shape = 21, fill = "black", color = "white") + 
-  stat_smooth() +
-  ggtitle("cpue_fle_below_20cm_st") + 
-  #coord_cartesian(xlim = c(0.001, 5)) +
-  NULL
-
-p6 <- ggplot(d, aes(cpue_fle_st, Fulton_K)) +
-  geom_point(shape = 21, fill = "black", color = "white") + 
-  stat_smooth() +
-  ggtitle("cpue_fle_st") + 
-  #coord_cartesian(xlim = c(0.001, 5)) + 
-  NULL
-
-(p1 + p2 + p3)/(p4 + p5 + p6)
-
-# Do this for all classes... and maybe years?
-ggplot(d, aes((cpue_fle_st+cpue_cod_st), Fulton_K)) +
-  geom_point(shape = 21, fill = "black", color = "white") + 
-  stat_smooth() +
-  xlim(-2, 12) +
-  NULL
-
-ggplot(d, aes((cpue_fle_below_20cm_st+cpue_cod_below_30cm_st), Fulton_K)) +
-  geom_point(shape = 21, fill = "black", color = "white") + 
-  stat_smooth() +
-  NULL
