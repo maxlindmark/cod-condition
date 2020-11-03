@@ -805,7 +805,8 @@ d <- dat %>%
                 cpue_fle_above_20cm, cpue_fle_below_20cm, cpue_fle,
                 abun_spr, abun_her,
                 oxy) %>% 
-  mutate(cpue_cod_above_30cm_st = cpue_cod_above_30cm,
+  mutate(depth_st = depth,
+         cpue_cod_above_30cm_st = cpue_cod_above_30cm,
          cpue_cod_below_30cm_st = cpue_cod_below_30cm,
          cpue_cod_st = cpue_cod,
          cpue_fle_above_20cm_st = cpue_fle_above_20cm,
@@ -814,7 +815,8 @@ d <- dat %>%
          abun_spr_st = abun_spr,
          abun_her_st = abun_her,
          oxy_st = oxy) %>% 
-  mutate_at(c("cpue_cod_above_30cm_st", "cpue_cod_below_30cm_st", "cpue_cod_st",
+  mutate_at(c("depth_st",
+              "cpue_cod_above_30cm_st", "cpue_cod_below_30cm_st", "cpue_cod_st",
               "cpue_fle_above_20cm_st", "cpue_fle_below_20cm_st", "cpue_fle_st",
               "abun_spr_st", "abun_her_st",
               "oxy_st"),
