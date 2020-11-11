@@ -61,7 +61,7 @@ pred_grid <- expand.grid(
 
 # Then remove Kattegatt...
 pred_grid <- pred_grid %>% 
-  mutate(kattegatt = ifelse(lat > 55.5 & lon < 14, "Y", "N")) %>% 
+  mutate(kattegatt = ifelse(lat > 56 & lon < 14, "Y", "N")) %>% 
   filter(kattegatt == "N")
 
 # Remove additional areas
