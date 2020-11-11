@@ -177,7 +177,7 @@ dat <- dat %>% drop_na(ShootLat)
 # select only quarter 4 and remove non-valid hauls
 dat <- dat %>% 
   filter(ShootLat < 58) %>% 
-  mutate(kattegatt = ifelse(ShootLat > 55.5 & ShootLong < 14, "Y", "N")) %>% 
+  mutate(kattegatt = ifelse(ShootLat > 56 & ShootLong < 14, "Y", "N")) %>% 
   filter(kattegatt == "N",
          Quarter == 4,
          HaulVal == "V") %>% 
@@ -202,7 +202,7 @@ cov_dat <- read.csv("data/DATRAS_cpue_length_haul/CPUE per length per haul per h
 # Remove hauls from outside the study area and select only quarter 4
 cov_dat <- cov_dat %>% 
   filter(ShootLat < 58) %>% 
-  mutate(kattegatt = ifelse(ShootLat > 55.5 & ShootLong < 14, "Y", "N")) %>% 
+  mutate(kattegatt = ifelse(ShootLat > 56 & ShootLong < 14, "Y", "N")) %>% 
   filter(kattegatt == "N") %>% 
   filter(Quarter == 4) %>% 
   dplyr::select(-kattegatt)
