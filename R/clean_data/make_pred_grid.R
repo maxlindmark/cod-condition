@@ -16,7 +16,7 @@
 #rm(list = ls())
 
 # Load libraries, install if needed
-library(tidyverse)
+library(tidyverse); theme_set(theme_classic())
 library(tidylog)
 library(viridis)
 library(mapdata)
@@ -127,7 +127,6 @@ p1 <- pred_grid %>%
   geom_point(size = 0.3) +
   geom_point(data = dat, aes(y = lat, x = lon),
              inherit.aes = FALSE, shape = 3, color = "grey") + 
-  theme_bw() +
   geom_sf(data = world, inherit.aes = F, size = 0.2) +
   coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
   NULL
@@ -137,7 +136,6 @@ point <- data.frame(lon = 14, lat = 57)
 p2 <- pred_grid %>%
   filter(year == "1999") %>% 
   ggplot(., aes(y = lat, x = lon)) +
-  theme_bw() +
   geom_sf(data = world, inherit.aes = F, size = 0.2, alpha = 0) +
   coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
   geom_point(size = 0.3) +
@@ -151,7 +149,6 @@ pred_grid %>%
   filter(year == "1999") %>% 
   mutate(deep = ifelse(depth < -70, "Y", "N")) %>% 
   ggplot(., aes(y = lat, x = lon, color = deep)) +
-  theme_bw() +
   geom_sf(data = world, inherit.aes = F, size = 0.2, alpha = 0) +
   coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
   geom_point(size = 0.1) +
@@ -331,7 +328,6 @@ pred_grid2 <- dplyr::bind_rows(data_list)
 
 # Plot and compare with rasters
 ggplot(pred_grid2, aes(lon, lat, color = oxy)) + 
-  theme_bw() +
   facet_wrap(~year) +
   scale_colour_gradientn(colours = rev(terrain.colors(10)),
                          limits = c(-200, 400)) +
@@ -344,24 +340,26 @@ ggplot(pred_grid2, aes(lon, lat, color = oxy)) +
 pred_grid2$year <- as.integer(pred_grid2$year)
 
 p <- ggplot(pred_grid2, aes(lon, lat, fill = oxy)) + 
-  theme_bw() +
+  geom_raster() +
   scale_fill_gradientn(colours = rev(terrain.colors(10)),
-                         limits = c(-200, 400)) +
-  geom_sf(data = world, inherit.aes = F, size = 0.2, alpha = 0) +
-  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
-  geom_raster()
-
+                         limits = c(min(drop_na(pred_grid2)$oxy), max(drop_na(pred_grid2)$oxy))) +
+  geom_sf(data = world, inherit.aes = F, size = 1, alpha = 0) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax))
+  
 # Here comes the gganimate specific bits
-anim <- p + labs(title = 'Year: {frame_time}') +
+anim <- p +
+  labs(title = 'Year: {frame_time}') +
   transition_time(year) +
   ease_aes('linear') +
+  theme_classic(base_size = 24)
   NULL
 
-animate(anim, height = 1000, width = 1000)
+animate(anim, height = 1200, width = 1200)
 
 anim_save(filename = "output/gif/oxy.gif")
 
+# Left join in the depth again
+pred_grid2 <- left_join(pred_grid2, pred_grid)
+
 # Save
-write.csv(pred_grid2, file = "data/for_analysis/pred_grid2.csv", row.names = FALSE)
-
-
+#write.csv(pred_grid2, file = "data/for_analysis/pred_grid2.csv", row.names = FALSE)
