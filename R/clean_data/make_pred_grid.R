@@ -6,9 +6,9 @@
 # 
 # A. Load libraries
 # 
-# B. Prepare data
-# 
-# C. Fit models
+# B. Basic grid
+#
+# C. Grid with oxygen
 # 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -27,6 +27,11 @@ library(marmap)
 library(rnaturalearth)
 library(rnaturalearthdata)
 library(patchwork)
+library(ncdf4)
+library(chron)
+library(gganimate)
+library(gifski)
+library(png)
 
 # Print package versions
 # sessionInfo()
@@ -36,7 +41,7 @@ library(patchwork)
 # Rcpp_1.0.5.1    
 
 
-# B. PREPARE DATA ==================================================================
+# B. BASIC GRID ====================================================================
 # Get the boundaries
 dat <- read.csv("data/for_analysis/mdat_cond.csv") 
 
@@ -153,4 +158,210 @@ pred_grid %>%
   NULL
 
 # Save
-write.csv(pred_grid, file = "data/for_analysis/pred_grid.csv", row.names = FALSE)
+#write.csv(pred_grid, file = "data/for_analysis/pred_grid.csv", row.names = FALSE)
+
+
+# C. GRID WITH OXYGEN ==============================================================
+pred_grid2 <- pred_grid
+
+# Loop through each year and extract the oxygen levels
+# Downloaded from here: https://resources.marine.copernicus.eu/?option=com_csw&view=details&product_id=BALTICSEA_REANALYSIS_BIO_003_012
+# Extract raster points: https://gisday.wordpress.com/2014/03/24/extract-raster-values-from-points-using-r/comment-page-1/
+# https://rpubs.com/boyerag/297592
+# https://pjbartlein.github.io/REarthSysSci/netCDF.html#get-a-variable
+# Open the netCDF file
+ncin <- nc_open("data/NEMO_Nordic_SCOBI/dataset-reanalysis-scobi-monthlymeans_1603971995426.nc")
+
+print(ncin)
+
+# Get longitude and latitude
+lon <- ncvar_get(ncin,"longitude")
+nlon <- dim(lon)
+head(lon)
+
+lat <- ncvar_get(ncin,"latitude")
+nlat <- dim(lat)
+head(lat)
+
+# Get time
+time <- ncvar_get(ncin,"time")
+time
+
+tunits <- ncatt_get(ncin,"time","units")
+nt <- dim(time)
+nt
+tunits
+
+# Get oxygen
+dname <- "o2b"
+
+oxy_array <- ncvar_get(ncin,dname)
+dlname <- ncatt_get(ncin,dname,"long_name")
+dunits <- ncatt_get(ncin,dname,"units")
+fillvalue <- ncatt_get(ncin,dname,"_FillValue")
+dim(oxy_array)
+
+# Get global attributes
+title <- ncatt_get(ncin,0,"title")
+institution <- ncatt_get(ncin,0,"institution")
+datasource <- ncatt_get(ncin,0,"source")
+references <- ncatt_get(ncin,0,"references")
+history <- ncatt_get(ncin,0,"history")
+Conventions <- ncatt_get(ncin,0,"Conventions")
+
+# Convert time: split the time units string into fields
+tustr <- strsplit(tunits$value, " ")
+tdstr <- strsplit(unlist(tustr)[3], "-")
+tmonth <- as.integer(unlist(tdstr)[2])
+tday <- as.integer(unlist(tdstr)[3])
+tyear <- as.integer(unlist(tdstr)[1])
+
+# Here I deviate from the guide a little bit. Save this info:
+dates <- chron(time, origin = c(tmonth, tday, tyear))
+
+# Crop the date variable
+months <- as.numeric(substr(dates, 2, 3))
+years <- as.numeric(substr(dates, 8, 9))
+years <- ifelse(years > 90, 1900 + years, 2000 + years)
+
+# Replace netCDF fill values with NA's
+oxy_array[oxy_array == fillvalue$value] <- NA
+
+# We only use Quarter 4 in this analysis, so now we want to loop through each time step,
+# and if it is a good month save it as a raster.
+# First get the index of months that correspond to Q4
+months
+
+index_keep <- which(months > 9)
+
+oxy_q4 <- oxy_array[, , index_keep]
+
+months_keep <- months[index_keep]
+
+years_keep <- years[index_keep]
+
+# Now we have an array with only Q4 data...
+# We need to now calculate the average within a year.
+# Get a sequence that takes every third value between 1: number of months (length)
+loop_seq <- seq(1, dim(oxy_q4)[3], by = 3)
+
+# Create objects that will hold data
+dlist <- list()
+oxy_10 <- c()
+oxy_11 <- c()
+oxy_12 <- c()
+oxy_ave <- c()
+
+# Loop through the vector sequence with every third value, then take the average of
+# three consecutive months (i.e. q4)
+for(i in loop_seq) {
+  
+  oxy_10 <- oxy_q4[, , (i)]
+  oxy_11 <- oxy_q4[, , (i + 1)]
+  oxy_12 <- oxy_q4[, , (i + 2)]
+  
+  oxy_ave <- (oxy_10 + oxy_11 + oxy_12) / 3
+  
+  list_pos <- ((i/3) - (1/3)) + 1 # to get index 1:n(years)
+  
+  dlist[[list_pos]] <- oxy_ave
+  
+}
+
+# Now name the lists with the year:
+names(dlist) <- unique(years_keep)
+
+# Now I need to make a loop where I extract the raster value for each year...
+
+# Filter years in the condition data frame to only have the years I have oxygen for
+d_sub_oxy <- pred_grid2 %>% filter(year %in% names(dlist)) %>% droplevels()
+
+# Create data holding object
+data_list <- list()
+
+# Create factor year for indexing the list in the loop
+d_sub_oxy$year_f <- as.factor(d_sub_oxy$year)
+
+# Loop through each year and extract raster values for the condition data points
+for(i in unique(d_sub_oxy$year_f)) {
+  
+  # Subset a year
+  oxy_slice <- dlist[[i]]
+  
+  # Create raster for that year (i)
+  r <- raster(t(oxy_slice), xmn = min(lon), xmx = max(lon), ymn = min(lat), ymx = max(lat),
+              crs = CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs+ towgs84=0,0,0"))
+  
+  # Flip...
+  r <- flip(r, direction = 'y')
+  
+  plot(r, main = i)
+  
+  # Filter the same year (i) in the condition data and select only coordinates
+  d_slice <- d_sub_oxy %>% filter(year_f == i) %>% dplyr::select(lon, lat)
+  
+  # Make into a SpatialPoints object
+  data_sp <- SpatialPoints(d_slice)
+  
+  # Extract raster value (oxygen)
+  rasValue <- raster::extract(r, data_sp)
+  
+  # Now we want to plot the results of the raster extractions by plotting the condition
+  # data points over a raster and saving it for each year.
+  # Make the SpatialPoints object into a raster again (for pl)
+  df <- as.data.frame(data_sp)
+  
+  # Add in the raster value in the df holding the coordinates for the condition data
+  d_slice$oxy <- rasValue
+  
+  # Add in which year
+  d_slice$year <- i
+  
+  # Create a index for the data last where we store all years (because our loop index
+  # i is not continuous, we can't use it directly)
+  index <- as.numeric(d_slice$year)[1] - 1992
+  
+  # Add each years' data in the list
+  data_list[[index]] <- d_slice
+  
+}
+
+# Now create a data frame from the list of all annual values
+pred_grid2 <- dplyr::bind_rows(data_list)
+
+# Plot and compare with rasters
+ggplot(pred_grid2, aes(lon, lat, color = oxy)) + 
+  theme_bw() +
+  facet_wrap(~year) +
+  scale_colour_gradientn(colours = rev(terrain.colors(10)),
+                         limits = c(-200, 400)) +
+  geom_sf(data = world, inherit.aes = F, size = 0.2, alpha = 0) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  geom_point(size = 0.1) +
+  NULL
+  
+# Animation
+pred_grid2$year <- as.integer(pred_grid2$year)
+
+p <- ggplot(pred_grid2, aes(lon, lat, fill = oxy)) + 
+  theme_bw() +
+  scale_fill_gradientn(colours = rev(terrain.colors(10)),
+                         limits = c(-200, 400)) +
+  geom_sf(data = world, inherit.aes = F, size = 0.2, alpha = 0) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  geom_raster()
+
+# Here comes the gganimate specific bits
+anim <- p + labs(title = 'Year: {frame_time}') +
+  transition_time(year) +
+  ease_aes('linear') +
+  NULL
+
+animate(anim, height = 1000, width = 1000)
+
+anim_save(filename = "output/gif/oxy.gif")
+
+# Save
+write.csv(pred_grid2, file = "data/for_analysis/pred_grid2.csv", row.names = FALSE)
+
+
