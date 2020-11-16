@@ -96,7 +96,7 @@ head(water_dat)
 # Now we need to remove areas that haven't been sampled due to being too deep
 # To that by extracting depths of the pred grid
 # https://gis.stackexchange.com/questions/242941/extracting-values-from-raster-to-get-elevation-values-in-r
-baltic_sea <- getNOAA.bathy(lon1 = xmin, lon2 = xmax, lat1 = ymin, lat2 = ymax, resolution = 15)
+baltic_sea <- getNOAA.bathy(lon1 = xmin, lon2 = xmax, lat1 = ymin, lat2 = ymax, resolution = 1)
 
 plot(baltic_sea, image = TRUE)
 scaleBathy(baltic_sea, deg = 2, x = "bottomleft", inset = 5)
@@ -111,6 +111,8 @@ sp <- get.depth(baltic_sea, latlong[, 1:2], locator = FALSE)
 
 df <- sp
 
+df$depth <- df$depth*-1
+
 # Now make a new grid. Can't use expand grid
 pred_grid <- data.frame(lon = rep(df$lon, length(unique(dat$year))),
                         lat = rep(df$lat, length(unique(dat$year))),
@@ -122,7 +124,7 @@ world <- ne_countries(scale = "medium", returnclass = "sf")
 
 p1 <- pred_grid %>%
   filter(year == "1999") %>% 
-  mutate(deep = ifelse(depth < -135, "Y", "N")) %>% 
+  mutate(deep = ifelse(depth > 135, "Y", "N")) %>% 
   ggplot(., aes(y = lat, x = lon, color = deep)) +
   geom_point(size = 0.3) +
   geom_point(data = dat, aes(y = lat, x = lon),
@@ -147,16 +149,58 @@ p1 / p2
 # Plot depths
 pred_grid %>%
   filter(year == "1999") %>% 
-  mutate(deep = ifelse(depth < -70, "Y", "N")) %>% 
+  mutate(deep = ifelse(depth > 70, "Y", "N")) %>% 
   ggplot(., aes(y = lat, x = lon, color = deep)) +
   geom_sf(data = world, inherit.aes = F, size = 0.2, alpha = 0) +
   coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
   geom_point(size = 0.1) +
   NULL
 
+# Now see how well it matches depth in data
+model_df <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cond.csv")
+
+latlong2 <- model_df %>% dplyr::select(lon, lat)
+
+data2 <- SpatialPoints(latlong2)
+
+plot(baltic_sea, image = TRUE)
+scaleBathy(baltic_sea, deg = 2, x = "bottomleft", inset = 5)
+plot(data2, pch = 16, col = "red", add = TRUE)
+
+sp2 <- get.depth(baltic_sea, latlong2[, 1:2], locator = FALSE)
+
+df2 <- sp2
+
+df2$depth <- df2$depth*-1
+
+df2 <- df2 %>% rename("depth_raster" = "depth")
+
+df2$depth_bits <- model_df$depth
+
+ggplot(df2, aes(depth_raster, depth_bits)) +
+  geom_point() + 
+  geom_abline(color = "red")
+
+df2 %>% 
+  mutate(resid = depth_raster - depth_bits) %>% 
+  ggplot(., aes(resid)) +
+  geom_histogram()
+  
+df2 %>% 
+  mutate(resid = depth_raster - depth_bits) %>% 
+  ggplot(., aes(depth_bits, resid)) +
+  geom_point()
+
+# Plot on map
+df2 %>% 
+  mutate(resid = depth_raster - depth_bits) %>% 
+  ggplot(., aes(lon, lat, color = resid)) +
+  geom_point() +
+  scale_color_gradient2(midpoint = 0)
+
+
 # Save
 #write.csv(pred_grid, file = "data/for_analysis/pred_grid.csv", row.names = FALSE)
-
 
 # C. GRID WITH OXYGEN ==============================================================
 pred_grid2 <- pred_grid
@@ -349,10 +393,9 @@ p <- ggplot(pred_grid2, aes(lon, lat, fill = oxy)) +
 # Here comes the gganimate specific bits
 anim <- p +
   labs(title = 'Year: {frame_time}') +
-  transition_time(year) +
+  transition_time(as.integer(year)) +
   ease_aes('linear') +
   theme_classic(base_size = 24)
-  NULL
 
 animate(anim, height = 1200, width = 1200)
 
