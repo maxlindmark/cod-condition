@@ -42,17 +42,18 @@ We model this individual-level relationship with a spatiotemporal GLMM of the fo
 $$
 \operatorname{log}(w_{s,t}) = \alpha_t + \boldsymbol\omega_s + \boldsymbol\epsilon_{s,t} + \sum^{n_k}_{k=1}\boldsymbol\gamma_k\boldsymbol{X_k} + \beta \operatorname{log}(l)
 $$ 
+<!-- SA: add the observation model; Student-t? -->
 
 where $\alpha_t$ is a time-varying intercept:
 
 $$
-\alpha_t \sim \operatorname{Normal}(\gamma_{t-1}, \sigma^2_\gamma).
+\alpha_t \sim \operatorname{Normal}(\alpha_{t-1}, \sigma^2_\gamma).
 $$
 $\boldsymbol\omega_s$ and $\boldsymbol\epsilon_{s,t}$ represent spatial and spatiotemporal random effects, respectively. $\boldsymbol{X_k}$ is a matrix of $n_k$ measured *additional* covariates and $\boldsymbol\gamma_k$ is the effect of the $k$-th *additional* covariate. $\beta$ is the length-coefficient, corresponding to the allometric exponent. The spatial, spatial trend and spatiotemporal random effects are assumed to be drawn from a multivariate normal distribution:
 
 $$
 \boldsymbol\omega \sim \operatorname{MVNormal}(\boldsymbol0, \boldsymbol\Sigma_\omega)\\
-\boldsymbol\epsilon \sim \operatorname{MVNormal}(\boldsymbol0, \boldsymbol\Sigma_\epsilon).
+\boldsymbol\epsilon_t \sim \operatorname{MVNormal}(\boldsymbol0, \boldsymbol\Sigma_\epsilon).
 $$
 
 We also consider the spatiotemporal random effects to be drawn from a multivariate normal distribution following an AR1 process:
@@ -276,14 +277,18 @@ plot(df$residuals_m1 ~ df$residuals_m2)
 
 We can also check the AR1 parameter
 
+<!-- SA: the plogis stuff isn't needed now that I've fixed the argument to `conf.int` (not my choice to add the dot! The choice of the broom package.) -->
+
 ```{r check AR1 estimate}
-tidy(m2, effects = "ran_pars", confint = TRUE)
+tidy(m2, effects = "ran_pars", conf.int = TRUE)
 # Transform back to -1 to 1 scale
 2 * plogis(tidy(m2, effects = "ran_pars", confint = TRUE)$estimate[5]) - 1
-2 * plogis(tidy(m2, effects = "ran_pars", confint = TRUE)$estimate[5] + c(-2, 2) * tidy(m2, effects = "ran_pars", confint = TRUE)$std.error[5]) - 1
+2 * plogis(tidy(m2, effects = "ran_pars", confint = TRUE)$estimate[5] + c(-2, 2) * tidy(m2, effects = "ran_pars", conf.int = TRUE)$std.error[5]) - 1
 ```
 
 The AR1 estimate is quite large and its confidence interval does not overlap 0, which indicates we should keep it like that (FYI when we set `spatial_trend = TRUE`, the AR1 correlation parameter becomes very small!). We can also Compare their AICs:
+
+<!-- SA: Yes, most likely on or the other -->
 
 ```{r extract student aic}
 AIC(m1)
@@ -306,6 +311,8 @@ ggplot(df, aes(ln_length_cm, residuals_m2)) +
 ```
 
 They look a little bit funny at small lengths (and small predicted weights). I think that's because a) the small ones are quite rare and b) data are in cm size-classes (a bit coarse for a ~5 cm fish, hence many are assigned the same length). Besides that I do not think they are too troublesome.
+
+<!-- SA: Yeah, agreed. Also try adding `alpha = something` and maybe add a `geom_smooth`-->
 
 Check the residuals on a map:
 
@@ -339,7 +346,7 @@ p <- predict(mdef, newdata = pred_grid)
 p <- p %>% mutate(est2 = ifelse(depth < -130, NA, est), # prediction (fixed + random)
                   eps_st2 = ifelse(depth < -130, NA, epsilon_st), # spatiotemporal effects
                   omega_s2 = ifelse(depth < -130, NA, omega_s), # spatial random effect
-                  est_non_rf2 = ifelse(depth < -130, NA, est_non_rf)) # spatial trend
+                  est_non_rf2 = ifelse(depth < -130, NA, est_non_rf)) # fixed effects + random walk (everything not a random field)
 ```
 
 Plot the predicted condition with fixed and random effects:
@@ -423,6 +430,8 @@ year_effects %>%
 ```
 
 The random walk model estimates slightly higher and less variable condition, and there seems to be a kind of plateau starting in ~2003-2004 following a more steep annual decline.
+
+<!-- SA: is it actually generally high? I see it higher and lower. This is very cool though. -->
 
 Now we want to refit the same model with two of the additional fixed effects outlined above, to exemplify the suggested approach.
 
@@ -543,11 +552,21 @@ Not surprisingly perhaps, the model predictions differ mostly in areas with low 
 knitr::include_graphics("/Users/maxlindmark/Desktop/1999.png")
 ```
 
+<!--
+SA: there's a bit more in the HTML version; make sure this is right:
+
+```
+pred_grid_oxy2$oxy_st <- (pred_grid_oxy2$oxy - mean(pred_grid_oxy2$oxy)) / sd(pred_grid_oxy2$oxy)
+poxy2 <- predict(moxy, newdata = pred_grid_oxy2)
+```
+
+SA: for this to be right, you would have had to standardize `oxy_st` in the fitted data by the mean and SD of the prediction grid O2. -->
+
 # Now don't predict at the average oxygen levels, but extract each value of of the prediction grid from the rasters... Do that in the other scrip though
 
 ## References
 
-Anderson, S.C., Keppel, E.A., Edwards, A.M. 2019. A reproducible data synopsis for over 100 species of British Columbia groundfsh. *DFO Can. Sci. Advis. Sec. Res. Doc*. 2019/041. vii + 321 p.
+Anderson, S.C., Keppel, E.A., Edwards, A.M. 2019. A reproducible data synopsis for over 100 species of British Columbia groundfish. *DFO Can. Sci. Advis. Sec. Res. Doc*. 2019/041. vii + 321 p.
 
 Casini, M., Käll, F., Hansson, M., Plikshs, M., Baranova, T., Karlsson, O., Lundström, K., Neuenfeldt, S., Gårdmark, A. and Hjelm, J., 2016. Hypoxic areas, density-dependence and food limitation drive the body condition of a heavily exploited marine fish predator. *Royal Society open science*, 3(10), p.160416.
 
