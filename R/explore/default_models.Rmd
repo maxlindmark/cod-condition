@@ -288,7 +288,7 @@ tidy(m2, effects = "ran_pars", conf.int = TRUE)
 
 The AR1 estimate is quite large and its confidence interval does not overlap 0, which indicates we should keep it like that (FYI when we set `spatial_trend = TRUE`, the AR1 correlation parameter becomes very small!). We can also Compare their AICs:
 
-<!-- SA: Yes, most likely on or the other -->
+<!-- SA: Yes, most likely one or the other -->
 
 ```{r extract student aic}
 AIC(m1)
