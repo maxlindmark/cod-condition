@@ -45,6 +45,7 @@ library(sdmTMB) # remotes::install_github("pbs-assess/sdmTMB")
 library(marmap)
 library(rnaturalearth)
 library(rnaturalearthdata)
+library(mapplots)
 
 # Print package versions
 # sessionInfo()
@@ -408,6 +409,39 @@ her <- read_xlsx("data/BIAS/abundances_rectangles_1991-2019.xlsx",
          Species = "Herring",
          abun_her = `Age 0`+`Age 1`+`Age 2`+`Age 3`+`Age 4`+`Age 5`+`Age 6`+`Age 7`+`Age 8+`+`1+`,
          ID3 = paste(StatRec, Year, sep = ".")) # Make new ID
+
+# Plot distribution over time in the whole area
+spr %>%
+  mutate(lon = ices.rect(spr$StatRec)$lon) %>% 
+  mutate(lat = ices.rect(spr$StatRec)$lat) %>% 
+  filter(! StatRec %in% c("41G0", "41G1", "41G2", "42G1", "42G2", "43G1", "43G2", "44G0", "44G1")) %>% 
+  ggplot(., aes(lon, lat, color = log(abun_spr))) +
+  geom_point(size = 2.5, shape = 15) +
+  scale_color_viridis() +
+  facet_wrap(~ Year, ncol = 5) + 
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  labs(x = "lon", y = "lat") + 
+  ggtitle("log(abun_spr)") +
+  NULL
+
+ggsave("figures/supp/spr_distribution.png", width = 10, height = 10, dpi = 600)
+
+her %>%
+  mutate(lon = ices.rect(her$StatRec)$lon) %>% 
+  mutate(lat = ices.rect(her$StatRec)$lat) %>% 
+  filter(! StatRec %in% c("41G0", "41G1", "41G2", "42G1", "42G2", "43G1", "43G2", "44G0", "44G1")) %>% 
+  ggplot(., aes(lon, lat, color = log(abun_her))) +
+  geom_point(size = 2.5, shape = 15) +
+  scale_color_viridis() +
+  facet_wrap(~ Year, ncol = 5) + 
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  labs(x = "lon", y = "lat") + 
+  ggtitle("log(abun_her)") +
+  NULL
+
+ggsave("figures/supp/her_distribution.png", width = 10, height = 10, dpi = 600)
 
 # Check distribution of data
 # https://www.researchgate.net/publication/47933620_Environmental_factors_and_uncertainty_in_fisheries_management_in_the_northern_Baltic_Sea/figures?lo=1
@@ -829,4 +863,73 @@ d <- dat %>%
 # filter(d, Fulton_K < 0.5) %>% dplyr::select(Fulton_K, length_cm, weight_g) %>% arrange(Fulton_K) %>% as.data.frame()
 # filter(d, Fulton_K > 2.5) %>% dplyr::select(Fulton_K, length_cm, weight_g) %>% arrange(Fulton_K) %>% as.data.frame()
 
-write.csv(d, file = "data/for_analysis/mdat_cond.csv", row.names = FALSE)
+# Now add in ICES-subdivisions
+# [1] "37G0" "37G1" "37G2" "37G3" "37G4" "37G5" "37G6" "37G8" "37G9" "38G0" "38G1" "38G2" "38G3" "38G4"
+# [15] "38G5" "38G6" "38G7" "38G8" "38G9" "39F9" "39G0" "39G1" "39G2" "39G3" "39G4" "39G5" "39G6" "39G7"
+# [29] "39G8" "39G9" "39H0" "40F9" "40G0" "40G1" "40G2" "40G4" "40G5" "40G6" "40G7" "40G8" "40G9" "40H0"
+# [43] "41G6" "41G7" "41G8" "41G9" "41H0" "42G6" "42G7" "42H0" "43G6" "43G7" "43G8" "43G9" "43H0" "43H1"
+# [57] "44G8" "44G9" "44H0" "44H1"
+
+d2 <- d %>% 
+  mutate(SD = NA) %>% 
+  mutate(SD = ifelse(StatRec %in% c("37G0", "37G1",
+                                    "38G0", "38G1", 
+                                    "39F9", "39G0", "39G1",
+                                    "40F9", "40G0", "40G1"), "sd22", SD)) %>% 
+  mutate(SD = ifelse(StatRec == "40G2", "sd23", SD)) %>% 
+  mutate(SD = ifelse(StatRec %in% c("37G2", "37G3", "37G4",
+                                    "38G1", "38G2", "38G3", "38G4", 
+                                    "39G1", "39G2", "39G3", "39G4",
+                                    "40G1"), "sd24", SD)) %>% 
+  mutate(SD = ifelse(StatRec %in% c("40G4",
+                                    "37G5", "37G6", "37G7",
+                                    "38G5", "38G6", "38G7",
+                                    "39G5", "39G6", "39G7",
+                                    "40G5", "40G6", "40G7",
+                                    "41G5", "41G6", "41G7"), "sd25", SD)) %>% 
+  mutate(SD = ifelse(StatRec %in% c("37G8", "37G9", "37H0",
+                                    "38G8", "38G9", "38H0",
+                                    "39G8", "39G9", "39H0",
+                                    "40G8", "40G9", "40H0",
+                                    "41G8", "41G9", "41H0"), "sd26", SD)) %>% 
+  mutate(SD = ifelse(StatRec %in% c("42G6", "42G7",
+                                    "43G6", "43G7",
+                                    "44G6", "44G7", "44G8"), "sd27", SD)) %>% 
+  mutate(SD = ifelse(StatRec %in% c("42G8", "42G9", "42H0", "42H1", "42H2",
+                                    "43G8", "43G9", "43H0", "43H1", "43H2",
+                                    "44G8", "44G9", "44H0", "44H1", "44H2"), "sd28", SD))
+           
+unique(is.na(d2$SD))
+
+# Plot spatial distribution of samples by SD
+d2 %>%
+  ggplot(., aes(y = lat, x = lon, color = SD)) +
+  geom_point(size = 1) +
+  theme_bw() +
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(8, 25), ylim = c(54, 60)) +
+  #scale_color_brewer(palette = "Dark2")
+  NULL
+
+# Calculate average cod, flounder, sprat and herring biomasses by SD:
+d2 <- d2 %>% 
+  group_by(SD, year) %>% 
+  mutate(oxy_sd = mean(oxy),
+         abun_her_sd = mean(abun_her),
+         abun_spr_sd = mean(abun_spr),
+         cpue_cod_sd = mean(cpue_cod),
+         cpue_fle_sd = mean(cpue_fle)) %>% 
+  ungroup() %>% 
+  mutate(oxy_sd_st = oxy_sd, 
+         abun_her_sd_st = abun_her_sd,
+         abun_spr_sd_st = abun_spr_sd,
+         cpue_cod_sd_st = cpue_cod_sd,
+         cpue_fle_sd_st = cpue_fle_sd) %>%
+  mutate_at(c("oxy_sd_st", "abun_her_sd_st", "abun_spr_sd_st", "cpue_cod_sd_st", "cpue_fle_sd_st"),
+            ~(scale(.) %>% as.vector)) 
+
+write.csv(d2, file = "data/for_analysis/mdat_cond.csv", row.names = FALSE)
+
+
+
+
