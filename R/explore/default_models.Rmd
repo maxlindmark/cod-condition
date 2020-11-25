@@ -7,7 +7,7 @@ output:
     df_print: paged
   pdf_document: default
 editor_options: 
-  chunk_output_type: inline
+  chunk_output_type: console
 ---
 
 ```{r setup, include = FALSE, cache=FALSE}
@@ -21,8 +21,7 @@ knitr::opts_chunk$set(
 ```
 
 ## Background
-
-The body condition and growth of Eastern Baltic cod (*Gadus morhua*) has declined steadily since the regime shift in the early 1990's to a degree that the stock now can be viewed as collapsed. Several hypotheses have been put forward, including changes in overlap with pelagic prey (e.g. Gårdmark *et al*, 2015), reduced oxygen levels decreasing habitat quality and leading to contraction of the distributional range thus increasing competition (e.g. Casini *et al*, 2016), increased competition for benthic food sources with flounder (Orio *et al*, 2019; Orio 2020) as well as increased intraspecific competition and growth bottlenecks within the population (Svedäng & Hornborg, 2014).
+The body condition and growth of Eastern Baltic cod (*Gadus morhua*) has declined steadily since the regime shift in the early 1990's to a degree that the stock now can be viewed as collapsed. Several hypotheses have been put forward, including changes in overlap with pelagic prey or lack of appropriately sized prey (e.g. Casini *et al*, 2016; Gårdmark *et al*, 2015), reduced oxygen levels decreasing habitat quality and leading to contraction of the distributional range thus increasing competition (e.g. Casini *et al*, 2016), increased competition for benthic food sources with flounder (Orio *et al*, 2019; Orio 2020) as well as increased intraspecific competition and growth bottlenecks within the population (Svedäng & Hornborg, 2014).
 
 However, these potential explanatory variables have not been evaluated on a fine spatial scale, even though factors such as competition, food availability and local habitat quality likely occur on fine spatial scales. Instead, averages over larger spatial areas (e.g. ICES subdivisions) have been the variables in previous comparisons. Moreover, the ability of each of proposed explanatory variable (linked to a hypothesis) to explain variation in the condition of cod has not been compared in a standardized way, and has not been contrasted to residual spatial and spatiotemporal variation.
 
@@ -40,7 +39,7 @@ In fishes, weight is typically assumed to vary log-normally around an average al
 We model this individual-level relationship with a spatiotemporal GLMM of the form (minor deviations from this model are discussed in this document):
 
 $$
-\operatorname{log}(w_{s,t}) = \alpha_t + \boldsymbol\omega_s + \boldsymbol\epsilon_{s,t} + \sum^{n_k}_{k=1}\boldsymbol\gamma_k\boldsymbol{X_k} + \beta \operatorname{log}(l)
+\operatorname{log}(w_{s,t}) = \alpha_t + \beta_ddepth + \boldsymbol\omega_s + \boldsymbol\epsilon_{s,t} + \sum^{n_k}_{k=1}\boldsymbol\gamma_k\boldsymbol{X_k} + \beta \operatorname{log}(l)
 $$ 
 
 where $\alpha_t$ is a time-varying intercept:
@@ -48,7 +47,8 @@ where $\alpha_t$ is a time-varying intercept:
 $$
 \alpha_t \sim \operatorname{Normal}(\gamma_{t-1}, \sigma^2_\gamma).
 $$
-$\boldsymbol\omega_s$ and $\boldsymbol\epsilon_{s,t}$ represent spatial and spatiotemporal random effects, respectively. $\boldsymbol{X_k}$ is a matrix of $n_k$ measured *additional* covariates and $\boldsymbol\gamma_k$ is the effect of the $k$-th *additional* covariate. $\beta$ is the length-coefficient, corresponding to the allometric exponent. The spatial, spatial trend and spatiotemporal random effects are assumed to be drawn from a multivariate normal distribution:
+
+$\beta_d$ is the coefficient for $depth$, $\boldsymbol\omega_s$ and $\boldsymbol\epsilon_{s,t}$ represent spatial and spatiotemporal random effects, respectively. $\boldsymbol{X_k}$ is a matrix of $n_k$ measured *additional* covariates and $\boldsymbol\gamma_k$ is the effect of the $k$-th *additional* covariate. $\beta$ is the length-coefficient, corresponding to the allometric exponent $b$. The spatial and spatiotemporal random effects are assumed to be drawn from a multivariate normal distribution:
 
 $$
 \boldsymbol\omega \sim \operatorname{MVNormal}(\boldsymbol0, \boldsymbol\Sigma_\omega)\\
@@ -74,7 +74,7 @@ This model (first equation) can be viewed as an approximation of Le Cren's condi
 ### Finding a default model
 The basic model structure above was determined after exploring different options, including different distributions, different degrees of freedom in the Student-t distribution, spatial trends, year as factor effects and # of knots (not shown here), and also based on the ecological question. For instance, depth is included to test if density variables have interactive effects with depth, which to extent is a proxy for benthic production (more on that in the model comparison script!). We no longer include sex as a covariate, and this is mainly because the predicted difference between males and females is very small (difference in the third decimal), and that un-sexed individuals are not in between the two estimates as would be expected but smaller. 
 
-Therefore, in this script we will mostly focus on different ways to model temporal changes (time varying intercept, year as factor or spatial trends), as well as comparing the support for autoregressive vs independent spatiotemporal fields. 
+Therefore, in this script we will mostly focus on different ways to model temporal changes (time varying intercept, year as factor or spatial trends), as well as comparing the support for autoregressive vs independent spatiotemporal fields and the inclusion of depth and how that affects other components of the model (mainly oxygen and spatial random fields).
 
 After that we proceed with a final model and exemplify how models with additional covariates that are hypothesized to drive variation in the condition factor can be fitted.
 
@@ -87,10 +87,10 @@ The covariates we currently consider are (see repo readme for sources):
 
 * **CPUE of cod**: Abundance CPUE by length group, currently >30cm, ≤30 cm or total
 * **CPUE of flounder**: Abundance CPUE by length group, currently >20cm, ≤20 cm or total
-* **Oxygen concentration**. NEMO-Nordic-SCOBI model output
-* **Abundance of sprat**. Abundance CPUE by age (currently all pooled) per ICES rectangle
-* **Abundance of herring**. Abundance CPUE by age (currently all pooled) per ICES rectangle
-* **Maybe**: temperature as a base-covariate through its effect on growth, metabolism, digestion etc.
+* **Oxygen concentration**: NEMO-Nordic-SCOBI model output
+* **Abundance of sprat**: Abundance CPUE by age (currently all pooled) per ICES rectangle
+* **Abundance of herring**: Abundance CPUE by age (currently all pooled) per ICES rectangle
+* **Maybe**: Temperature as a base-covariate through its effect on growth, metabolism, digestion etc.
 
 The covariates are standardized to have a mean of 0 and a standard deviation of 1, to allow for direct comparison with the spatial and spatiotemporal standard deviation, following Thorson (2015) and Grüss *et al* (2020).
 
@@ -105,6 +105,10 @@ library(marmap)
 library(rnaturalearth)
 library(rnaturalearthdata)
 library(sf)
+library(gganimate)
+library(gifski)
+library(png)
+library(qwraps2) # To load entire cache in interactive r session, do: qwraps2::lazyload_cache_dir(path = "R/explore/default_models_cache/html")
 
 # For adding maps to plots
 world <- ne_countries(scale = "medium", returnclass = "sf")
@@ -117,17 +121,34 @@ Now read data:
 
 ```{r read and process data, message=FALSE, warning=FALSE}
 d <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cond.csv")
+
+d$year <- as.integer(d$year)
 ```
 
-Read the prediction grid:
+Read the prediction grids:
 
 ```{r read and process prediction grid, message=FALSE, warning=FALSE}
 pred_grid <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid.csv")
 
 pred_grid <- pred_grid %>%
-  mutate(ln_length_cm = log(1)) %>% # For now we'll predict changes in the intercept ("female condition factor")
-  mutate(X = lon, Y = lat) %>% 
+  mutate(ln_length_cm = log(1)) %>% # For now we'll predict changes in the intercept ("condition factor")
+  mutate(X = lon,
+         Y = lat,
+         year = as.integer(year),
+         depth_st = 0) %>% # In this prediction grid I keep depth at its mean, below I have a more realistic prediction grid
   filter(year %in% c(unique(d$year)))
+
+# And now read in pred_grid2 which has oxygen values at location and time and depth:
+pred_grid2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid2.csv")
+
+pred_grid2 <- pred_grid2 %>%
+  mutate(ln_length_cm = log(1)) %>% # For now we'll predict changes in the intercept ("condition factor")
+  mutate(X = lon, Y = lat, year = as.integer(year)) %>% 
+  filter(year %in% c(unique(d$year))) %>% 
+  mutate(depth_st = depth,
+         oxy_st = oxy) %>% 
+  mutate_at(c("depth_st", "oxy_st"),
+            ~(scale(.) %>% as.vector))
 ```
 
 We can now plot the Fulton K condition factor to get a glimpse of what we might expect (but in the main model we use Le Cren's condition index).
@@ -138,10 +159,8 @@ We can now plot the Fulton K condition factor to get a glimpse of what we might 
 ggplot(d, aes(Fulton_K)) + geom_histogram()
 
 # Plot "Fulton K" in space and time 
-# It's a little bit difficult to see because we have many extreme (high condition index) observations
-# Will filter here because of that
 d %>% 
-  filter(Fulton_K < 2) %>% 
+  filter(Fulton_K < 2) %>% # remove the extremes for now
   ggplot(., aes(lon, lat, color = Fulton_K)) + 
   geom_point(size = 1) + 
   facet_wrap(~ year, ncol = 5) +
@@ -150,11 +169,11 @@ d %>%
   coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax))
 ```
 
-Ok, there's a clear temporal development in condition and the spatial coverage of data varies by year (fewer data in the beginning of the time series).
+There is a clear temporal development in condition and the spatial coverage of data varies by year (fewer data in the beginning of the time series).
 
 ## Find the default model
 ### Define spde mesh
-In earlier versions we used this: `spde <- make_mesh(data = d, xy_cols = c("lon", "lat"), n_knots = 110, type = "kmeans", seed = 42)`. But now we have even more islands in the data since I'm using also the western Baltic Sea, so we will use the `add_barrier_mesh` to include an island effect (following the example function). Note this also means we can increase the # of knots before hitting convergence issues (how much varies from model to model though!)
+In earlier versions we used this: `spde <- make_mesh(data = d, xy_cols = c("lon", "lat"), n_knots = 110, type = "kmeans", seed = 42)`. But now we have even more islands in the data since I am using also the western Baltic Sea, so we will use the `add_barrier_mesh` to include an island effect (following the example function). Note this also means we can increase the # of knots before hitting convergence issues (how much varies from model to model though!)
 
 ```{r make barrier spde mesh, results='hide', cache=TRUE, message=FALSE}
 # Crop the polygon for plotting and efficiency:
@@ -181,18 +200,18 @@ ggplot(baltic_coast) +
 surv_coords <- st_coordinates(survey)
 
 spde <- make_mesh(d, xy_cols = c("lon", "lat"),
-                  n_knots = 120, type = "kmeans", seed = 42)
+                  n_knots = 200, type = "kmeans", seed = 42)
 plot(spde)
 
 # Add on the barrier mesh component:
 bspde <- add_barrier_mesh(
-  spde, baltic_coast, range_fraction = 0.1,
+  spde, baltic_coast, range_fraction = 0.2,
   proj_scaling = 1, plot = TRUE
 )
 
 # In the above, the grey dots are the centre of triangles that are in the
 # ocean. The red crosses are centres of triangles that are over land. The
-# spatial range will be assumed to be 0.1 (`range_fraction`) over land compared
+# spatial range will be assumed to be 0.2 (`range_fraction`) over land compared
 # to over water.
 
 # We can make a more advanced plot if we want:
@@ -219,8 +238,8 @@ m1 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + -1, time_varying = ~1, data 
 We can also consider the following models, with a spatial trend (to capture the larger decline in condition in the western Baltic), or the simple approach with a year factor instead of a random walk.
 
 ```{r potential models, cache=TRUE}
-# extra: spatial fields
-m_sfields <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + -1, data = d, time = "year",
+# extra: spatial trends
+m_trends <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + -1, data = d, time = "year",
                     spde = bspde, family = student(link = "identity", df = 2), ar1_fields = FALSE,
                     include_spatial = TRUE, spatial_trend = TRUE, spatial_only = FALSE,
                     silent = TRUE, newton_steps = 1, reml = TRUE)
@@ -235,12 +254,12 @@ m_year <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + factor(year) -1, data = 
 We will compare the fixed year effect further down with the random walk estimates, and here we will just show the spatial trend prediction: 
 
 ```{r plot spatial trends on grid, fig.width=12, message=FALSE}
-p_fields <- predict(m_sfields, newdata = pred_grid)
+p_trends <- predict(m_trends, newdata = pred_grid)
 
 # Replace too-deep predictions with NA
-p_fields <- p_fields %>% mutate(zeta_s2 = ifelse(depth < -130, NA, zeta_s)) # spatial trend
+p_trends <- p_trends %>% mutate(zeta_s2 = ifelse(depth > 120, NA, zeta_s)) # spatial trend
 
-ggplot(filter(p_fields, year == 2000), aes(lon, lat, fill = zeta_s2)) +
+ggplot(filter(p_trends, year == 2000), aes(lon, lat, fill = zeta_s2)) +
   geom_raster() +
   scale_fill_viridis_c() + 
   geom_sf(data = world, inherit.aes = F, size = 0.2) +
@@ -299,13 +318,17 @@ df$pred_m2 <- pred_m2$est
 qqnorm(df$residuals_m2); abline(a = 0, b = 1)
 
 ggplot(df, aes(pred_m2, residuals_m2)) +
-  geom_point(shape = 21, fill = "black", color = "white")
+  geom_point(alpha = 0.1, color = "grey20") + 
+  geom_abline(color = "red", slope = 0, linetype = 2) +
+  geom_smooth()
 
 ggplot(df, aes(ln_length_cm, residuals_m2)) +
-  geom_point(shape = 21, fill = "black", color = "white")
+  geom_point(alpha = 0.1, color = "grey20") + 
+  geom_abline(color = "red", slope = 0, linetype = 2) +
+  geom_smooth()
 ```
 
-They look a little bit funny at small lengths (and small predicted weights). I think that's because a) the small ones are quite rare and b) data are in cm size-classes (a bit coarse for a ~5 cm fish, hence many are assigned the same length). Besides that I do not think they are too troublesome.
+They look a little bit funny at small lengths (and small predicted weights), and overall there seems to be a peak in the middle of the predicted data (and ln_length_cm). I think that is because a) the small ones are quite rare and b) data are in cm size-classes (a bit coarse for a ~5 cm fish, hence many are assigned the same length). I do not have a good feeling for why there would be a peak in the relationship though.
 
 Check the residuals on a map:
 
@@ -318,8 +341,15 @@ ggplot(df, aes(lon, lat, colour = residuals_m2)) +
 
 Maybe some clustering remains... But overall OK I think!
 
-Now that we have random structure, I will refit it with `reml=FALSE`, because from now on we will only change and compare models with different fixed effects:
+Now that we have random structure, I will refit it with `reml=FALSE`, because from now on we will only change and compare models with different fixed effects. For the base model, we can consider depth. Depth is an interesting variable, because in the eastern Baltic sea where we have a stronger decline in condition, it is also deeper. Deep areas are generally low in oxygen, but also shallow areas can be that. However, in the eastern Baltic sea, there are no benthic prey for cod besides *Saduria entomon*, and they do not occupy deep areas (Gogina *et al.*, 2020). and because saduria no not live in the western Baltic sea, we could not include that as a variable directly but would instead have to use a proxy for many different benthic species. Hence, depth can in the whole study area be seen as a proxy for availability of benthic food. It also means that we can see later if there are interactions between density of cod and/or flounder and depth, indicating that the degree of competition changes over a depth gradient. First, plot the relationship between oxygen and depth, to make sure they are not too correlated:
 
+```{r depth vs oxygen, cache=TRUE}
+ggplot(d, aes(depth_st, oxy_st)) + 
+  geom_point() + 
+  annotate("text", label = paste("correlation coefficient = ", round(cor(d$oxy_st, d$depth_st), digits = 2), sep = ""), x = -Inf, y = -Inf, hjust = -0.1, vjust = -1)  
+```
+
+Now refit the default model with `reml=FALSE`:
 ```{r def model with ML, cache=TRUE}
 # Model 2 with ML
 mdef <- sdmTMB(formula = ln_weight_g ~ ln_length_cm -1, time_varying = ~1, data = d, time = "year",
@@ -328,18 +358,32 @@ mdef <- sdmTMB(formula = ln_weight_g ~ ln_length_cm -1, time_varying = ~1, data 
                silent = TRUE, newton_steps = 1, reml = FALSE)
 ```
 
-### Plot predictions
+And compare that with a model with depth as a covariate:
 
-Now we can predict and plot estimates using all fixed and random effects on pre-made grid. This grid is created by doing an `expand.grid` over the survey range, then filtering out areas that are actually in the ocean using ICES shapefiles. Lastly some areas are too deep for sampling (-135 m). There's a depth column in the prediction grad and we can make those predictions NA so it's clear they are different from e.g. land and islands (and so that the color gradient isn't going too far because of the extreme predictions at these depths).
+```{r def model + depth with ML, cache=TRUE}
+# Model 2 with ML
+mdef2 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st -1, time_varying = ~1, data = d, time = "year",
+                spde = bspde, family = student(link = "identity", df = 2), ar1_fields = TRUE,
+                include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
+                silent = TRUE, newton_steps = 1, reml = FALSE)
+```
+
+Compare the models using AIC:
+```{r AIC depth or not, cache=TRUE}
+AIC(mdef, mdef2)
+```
+
+### Plot predictions
+Now we can predict and plot estimates using all fixed and random effects on pre-made grid. This grid is created by doing an `expand.grid` over the survey range, then filtering out areas that are actually in the ocean using ICES shapefiles. Lastly some areas are too deep for sampling (-135 m). There is a depth column in the prediction grad and we can make those predictions NA so it is clear they are different from e.g. land and islands (and so that the color gradient is not going too far because of the extreme predictions at these depths).
 
 ```{r predict on grid, message=FALSE}
-p <- predict(mdef, newdata = pred_grid)
+p <- predict(mdef2, newdata = pred_grid)
 
 # Replace too-deep predictions with NA
-p <- p %>% mutate(est2 = ifelse(depth < -130, NA, est), # prediction (fixed + random)
-                  eps_st2 = ifelse(depth < -130, NA, epsilon_st), # spatiotemporal effects
-                  omega_s2 = ifelse(depth < -130, NA, omega_s), # spatial random effect
-                  est_non_rf2 = ifelse(depth < -130, NA, est_non_rf)) # spatial trend
+p <- p %>% mutate(est2 = ifelse(depth > 120, NA, est), # prediction (fixed + random)
+                  eps_st2 = ifelse(depth > 120, NA, epsilon_st), # spatiotemporal effects
+                  omega_s2 = ifelse(depth > 120, NA, omega_s), # spatial random effect
+                  est_non_rf2 = ifelse(depth > 120, NA, est_non_rf)) # spatial trend
 ```
 
 Plot the predicted condition with fixed and random effects:
@@ -377,20 +421,20 @@ ggplot(filter(p, year == 2000), aes(lon, lat, fill = omega_s2)) +
   coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
   ggtitle("Spatial random effects")
 ```
-The spatial random field seems to largely follow depth (except in the most western part which is shallow but relatively low oxygen), which makes sense since it's constant across years and reflects e.g. oxygen concentration and overall habitat quality (deep areas are even anoxic).
+The spatial random field seems to largely follow depth (except in the most western part which is shallow but relatively low oxygen), which makes sense since it is constant across years and reflects e.g. oxygen concentration and overall habitat quality (deep areas are even anoxic).
 
 Lastly, we can extract and plot the annual estimates, and compare them with the model where year is a factor (note that one is fitted with restricted maximum likelihood whereas the default model is now fitted with maximum likelihood):
 
 ```{r additional models,cache=TRUE,message=FALSE}
 # Fit m1 with reml=FALSE
-m_yearb <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + factor(year) -1, data = d, time = "year",
+m_yearb <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st + factor(year) -1, data = d, time = "year",
                   spde = bspde, family = student(link = "identity", df = 2), ar1_fields = FALSE,
                   include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
                   silent = TRUE, newton_steps = 1, reml = FALSE)
 
-# In the factor models, these are fixed effects and can be extracted with the tidy-function. This is for females.
+# In the factor models, these are fixed effects and can be extracted with the tidy-function.
 m_year_fixed <- tidy(m_yearb, effects = "fixed", conf.int = TRUE) %>%
-  filter(!term %in% c("ln_length_cm")) %>% 
+  filter(!term %in% c("ln_length_cm", "depth_st")) %>% 
   mutate(Model = "Factor year",
          Year = unique(m_yearb$data$year))
 
@@ -398,11 +442,11 @@ m_year_fixed <- tidy(m_yearb, effects = "fixed", conf.int = TRUE) %>%
 m_rw <- m_year_fixed
 m_rw <- m_rw %>%
   mutate(Model = "Random walk",
-         estimate = as.list(mdef$sd_report, "Estimate")$b_rw_t,
-         std.error = as.list(mdef$sd_report, "Std. Error")$b_rw_t,
+         estimate = as.list(mdef2$sd_report, "Estimate")$b_rw_t,
+         std.error = as.list(mdef2$sd_report, "Std. Error")$b_rw_t,
          conf.low = estimate - 1.96*std.error,
          conf.high = estimate + 1.96*std.error,
-         Year = unique(mdef$data$year))
+         Year = unique(mdef2$data$year))
 
 year_effects <- bind_rows(m_year_fixed, m_rw) 
 
@@ -418,74 +462,100 @@ year_effects %>%
         legend.position = c(0.8, 0.8)) +
   scale_color_brewer(palette = "Dark2") +
   scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
-  labs(x = "Year", y = "Average log female condition") +
+  labs(x = "Year", y = "log(alpha)") +
   NULL
 ```
 
-The random walk model estimates slightly higher and less variable condition, and there seems to be a kind of plateau starting in ~2003-2004 following a more steep annual decline.
+The random walk model estimates slightly higher and less variable condition, and there seems to be a kind of plateau starting in 2004 following a more steep annual decline.
 
 Now we want to refit the same model with two of the additional fixed effects outlined above, to exemplify the suggested approach.
 
 ## Add covariates to default model
-Here is an example of how the importance of additional covariates can be evaluated. To keep it simple we here contrast only two covariates (cod and oxygen). The rest of this analysis (i.e. with all covariates) will be done in different rmarkdown file. 
+Here is an example of how the importance of additional covariates can be evaluated. To keep it simple we use one oxygen, modelled as a linear effect and with a spline because there might be a threshold effect of it on condition. The rest of this analysis (i.e. with all covariates) will be done in different rmarkdown file. 
 
 ```{r spatiotemporal glmm with covariates, cache=TRUE}
-# Fit model with cod cpue as covariate
-mcod <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + cpue_cod_st -1, time_varying = ~1,
+# Fit model with oxygen concentration as covariate
+moxy <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st + oxy_st -1, time_varying = ~1,
                data = d, time = "year", spde = bspde, family = student(link = "identity", df = 2),
                ar1_fields = TRUE, include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
                silent = TRUE, newton_steps = 1, reml = FALSE)
 
-# And one with oxygen concentration as covariate
-moxy <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + oxy_st -1, time_varying = ~1,
-               data = d, time = "year", spde = bspde, family = student(link = "identity", df = 2),
-               ar1_fields = TRUE, include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
-               silent = TRUE, newton_steps = 1, reml = FALSE)
+# And one with oxygen modeled as a spline 
+moxy_gam <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st + s(oxy_st, k = 3) -1, time_varying = ~1,
+                   data = d, time = "year", spde = bspde, family = student(link = "identity", df = 2),
+                   ar1_fields = TRUE, include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
+                   silent = TRUE, newton_steps = 1, reml = FALSE)
 
 # Check the models
-print(mcod)
 print(moxy)
+print(moxy_gam)
 ```
 
 Check the new fixed effect estimates and their confidence interval:
 
 ```{r check new fixed effects}
-tidy(mcod, conf.int = TRUE)
 tidy(moxy, conf.int = TRUE)
+tidy(moxy_gam, conf.int = TRUE)
 ```
 
-Now compare the models using AIC:
+Plot marginal effects:
+ 
+```{r marginal effects, fig.width=12, cache=TRUE}
+# Prepare prediction data frame
+nd_oxy <- data.frame(oxy_st = seq(min(d$oxy_st), max(d$oxy_st), length.out = 100))
+nd_oxy$year <- 2003L
+nd_oxy$depth_st <- 0
+nd_oxy$ln_length_cm <- 0
+
+# Predict from linear oxygen model
+p_margin_oxy <- predict(moxy, newdata = nd_oxy, se_fit = TRUE, re_form = NA)
+
+# Predict from spline model
+p_margin_oxy_gam <- predict(moxy_gam, newdata = nd_oxy, se_fit = TRUE, re_form = NA)
+
+# Plot together:
+oxy_preds <- bind_rows(mutate(p_margin_oxy, model = "linear"),
+                       mutate(p_margin_oxy_gam, model = "gam"))
+
+ggplot(oxy_preds, aes(oxy_st, est,
+  ymin = est - 1.96 * est_se, ymax = est + 1.96 * est_se, fill = model, color = model)) +
+  geom_ribbon(alpha = 0.4) + geom_line() +
+  scale_color_brewer(palette = "Set1") +
+  scale_fill_brewer(palette = "Set1") +
+  theme(legend.position = c(0.1, 0.9))
+```
+
+Does not look like a very strong support for a spline here. We can also compare their AICs:
 
 ```{r model comparison with AIC}
-AIC(mdef)
-AIC(mcod)
+AIC(mdef2)
 AIC(moxy)
+AIC(moxy_gam)
 ```
 
-The model with oxygen has the lowest AIC, and the coefficient for oxygen seems significant (unlike the cod coefficient). Now let's look more closely at the our estimates, specifically comparing the standard deviation of spatial, spatial trend and spatiotemporal variation with our coefficients for the standardized variables:
+Now look more closely at the our estimates, specifically comparing the standard deviation of spatial and spatiotemporal variation with our coefficients for the standardized variables:
 
 ```{r extract sds of random fields, message=FALSE}
-# SA: Note that I know sdreport sigma_E and sigma_O in log space as well to get intervals with standard errors calculated in log space
-# Extract random and fixed coefficients from the cod model, bind rows
-mcod_est <- bind_rows(tidy(mcod, effects = "ran_par", conf.int = TRUE) %>%
-                        filter(term %in% c("sigma_O", "sigma_E")),
-                      tidy(mcod, effects = "fixed", conf.int = TRUE) %>%
-                        filter(term %in% c("cpue_cod_st"))) %>% 
-  mutate(model = "cod model")
-
-# ... oxygen model
-moxy_est <- bind_rows(tidy(mcod, effects = "ran_par", conf.int = TRUE) %>%
+# Extract random and fixed coefficients from the oxygen model, bind rows
+moxy_est <- bind_rows(tidy(moxy, effects = "ran_par", conf.int = TRUE) %>%
                         filter(term %in% c("sigma_O", "sigma_E")),
                       tidy(moxy, effects = "fixed", conf.int = TRUE) %>%
-                        filter(term %in% c("oxy_st"))) %>% 
+                        filter(term %in% c("oxy_st", "depth_st"))) %>% 
   mutate(model = "oxygen model\n(AIC selected)")
 
 # ... And the default model
-mdef_est <- tidy(mdef, effects = "ran_par", conf.int = TRUE) %>%
-                        filter(term %in% c("sigma_O", "sigma_E")) %>% 
+mdef2_est <- bind_rows(tidy(mdef2, effects = "ran_par", conf.int = TRUE) %>%
+                        filter(term %in% c("sigma_O", "sigma_E")),
+                      tidy(mdef2, effects = "fixed", conf.int = TRUE) %>%
+                        filter(term %in% c("depth_st"))) %>% 
   mutate(model = "default model")
 
-coef_df <- bind_rows(mdef_est, mcod_est, moxy_est) 
+# ... And the default model without depth
+mdef_est <- tidy(mdef, effects = "ran_par", conf.int = TRUE) %>%
+  filter(term %in% c("sigma_O", "sigma_E")) %>% 
+  mutate(model = "default model no depth")
+
+coef_df <- bind_rows(moxy_est, mdef2_est, mdef_est) 
 dodge <- position_dodge(width = 0.3)
 
 ggplot(coef_df, aes(term, estimate, color = model, group = model)) + 
@@ -496,11 +566,9 @@ ggplot(coef_df, aes(term, estimate, color = model, group = model)) +
   ggtitle("Spatial and spatiotemporal variation vs covariates")
 ```
 
-I interpret this as follows: the spatial and spatiotemporal variation is not affected by additional covariates in these models. I also find the magnitude of spatial and spatiotemporal variation to be roughly the same as that of oxygen. The effect of oxygen is stronger now than in previous versions, mainly because we know use model-predicted oxygen instead of the nearest observed oxygen in-situ concentration.
+I interpret this as follows: The effect of oxygen is stronger now than in previous versions, and the magnitude is alrger than that of spatial and spatiotemporal variation (mainly because we know use model-predicted oxygen instead of the nearest observed oxygen in-situ concentration which was inaccurate). Inclusion of the depth variable reduces the standard deviation of the spatial random field, and to a smaller degree also the spatiotemporal standard deviation. Including oxygen reduces the effect of depth (which at least partly is due to deep areas being low in oxygen).
 
-* Note though that if I omit the depth variable, the model with oxygen as an additional covariate reduces the spatial variation that is constant in time (sigma_O), and moves that to the oxygen estimate. When I include depth, that does not happen, likely because what looked to be a constant (over time) effect in space of oxygen was in fact the depth-component of oxygen (deeper areas are anoxic, but note also shallow areas can be low in oxygen). Also, when I omit depth, the magnitude of the oxygen-effect is ~4x larger. 
-
-For the sake of comparison, I can also produce a map to look at the differences there. Here I'm using the oxygen model.
+For the sake of comparison, I can also produce a map to look at the differences there. Here I am using the oxygen model.
 
 ```{r map prediction for covariate model, message=FALSE, fig.width=12}
 # Add in a fixed covariate here
@@ -510,7 +578,7 @@ pred_grid_oxy$oxy_st <- 0 # Mean since standardized
 poxy <- predict(moxy, newdata = pred_grid_oxy)
 
 # Replace too-deep predictions with NA
-poxy <- poxy %>% mutate(est2 = ifelse(depth < -130, NA, est))
+poxy <- poxy %>% mutate(est2 = ifelse(depth > 120, NA, est))
 
 ggplot(poxy, aes(X, Y, fill = est2)) +
   geom_raster() +
@@ -519,31 +587,109 @@ ggplot(poxy, aes(X, Y, fill = est2)) +
                      name = "log(condition factor)") + 
   geom_sf(data = world, inherit.aes = F, size = 0.2) +
   coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
-  ggtitle("Prediction (random + fixed) with covariates oxygen model at mean oxygen")
+  ggtitle("Prediction (random + fixed) with oxygen model at mean oxygen") +
+  labs(x = "lon", y = "lat")
 ```
 
-And here's a map with the ratio between oxygen and the default model:
+And here is a map with the ratio between oxygen and the default model:
 
 ```{r map ratio of predictions, message=FALSE, fig.width=12}
 poxy$est_ratio <- poxy$est2 / p$est2
 
 ggplot(poxy, aes(X, Y, fill = est_ratio)) +
   geom_raster() +
+  facet_wrap(~ year, ncol = 5) +
+  scale_fill_gradient2(midpoint = 1) + 
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  ggtitle("Ratio of prediction (random + fixed) oxygen:default") +
+  labs(x = "lon", y = "lat")
+```
+
+Not surprisingly perhaps, the model predictions differ mostly in areas with low oxygen concentration (although the difference is small!). 
+
+```{r, echo=FALSE, out.width = "80%"}
+# All defaults
+knitr::include_graphics("/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/cod_condition/figures/supp/oxygen_rasters/2005.png")
+```
+
+Lastly, we can make a prediction over a grid with modeled oxygen and estimated depth values (i.e. the Baltic...):
+
+```{r predict on grid with oxygen, message=FALSE, fig.width=12}
+# Add in a fixed covariate here
+poxy2 <- predict(moxy, newdata = pred_grid2)
+
+# Replace too-deep predictions with NA
+poxy2 <- poxy2 %>% mutate(est2 = ifelse(depth > 120, NA, est))
+
+ggplot(poxy2, aes(X, Y, fill = est2)) +
+  geom_raster() +
+  facet_wrap(~year, ncol = 5) +
+  scale_fill_viridis(option = "magma", 
+                     name = "log(condition factor)") + 
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  ggtitle("Prediction (random + fixed)") +
+  labs(x = "lon", y = "lat")
+```
+
+And here is a map with the ratio between oxygen and the default model:
+
+```{r map ratio of predictions with oxygen, message=FALSE, fig.width=12}
+p_no_na <- p
+p_no_na$id <- paste(p_no_na$lat, p_no_na$lon, p_no_na$year) # some oxygen values with NA hence I need to make sure I have the same coordinates
+poxy2$id <- paste(poxy2$lat, poxy2$lon, poxy2$year)
+
+# Filter id's so they are the same
+p_no_na <- p_no_na %>% filter(id %in% poxy2$id)
+
+# Calculate ratio
+poxy2$est_ratio <- poxy2$est2 / p_no_na$est2
+
+ggplot(poxy2, aes(X, Y, fill = est_ratio)) +
+  geom_raster() +
   facet_wrap(~year, ncol = 5) +
   scale_fill_gradient2(midpoint = 1) + 
   geom_sf(data = world, inherit.aes = F, size = 0.2) +
   coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
-  ggtitle("Ratio of prediction (random + fixed) oxygen:default")
+  ggtitle("Prediction (random + fixed) with covariates oxygen model at modelled oxygen") +
+  labs(x = "lon", y = "lat")
 ```
 
-Not surprisingly perhaps, the model predictions differ mostly in areas with low oxygen concentration (although the difference is small!). Below I'm plotting the oxygen concentration for 1999 to illustrate this:
+```{r gganimate condition, message=FALSE, include=FALSE}
+p <- ggplot(poxy2, aes(X, Y, fill = est2)) +
+  geom_raster() +
+  scale_fill_viridis(option = "magma", 
+                     name = "log(condition factor)") + 
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  labs(x = "lon", y = "lat")
 
-```{r, echo=FALSE, out.width = "70%"}
+# Here comes the gganimate specific bits
+anim <- p +
+  labs(title = 'Year: {frame_time}') +
+  transition_time(as.integer(year)) +
+  ease_aes('linear') +
+  theme_classic(base_size = 24)
+
+gganimate::animate(anim, height = 1200, width = 1200)
+
+anim_save(filename = "/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/cod_condition/output/gif/cond_oxy.gif")  
+```
+
+Again, the story seems to be that condition is getting worse throughout the Baltic Sea and it's already worse in deep area (see bathymetry map below), and maybe the time trend is also slightly stronger there!
+
+```{r, message=FALSE}
 # All defaults
-knitr::include_graphics("/Users/maxlindmark/Desktop/1999.png")
+pred_grid2 %>% 
+  filter(year == 1999) %>% 
+  filter(depth > 0) %>% 
+  ggplot(., aes(lon, lat, fill = depth)) + 
+  scale_fill_gradientn(colours = rev(terrain.colors(10)),
+                         limits = c(min(drop_na(pred_grid2)$depth),
+                                    max(drop_na(pred_grid2)$depth))) +
+  geom_raster()
 ```
-
-# Now don't predict at the average oxygen levels, but extract each value of of the prediction grid from the rasters... Do that in the other scrip though
 
 ## References
 
@@ -553,11 +699,13 @@ Casini, M., Käll, F., Hansson, M., Plikshs, M., Baranova, T., Karlsson, O., Lun
 
 Froese, R., Thorson, J.T. and Reyes Jr, R.B., 2014. A Bayesian approach for estimating length‐weight relationships in fishes. *Journal of Applied Ichthyology*, 30(1), pp.78-85.
 
+Gogina, M., Zettler, M.L., Wåhlström, I., Andersson, H., Radtke, H., Kuznetsov, I. and MacKenzie, B.R., 2020. A combination of species distribution and ocean-biogeochemical models suggests that climate change overrides eutrophication as the driver of future distributions of a key benthic crustacean in the estuarine ecosystem of the Baltic Sea. *ICES Journal of Marine Science*, 77(6), pp.2089-2105.
+
 Grüss, A., Gao, J., Thorson, J.T., Rooper, C.N., Thompson, G., Boldt, J.L. and Lauth, R., 2020. Estimating synchronous changes in condition and density in eastern Bering Sea fishes. *Marine Ecology Progress Series*, 635, pp.169-185.
 
 Gårdmark, A., Casini, M., Huss, M., van Leeuwen, A., Hjelm, J., Persson, L. and de Roos, A.M., 2015. Regime shifts in exploited marine food webs: detecting mechanisms underlying alternative stable states using size-structured community dynamics theory. *Philosophical Transactions of the Royal Society B: Biological Sciences*, 370(1659), p.20130262.
 
-Neuenfeldt, S., Bartolino, V., Orio, A., Andersen, K.H., Andersen, N.G., Niiranen, S., Bergström, U., Ustups, D., Kulatska, N. and Casini, M., 2020. Feeding and growth of Atlantic cod (Gadus morhua L.) in the eastern Baltic Sea under environmental change. ICES Journal of Marine Science, 77(2), pp.624-632.
+Neuenfeldt, S., Bartolino, V., Orio, A., Andersen, K.H., Andersen, N.G., Niiranen, S., Bergström, U., Ustups, D., Kulatska, N. and Casini, M., 2020. Feeding and growth of Atlantic cod (Gadus morhua L.) in the eastern Baltic Sea under environmental change. *ICES Journal of Marine Science*, 77(2), pp.624-632.
 
 Orio, A., Bergström, U., Florin, A-B., Lehmann, A., Šics, I. and Casini, M., 2019. Spatial contraction of demersal fish populations in a large marine ecosystem. *Journal of Biogeography*, 46(3), pp.633-645.
 
