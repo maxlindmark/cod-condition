@@ -41,18 +41,19 @@ We model this individual-level relationship with a spatiotemporal GLMM of the fo
 $$
 \operatorname{log}(w_{s,t}) = \alpha_t + \beta_ddepth + \boldsymbol\omega_s + \boldsymbol\epsilon_{s,t} + \sum^{n_k}_{k=1}\boldsymbol\gamma_k\boldsymbol{X_k} + \beta \operatorname{log}(l)
 $$ 
+<!-- SA: add the observation model; Student-t? -->
 
 where $\alpha_t$ is a time-varying intercept:
 
 $$
-\alpha_t \sim \operatorname{Normal}(\gamma_{t-1}, \sigma^2_\gamma).
+\alpha_t \sim \operatorname{Normal}(\alpha_{t-1}, \sigma^2_\gamma).
 $$
 
 $\beta_d$ is the coefficient for $depth$, $\boldsymbol\omega_s$ and $\boldsymbol\epsilon_{s,t}$ represent spatial and spatiotemporal random effects, respectively. $\boldsymbol{X_k}$ is a matrix of $n_k$ measured *additional* covariates and $\boldsymbol\gamma_k$ is the effect of the $k$-th *additional* covariate. $\beta$ is the length-coefficient, corresponding to the allometric exponent $b$. The spatial and spatiotemporal random effects are assumed to be drawn from a multivariate normal distribution:
 
 $$
 \boldsymbol\omega \sim \operatorname{MVNormal}(\boldsymbol0, \boldsymbol\Sigma_\omega)\\
-\boldsymbol\epsilon \sim \operatorname{MVNormal}(\boldsymbol0, \boldsymbol\Sigma_\epsilon).
+\boldsymbol\epsilon_t \sim \operatorname{MVNormal}(\boldsymbol0, \boldsymbol\Sigma_\epsilon).
 $$
 
 We also consider the spatiotemporal random effects to be drawn from a multivariate normal distribution following an AR1 process:
@@ -295,14 +296,18 @@ plot(df$residuals_m1 ~ df$residuals_m2)
 
 We can also check the AR1 parameter
 
+<!-- SA: the plogis stuff isn't needed now that I've fixed the argument to `conf.int` (not my choice to add the dot! The choice of the broom package.) -->
+
 ```{r check AR1 estimate}
-tidy(m2, effects = "ran_pars", confint = TRUE)
+tidy(m2, effects = "ran_pars", conf.int = TRUE)
 # Transform back to -1 to 1 scale
 2 * plogis(tidy(m2, effects = "ran_pars", confint = TRUE)$estimate[5]) - 1
-2 * plogis(tidy(m2, effects = "ran_pars", confint = TRUE)$estimate[5] + c(-2, 2) * tidy(m2, effects = "ran_pars", confint = TRUE)$std.error[5]) - 1
+2 * plogis(tidy(m2, effects = "ran_pars", confint = TRUE)$estimate[5] + c(-2, 2) * tidy(m2, effects = "ran_pars", conf.int = TRUE)$std.error[5]) - 1
 ```
 
 The AR1 estimate is quite large and its confidence interval does not overlap 0, which indicates we should keep it like that (FYI when we set `spatial_trend = TRUE`, the AR1 correlation parameter becomes very small!). We can also Compare their AICs:
+
+<!-- SA: Yes, most likely one or the other -->
 
 ```{r extract student aic}
 AIC(m1)
@@ -329,6 +334,8 @@ ggplot(df, aes(ln_length_cm, residuals_m2)) +
 ```
 
 They look a little bit funny at small lengths (and small predicted weights), and overall there seems to be a peak in the middle of the predicted data (and ln_length_cm). I think that is because a) the small ones are quite rare and b) data are in cm size-classes (a bit coarse for a ~5 cm fish, hence many are assigned the same length). I do not have a good feeling for why there would be a peak in the relationship though.
+
+<!-- SA: Yeah, agreed. Also try adding `alpha = something` and maybe add a `geom_smooth`-->
 
 Check the residuals on a map:
 
@@ -467,6 +474,8 @@ year_effects %>%
 ```
 
 The random walk model estimates slightly higher and less variable condition, and there seems to be a kind of plateau starting in 2004 following a more steep annual decline.
+
+<!-- SA: is it actually generally high? I see it higher and lower. This is very cool though. -->
 
 Now we want to refit the same model with two of the additional fixed effects outlined above, to exemplify the suggested approach.
 
@@ -612,7 +621,6 @@ Not surprisingly perhaps, the model predictions differ mostly in areas with low 
 # All defaults
 knitr::include_graphics("/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/cod_condition/figures/supp/oxygen_rasters/2005.png")
 ```
-
 Lastly, we can make a prediction over a grid with modeled oxygen and estimated depth values (i.e. the Baltic...):
 
 ```{r predict on grid with oxygen, message=FALSE, fig.width=12}
@@ -693,7 +701,7 @@ pred_grid2 %>%
 
 ## References
 
-Anderson, S.C., Keppel, E.A., Edwards, A.M. 2019. A reproducible data synopsis for over 100 species of British Columbia groundfsh. *DFO Can. Sci. Advis. Sec. Res. Doc*. 2019/041. vii + 321 p.
+Anderson, S.C., Keppel, E.A., Edwards, A.M. 2019. A reproducible data synopsis for over 100 species of British Columbia groundfish. *DFO Can. Sci. Advis. Sec. Res. Doc*. 2019/041. vii + 321 p.
 
 Casini, M., Käll, F., Hansson, M., Plikshs, M., Baranova, T., Karlsson, O., Lundström, K., Neuenfeldt, S., Gårdmark, A. and Hjelm, J., 2016. Hypoxic areas, density-dependence and food limitation drive the body condition of a heavily exploited marine fish predator. *Royal Society open science*, 3(10), p.160416.
 
