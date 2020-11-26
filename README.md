@@ -27,8 +27,8 @@ Contains .rds objects of model outputs due to long compuation times
 
 *References for NEMO-Nordic-SCOBI*
 
-**Almroth-Rosell**, E., Eilola, K., Hordoir, R., Meier, H.E.M., Hall, P.O.J., 2011. Transport of fresh and resuspended particulate organic material in the Baltic Sea — a model study. J.Mar.Sys. 87, 1-12. Doi: 10.1016/j.jmarsys.2011.02.005
+Almroth-Rosell, E., Eilola, K., Hordoir, R., Meier, H.E.M., Hall, P.O.J., 2011. Transport of fresh and resuspended particulate organic material in the Baltic Sea — a model study. *J.Mar.Sys*. 87, 1-12. Doi: 10.1016/j.jmarsys.2011.02.005
 
-**Eilola, K.**, Meier, M.H.E., Almroth, E., 2009. On the dynamics of oxygen, phosphorus and cyanobacteria in the Baltic Sea; A model study. J.Mar.Sys. 75, 163-184. Doi: doi:10.1016/j.jmarsys.2008.08.009.
+Eilola, K., Meier, M.H.E., Almroth, E., 2009. On the dynamics of oxygen, phosphorus and cyanobacteria in the Baltic Sea; A model study. *J.Mar.Sys*. 75, 163-184. Doi: doi:10.1016/j.jmarsys.2008.08.009.
 
-**Kuznetsov**, I., Eilola, K., Dieterich, C., Hordoir, R., Axell, L., Höglund, A. and Schimanke, S., 2016. Model study on the variability of ecosystem parameters in the Skagerrak-Kattegat area, effect of load reduction in the North Sea and possible effect of BSAP on Skagerrak-Kattegat area.
+Kuznetsov, I., Eilola, K., Dieterich, C., Hordoir, R., Axell, L., Höglund, A. and Schimanke, S., 2016. Model study on the variability of ecosystem parameters in the Skagerrak-Kattegat area, effect of load reduction in the North Sea and possible effect of BSAP on Skagerrak-Kattegat area. *SMHI Report* Oceanografi 119
