@@ -20,7 +20,7 @@
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 # A. LOAD LIBRARIES ================================================================
-# rm(list = ls())
+rm(list = ls())
 
 # Load libraries, install if needed
 library(tidyverse); theme_set(theme_classic())
@@ -58,6 +58,8 @@ library(mapplots)
 # For adding maps to plots
 world <- ne_countries(scale = "medium", returnclass = "sf")
 
+# Specify map ranges
+ymin = 54; ymax = 58; xmin = 9.5; xmax = 22
 
 # B. READ HAUL DATA ================================================================
 # Load HH data using the DATRAS package to get catches
@@ -839,24 +841,8 @@ d <- dat %>%
                 cpue_fle_above_20cm, cpue_fle_below_20cm, cpue_fle,
                 abun_spr, abun_her,
                 oxy) %>% 
-  mutate(depth_st = depth,
-         cpue_cod_above_30cm_st = cpue_cod_above_30cm,
-         cpue_cod_below_30cm_st = cpue_cod_below_30cm,
-         cpue_cod_st = cpue_cod,
-         cpue_fle_above_20cm_st = cpue_fle_above_20cm,
-         cpue_fle_below_20cm_st = cpue_fle_below_20cm,
-         cpue_fle_st = cpue_fle,
-         abun_spr_st = abun_spr,
-         abun_her_st = abun_her,
-         oxy_st = oxy) %>% 
-  mutate_at(c("depth_st",
-              "cpue_cod_above_30cm_st", "cpue_cod_below_30cm_st", "cpue_cod_st",
-              "cpue_fle_above_20cm_st", "cpue_fle_below_20cm_st", "cpue_fle_st",
-              "abun_spr_st", "abun_her_st",
-              "oxy_st"),
-            ~(scale(.) %>% as.vector)) %>% 
   filter(Fulton_K < 3 & Fulton_K > 0.15) %>%  # Visual exploration, larger values likely data entry errors
-  drop_na(oxy_st) %>% 
+  drop_na(oxy) %>% 
   filter(depth > 0) %>% 
   ungroup()
 
@@ -908,28 +894,38 @@ d2 %>%
   theme_bw() +
   geom_sf(data = world, inherit.aes = F, size = 0.2) +
   coord_sf(xlim = c(8, 25), ylim = c(54, 60)) +
-  #scale_color_brewer(palette = "Dark2")
   NULL
 
-# Calculate average cod, flounder, sprat and herring biomasses by SD:
+# Calculate average sprat and herring biomasses by SD:
 d2 <- d2 %>% 
   group_by(SD, year) %>% 
-  mutate(oxy_sd = mean(oxy),
-         abun_her_sd = mean(abun_her),
-         abun_spr_sd = mean(abun_spr),
-         cpue_cod_sd = mean(cpue_cod),
-         cpue_fle_sd = mean(cpue_fle)) %>% 
-  ungroup() %>% 
-  mutate(oxy_sd_st = oxy_sd, 
-         abun_her_sd_st = abun_her_sd,
-         abun_spr_sd_st = abun_spr_sd,
-         cpue_cod_sd_st = cpue_cod_sd,
-         cpue_fle_sd_st = cpue_fle_sd) %>%
-  mutate_at(c("oxy_sd_st", "abun_her_sd_st", "abun_spr_sd_st", "cpue_cod_sd_st", "cpue_fle_sd_st"),
-            ~(scale(.) %>% as.vector)) 
+  mutate(abun_her_sd = mean(abun_her),
+         abun_spr_sd = mean(abun_spr)) %>% 
+  ungroup()
 
-write.csv(d2, file = "data/for_analysis/mdat_cond.csv", row.names = FALSE)
+# Calculate average cod & flounder densities by ICES rectangle
+d2 <- d2 %>% 
+  group_by(StatRec, year) %>% 
+  mutate(oxy_rec = mean(oxy),
+         cpue_cod_rec = mean(cpue_cod),
+         cpue_fle_rec = mean(cpue_fle)) %>% 
+  ungroup()
 
+# Plot spatial distribution of samples by rectangle
+d2 %>%
+  ggplot(., aes(y = lat, x = lon, color = factor(StatRec))) +
+  geom_point(size = 1) +
+  theme_bw() +
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(8, 25), ylim = c(54, 60)) +
+  NULL
+
+# Finally, select only the main variables to make the data file smaller (for GitHub)
+d_analysis <- d2 %>% dplyr::select(year, depth, lat, lon, length_cm, weight_g, Fulton_K,
+                                   cpue_cod, cpue_cod_rec, cpue_fle, cpue_fle_rec,
+                                   oxy, oxy_rec, abun_spr, abun_spr_sd, abun_her, abun_her_sd)
+
+write.csv(d_analysis, file = "data/for_analysis/mdat_cond.csv", row.names = FALSE)
 
 
 
