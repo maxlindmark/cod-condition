@@ -199,6 +199,9 @@ dat <- dat %>%
 
 min(dat$ShootLon)
 
+dat %>% filter(ID == "1991.4.SOL.H20.34.49")
+
+
 # E. READ AND JOIN THE COD AND FLOUNDER COVARIATES =================================
 cov_dat <- read.csv("data/DATRAS_cpue_length_haul/CPUE per length per haul per hour_2020-09-25 16_15_36.csv")
 
@@ -282,7 +285,7 @@ fle$ID2[!fle$ID2 %in% test$ID2]
 filter(fle, ID2 %in% unique(test$ID2)) 
 # Nope! All good.
 
-# Now calculate the mean CPUE per hauls and size group per species. For cod we use 30
+# Now calculate the mean CPUE per haul and size group per species. For cod we use 30
 # cm and for flounder 20 cm. This is because Neuenfeldt et al (2019) found that cod
 # below 30cm are in a growth-bottleneck, and because Haase et al (2020) found that 
 # flounder above 20cm start feeding a lot of saduria, which has been speculated to
@@ -393,14 +396,18 @@ sum(filter(fle, ID2 == "1991.4.SOL.H20.30.26.54.6.14.25" & length_cm < 20)$CPUE_
 dat %>% filter(ID2 == "1991.4.SOL.H20.30.26.54.6.14.25") %>%
   dplyr:: select(ID2, cpue_fle_above_20cm, cpue_fle_below_20cm)
 
+# TEST
+dat %>% filter(ID == "1991.4.SOL.H20.34.49")
+
 
 # F. READ AND JOIN PELAGIC COVARIATES ==============================================
+#** Rectangle level ================================================================
 spr <- read_xlsx("data/BIAS/abundances_rectangles_1991-2019.xlsx",
                  sheet = 1) %>%
   rename("StatRec" = "Rec") %>%
   mutate(StatRec = as.factor(StatRec),
          Species = "Sprat",
-         abun_spr = `Age 0`+`Age 1`+`Age 2`+`Age 3`+`Age 4`+`Age 5`+`Age 6`+`Age 7`+`Age 8+`+`1+`,
+         abun_spr = `Age 0`+`Age 1`+`Age 2`+`Age 3`+`Age 4`+`Age 5`+`Age 6`+`Age 7`+`Age 8+`, # omitting `1+` here
          ID3 = paste(StatRec, Year, sep = ".")) # Make new ID)
   
 her <- read_xlsx("data/BIAS/abundances_rectangles_1991-2019.xlsx",
@@ -409,41 +416,41 @@ her <- read_xlsx("data/BIAS/abundances_rectangles_1991-2019.xlsx",
   rename("StatRec" = "Rect2") %>% # This is not called Rec in the data for some reason
   mutate(StatRec = as.factor(StatRec),
          Species = "Herring",
-         abun_her = `Age 0`+`Age 1`+`Age 2`+`Age 3`+`Age 4`+`Age 5`+`Age 6`+`Age 7`+`Age 8+`+`1+`,
+         abun_her = `Age 0`+`Age 1`+`Age 2`+`Age 3`+`Age 4`+`Age 5`+`Age 6`+`Age 7`+`Age 8+`, # omitting `1+` here
          ID3 = paste(StatRec, Year, sep = ".")) # Make new ID
 
 # Plot distribution over time in the whole area
-spr %>%
-  mutate(lon = ices.rect(spr$StatRec)$lon) %>% 
-  mutate(lat = ices.rect(spr$StatRec)$lat) %>% 
-  filter(! StatRec %in% c("41G0", "41G1", "41G2", "42G1", "42G2", "43G1", "43G2", "44G0", "44G1")) %>% 
-  ggplot(., aes(lon, lat, color = log(abun_spr))) +
-  geom_point(size = 2.5, shape = 15) +
-  scale_color_viridis() +
-  facet_wrap(~ Year, ncol = 5) + 
-  geom_sf(data = world, inherit.aes = F, size = 0.2) +
-  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
-  labs(x = "lon", y = "lat") + 
-  ggtitle("log(abun_spr)") +
-  NULL
+# spr %>%
+#   mutate(lon = ices.rect(spr$StatRec)$lon) %>% 
+#   mutate(lat = ices.rect(spr$StatRec)$lat) %>% 
+#   filter(! StatRec %in% c("41G0", "41G1", "41G2", "42G1", "42G2", "43G1", "43G2", "44G0", "44G1")) %>% 
+#   ggplot(., aes(lon, lat, color = log(abun_spr))) +
+#   geom_point(size = 2.5, shape = 15) +
+#   scale_color_viridis() +
+#   facet_wrap(~ Year, ncol = 5) + 
+#   geom_sf(data = world, inherit.aes = F, size = 0.2) +
+#   coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+#   labs(x = "lon", y = "lat") + 
+#   ggtitle("log(abun_spr)") +
+#   NULL
 
-ggsave("figures/supp/spr_distribution.png", width = 10, height = 10, dpi = 600)
+# ggsave("figures/supp/spr_distribution.png", width = 10, height = 10, dpi = 600)
 
-her %>%
-  mutate(lon = ices.rect(her$StatRec)$lon) %>% 
-  mutate(lat = ices.rect(her$StatRec)$lat) %>% 
-  filter(! StatRec %in% c("41G0", "41G1", "41G2", "42G1", "42G2", "43G1", "43G2", "44G0", "44G1")) %>% 
-  ggplot(., aes(lon, lat, color = log(abun_her))) +
-  geom_point(size = 2.5, shape = 15) +
-  scale_color_viridis() +
-  facet_wrap(~ Year, ncol = 5) + 
-  geom_sf(data = world, inherit.aes = F, size = 0.2) +
-  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
-  labs(x = "lon", y = "lat") + 
-  ggtitle("log(abun_her)") +
-  NULL
+# her %>%
+#   mutate(lon = ices.rect(her$StatRec)$lon) %>% 
+#   mutate(lat = ices.rect(her$StatRec)$lat) %>% 
+#   filter(! StatRec %in% c("41G0", "41G1", "41G2", "42G1", "42G2", "43G1", "43G2", "44G0", "44G1")) %>% 
+#   ggplot(., aes(lon, lat, color = log(abun_her))) +
+#   geom_point(size = 2.5, shape = 15) +
+#   scale_color_viridis() +
+#   facet_wrap(~ Year, ncol = 5) + 
+#   geom_sf(data = world, inherit.aes = F, size = 0.2) +
+#   coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+#   labs(x = "lon", y = "lat") + 
+#   ggtitle("log(abun_her)") +
+#   NULL
 
-ggsave("figures/supp/her_distribution.png", width = 10, height = 10, dpi = 600)
+# ggsave("figures/supp/her_distribution.png", width = 10, height = 10, dpi = 600)
 
 # Check distribution of data
 # https://www.researchgate.net/publication/47933620_Environmental_factors_and_uncertainty_in_fisheries_management_in_the_northern_Baltic_Sea/figures?lo=1
@@ -471,8 +478,9 @@ test_spr <- spr %>%
 
 test_spr
 
-# Seems to be due to rectangles somehow being in different sub divisions. I need to
-# group by ID3 and summarize
+# Seems to be due to rectangles somehow being in different sub divisions.
+# I need to group by ID3 and summarize
+# First check all rectangles with more than one row have two rows and not more
 nrow(spr)
 nrow(spr %>% group_by(ID3) %>% mutate(n = n()) %>% filter(n == 2))
 nrow(spr %>% group_by(ID3) %>% mutate(n = n()) %>% filter(!n == 1))
@@ -494,6 +502,41 @@ filter(spr, ID3 == "39G2.1991")
 
 # This should equal 1 (new # rows =  old - duplicated ID3)
 nrow(spr_sum) / (nrow(spr) - 0.5*nrow(spr %>% group_by(ID3) %>% mutate(n = n()) %>% filter(n == 2)))
+
+# How many rows per rectangle?
+spr_sum %>%
+  group_by(ID3) %>% 
+  mutate(n = n()) %>% 
+  ggplot(., aes(factor(n))) + geom_bar()
+
+# Now do the same for herring
+nrow(her)
+nrow(her %>% group_by(ID3) %>% mutate(n = n()) %>% filter(n == 2))
+nrow(her %>% group_by(ID3) %>% mutate(n = n()) %>% filter(!n == 1))
+
+her_sum <- her %>%
+  group_by(ID3) %>% 
+  summarise(abun_her = sum(abun_her)) %>% # Sum abundance within ID3
+  distinct(ID3, .keep_all = TRUE) %>% # Remove duplicate ID3
+  mutate(ID_temp = ID3) %>% # Create temporary ID3 that we can use to split in order
+  # to get Year and StatRect back into the summarized data
+  separate(ID_temp, c("StatRec", "Year"), sep = 4)
+
+nrow(her_sum) 
+nrow(her)
+nrow(her %>% group_by(ID3) %>% mutate(n = n()) %>% filter(n == 2))
+
+filter(her_sum, ID3 == "39G2.1991")
+filter(her, ID3 == "39G2.1991")
+
+# This should equal 1 (new # rows =  old - duplicated ID3)
+nrow(her_sum) / (nrow(her) - 0.5*nrow(her %>% group_by(ID3) %>% mutate(n = n()) %>% filter(n == 2)))
+
+# How many rows per rectangle?
+her_sum %>%
+  group_by(ID3) %>% 
+  mutate(n = n()) %>% 
+  ggplot(., aes(factor(n))) + geom_bar()
 
 # Join pelagic covariates
 # Make StatRec a factor in the main data
@@ -518,14 +561,23 @@ filter(dat, StatRec == "44G8")
 filter(her, StatRec == "44G8")
 
 # Select columns from pelagic data to go in dat
-spr_sub <- spr %>% dplyr::select(ID3, abun_spr)
-her_sub <- her %>% dplyr::select(ID3, abun_her)
+spr_sub <- spr_sum %>% dplyr::select(ID3, abun_spr)
+her_sub <- her_sum %>% dplyr::select(ID3, abun_her)
+
+# TEST
+dat %>% filter(ID == "1991.4.SOL.H20.34.49")
 
 # Now join dat and sprat data
 dat <- left_join(dat, spr_sub)
+nrow(dat)
 
 # And herring..
 dat <- left_join(dat, her_sub)
+
+# TEST
+dat %>% filter(ID == "1991.4.SOL.H20.34.49")
+
+nrow(dat)
 
 # REPLACE NA ABUNDANCES WITH 0
 dat$abun_her[is.na(dat$abun_her)] <- 0
@@ -544,29 +596,171 @@ dat %>% filter(ID3 == "44G7.1991")
 ggplot(dat, aes(abun_spr)) + geom_histogram()
 ggplot(dat, aes(abun_her)) + geom_histogram()
 
+# TEST
+dat %>% filter(ID == "1991.4.SOL.H20.34.49")
+
+
+#** Sub-division level =============================================================
+spr_sd <- read_xlsx("data/BIAS/abundance_sub_division_1991-2019.xlsx",
+                 sheet = 1) %>%
+  rename("Year" = "ANNUS") %>% 
+  mutate(Sub_Div = as.factor(Sub_Div)) %>% 
+  mutate(Sub_Div = recode(Sub_Div, "28_2" = "28")) %>% # Change 28_2 (main area) to simply 28 (which also includes 28_1)
+  mutate(Species = "Sprat",
+         abun_spr_sd = `AGE0`+`AGE1`+`AGE2`+`AGE3`+`AGE4`+`AGE5`+`AGE6`+`AGE7`+`AGE8+`,
+         ID_sd = paste(Sub_Div, Year, sep = "."))
+
+her_sd <- read_xlsx("data/BIAS/abundance_sub_division_1991-2019.xlsx",
+                    sheet = 2) %>%
+  rename("Year" = "ANNUS") %>% 
+  mutate(Sub_Div = as.factor(Sub_Div)) %>% 
+  mutate(Sub_Div = recode(Sub_Div, "28_2" = "28")) %>% # Change 28_2 (main area) to simply 28 (which also includes 28_1)
+  mutate(Species = "Herring",
+         abun_her_sd = `AGE0`+`AGE1`+`AGE2`+`AGE3`+`AGE4`+`AGE5`+`AGE6`+`AGE7`+`AGE8+`,
+         ID_sd = paste(Sub_Div, Year, sep = "."))
+  
+# How many unique rows per ID3?
+spr_sd %>%
+  group_by(ID_sd) %>% 
+  mutate(n = n()) %>% 
+  ggplot(., aes(factor(n))) + geom_bar()
+
+her_sd %>%
+  group_by(ID_sd) %>% 
+  mutate(n = n()) %>% 
+  ggplot(., aes(factor(n))) + geom_bar()
+
+# Now we need to add in the sub-divisions in the main data
+# Somethings to note here: there are rectangles that are in more than 1 sub-division!
+border_rec <- spr %>% group_by(ID3) %>% mutate(n = n()) %>% filter(n == 2)
+unique(border_rec$StatRec)
+
+# 39G2 is assigned to SD 24, not 23 (0 abundances in SD 23 from the Rectangle data)
+spr %>% filter(ID3 == "39G2.1991")
+
+# 39G4 is assigned to SD 24, not 25 (0 abundances in SD 23 from the Rectangle data)
+spr %>% filter(ID3 == "39G4.1991")
+
+# 41G0, 41G2 and 41G1 are not in the condition data
+spr %>% filter(ID3 == "41G0.1991")
+
+dat <- dat %>% 
+  mutate(Sub_Div = NA) %>% 
+  mutate(Sub_Div = ifelse(StatRec %in% c("37G0", "37G1",
+                                         "38G0", "38G1", 
+                                         "39F9", "39G0", "39G1",
+                                         "40F9", "40G0", "40G1"), "22", Sub_Div)) %>% 
+  mutate(Sub_Div = ifelse(StatRec == "40G2", "23", Sub_Div)) %>% 
+  mutate(Sub_Div = ifelse(StatRec %in% c("37G2", "37G3", "37G4",
+                                         "38G1", "38G2", "38G3", "38G4", 
+                                         "39G1", "39G2", "39G3", "39G4",
+                                         "40G1"), "24", Sub_Div)) %>% 
+  mutate(Sub_Div = ifelse(StatRec %in% c("40G4",
+                                         "37G5", "37G6", "37G7",
+                                         "38G5", "38G6", "38G7",
+                                         "39G5", "39G6", "39G7",
+                                         "40G5", "40G6", "40G7",
+                                         "41G5", "41G6", "41G7"), "25", Sub_Div)) %>% 
+  mutate(Sub_Div = ifelse(StatRec %in% c("37G8", "37G9", "37H0",
+                                         "38G8", "38G9", "38H0",
+                                         "39G8", "39G9", "39H0",
+                                         "40G8", "40G9", "40H0",
+                                         "41G8", "41G9", "41H0"), "26", Sub_Div)) %>% 
+  mutate(Sub_Div = ifelse(StatRec %in% c("42G6", "42G7",
+                                         "43G6", "43G7",
+                                         "44G6", "44G7", "44G8"), "27", Sub_Div)) %>% 
+  mutate(Sub_Div = ifelse(StatRec %in% c("42G8", "42G9", "42H0", "42H1", "42H2",
+                                         "43G8", "43G9", "43H0", "43H1", "43H2",
+                                         "44G8", "44G9", "44H0", "44H1", "44H2"), "28", Sub_Div)) %>% 
+  mutate(Sub_Div = factor(Sub_Div))
+
+# Check if any NAs (if they weren't assigned an SD)
+unique(is.na(dat$Sub_Div))
+
+unique(spr_sd$Sub_Div)
+unique(dat$Sub_Div)
+
+# Now join dat and sprat data
+# First add the new ID in dat
+dat <- dat %>% mutate(ID_sd = paste(Sub_Div, Year, sep = "."))
+
+# Select only key variables
+spr_sd_sub <- spr_sd %>% dplyr::select(ID_sd, abun_spr_sd)
+her_sd_sub <- her_sd %>% dplyr::select(ID_sd, abun_her_sd)
+
+nrow(dat)
+dat <- left_join(dat, spr_sd_sub)
+dat <- left_join(dat, her_sd_sub)
+
+nrow(dat)
+
+# TEST
+dat %>% filter(ID == "1991.4.SOL.H20.34.49")
+
+
+#** Test if same as raw data =======================================================
+# Sprat
+test_sprat_raw <- spr_sd %>%
+  dplyr::select(Year, Sub_Div, abun_spr_sd, ID_sd) %>%
+  data.frame() %>%
+  mutate(source = "raw")
+
+test_sprat_dat <- dat %>%
+  dplyr::select(Year, abun_spr_sd, Sub_Div, ID_sd) %>%
+  distinct(.keep_all = TRUE) %>%
+  mutate(source = "dat")
+
+test_sprat <- bind_rows(test_sprat_raw, test_sprat_dat)
+
+test_sprat %>% 
+  filter(ID_sd %in% test_sprat_dat$ID_sd) %>% 
+  ggplot(., aes(Year, abun_spr_sd, shape = source, color = source)) +
+  geom_point(alpha = 0.4, size = 4) + 
+  facet_wrap(~ Sub_Div, scales = "free")
+
+# Herring
+test_herring_raw <- her_sd %>%
+  dplyr::select(Year, Sub_Div, abun_her_sd, ID_sd) %>%
+  data.frame() %>%
+  mutate(source = "raw")
+
+test_herring_dat <- dat %>%
+  dplyr::select(Year, abun_her_sd, Sub_Div, ID_sd) %>%
+  distinct(.keep_all = TRUE) %>%
+  mutate(source = "dat")
+
+test_herring <- bind_rows(test_herring_raw, test_herring_dat)
+
+test_herring %>% 
+  filter(ID_sd %in% test_herring_dat$ID_sd) %>% 
+  ggplot(., aes(Year, abun_her_sd, shape = source, color = source)) +
+  geom_point(alpha = 0.4, size = 4) + 
+  facet_wrap(~ Sub_Div, scales = "free")
+
+
+#** Regarding sizes ================================================================
+#** Regarding sizes ================================================================
 # How to select which ages to use as predictor variables?
-# From Niiranen et al, it seem sprat in cod stomachs range between 50 and 150 mm and
+# From Niiranen et al, it seems sprat in cod stomachs range between 50 and 150 mm and
 # herring range between essentially 0 to 300 mm. Which ages does that correspond to? For
 # that we need VBGE parameters. Following Lindmark et al (in prep), in which the VBGE 
 # curves are plotted for these species for weight, and weight-length relationships are 
 # estimated, we see the following:
 
-# Sprat: a 5 and 15 cm sprat weighs 1 and 30 g respectively. 
-0.0078*5^3.07
-0.0078*15^3.07
-# This covers all weights and ages in the sprat data. Moreover, in Niiranen et al it
-# doesn't seem to be much variation between size classes of cod with respect to this.
+# Sprat: a 5 and 15 cm sprat weighs 1 and 32 g respectively. 
+0.0078*5^3.07=1.091271
+0.0078*15^3.07=31.8196
+# VBGE curves show that sprat at age 8 are on average <20g, hence we could probably include all ages
 
-# Herring: a 1 and 30 cm herring weighs >1 and 182 g respectively. 
-0.0042*1^3.14
-0.0042*30^3.14
-# This covers all weights and ages in the herring data. Moreover, in Niiranen et al it
-# doesn't seem to be much variation between size classes of cod with respect to this.
+# Herring: a 1 and 30 cm herring weighs <1 and 182 g respectively. 
+0.0042*1^3.14=0.0042
+0.0042*30^3.14=182.5619
+# VBGE curves show that sprat at age 8 are on average <100g, hence we could probably include all ages
 
 # Conclusion: I will not filter any further
 
 
-# # G. READ AND JOIN OCEANOGRAPHIC DATA ==============================================
+# # G. READ AND JOIN OCEANOGRAPHIC DATA ============================================
 # ** Oxygen ========================================================================
 # Downloaded from here: https://resources.marine.copernicus.eu/?option=com_csw&view=details&product_id=BALTICSEA_REANALYSIS_BIO_003_012
 # Extract raster points: https://gisday.wordpress.com/2014/03/24/extract-raster-values-from-points-using-r/comment-page-1/
@@ -829,18 +1023,10 @@ d <- dat %>%
          "year" = "Year",
          "sex" = "Sex",
          "depth" = "Depth") %>% 
-  mutate(ln_weight_g = log(weight_g),
-         ln_length_cm = log(length_cm),
-         Fulton_K = weight_g/(0.01*length_cm^3), # cod-specific, from FishBase
+  mutate(Fulton_K = weight_g/(0.01*length_cm^3), # cod-specific, from FishBase
          sex = ifelse(sex == -9, "U", sex),
          sex = as.factor(sex),
          year_f = as.factor(year)) %>% 
-  dplyr::select(year, year_f, depth, StatRec, lat, lon, sex, length_cm, weight_g, ln_length_cm, ln_weight_g,
-                Quarter, Fulton_K,
-                cpue_cod_above_30cm, cpue_cod_below_30cm, cpue_cod, 
-                cpue_fle_above_20cm, cpue_fle_below_20cm, cpue_fle,
-                abun_spr, abun_her,
-                oxy) %>% 
   filter(Fulton_K < 3 & Fulton_K > 0.15) %>%  # Visual exploration, larger values likely data entry errors
   drop_na(oxy) %>% 
   filter(depth > 0) %>% 
@@ -849,62 +1035,8 @@ d <- dat %>%
 # filter(d, Fulton_K < 0.5) %>% dplyr::select(Fulton_K, length_cm, weight_g) %>% arrange(Fulton_K) %>% as.data.frame()
 # filter(d, Fulton_K > 2.5) %>% dplyr::select(Fulton_K, length_cm, weight_g) %>% arrange(Fulton_K) %>% as.data.frame()
 
-# Now add in ICES-subdivisions
-# [1] "37G0" "37G1" "37G2" "37G3" "37G4" "37G5" "37G6" "37G8" "37G9" "38G0" "38G1" "38G2" "38G3" "38G4"
-# [15] "38G5" "38G6" "38G7" "38G8" "38G9" "39F9" "39G0" "39G1" "39G2" "39G3" "39G4" "39G5" "39G6" "39G7"
-# [29] "39G8" "39G9" "39H0" "40F9" "40G0" "40G1" "40G2" "40G4" "40G5" "40G6" "40G7" "40G8" "40G9" "40H0"
-# [43] "41G6" "41G7" "41G8" "41G9" "41H0" "42G6" "42G7" "42H0" "43G6" "43G7" "43G8" "43G9" "43H0" "43H1"
-# [57] "44G8" "44G9" "44H0" "44H1"
-
-d2 <- d %>% 
-  mutate(SD = NA) %>% 
-  mutate(SD = ifelse(StatRec %in% c("37G0", "37G1",
-                                    "38G0", "38G1", 
-                                    "39F9", "39G0", "39G1",
-                                    "40F9", "40G0", "40G1"), "sd22", SD)) %>% 
-  mutate(SD = ifelse(StatRec == "40G2", "sd23", SD)) %>% 
-  mutate(SD = ifelse(StatRec %in% c("37G2", "37G3", "37G4",
-                                    "38G1", "38G2", "38G3", "38G4", 
-                                    "39G1", "39G2", "39G3", "39G4",
-                                    "40G1"), "sd24", SD)) %>% 
-  mutate(SD = ifelse(StatRec %in% c("40G4",
-                                    "37G5", "37G6", "37G7",
-                                    "38G5", "38G6", "38G7",
-                                    "39G5", "39G6", "39G7",
-                                    "40G5", "40G6", "40G7",
-                                    "41G5", "41G6", "41G7"), "sd25", SD)) %>% 
-  mutate(SD = ifelse(StatRec %in% c("37G8", "37G9", "37H0",
-                                    "38G8", "38G9", "38H0",
-                                    "39G8", "39G9", "39H0",
-                                    "40G8", "40G9", "40H0",
-                                    "41G8", "41G9", "41H0"), "sd26", SD)) %>% 
-  mutate(SD = ifelse(StatRec %in% c("42G6", "42G7",
-                                    "43G6", "43G7",
-                                    "44G6", "44G7", "44G8"), "sd27", SD)) %>% 
-  mutate(SD = ifelse(StatRec %in% c("42G8", "42G9", "42H0", "42H1", "42H2",
-                                    "43G8", "43G9", "43H0", "43H1", "43H2",
-                                    "44G8", "44G9", "44H0", "44H1", "44H2"), "sd28", SD))
-           
-unique(is.na(d2$SD))
-
-# Plot spatial distribution of samples by SD
-d2 %>%
-  ggplot(., aes(y = lat, x = lon, color = SD)) +
-  geom_point(size = 1) +
-  theme_bw() +
-  geom_sf(data = world, inherit.aes = F, size = 0.2) +
-  coord_sf(xlim = c(8, 25), ylim = c(54, 60)) +
-  NULL
-
-# Calculate average sprat and herring biomasses by SD:
-d2 <- d2 %>% 
-  group_by(SD, year) %>% 
-  mutate(abun_her_sd = mean(abun_her),
-         abun_spr_sd = mean(abun_spr)) %>% 
-  ungroup()
-
 # Calculate average cod & flounder densities by ICES rectangle
-d2 <- d2 %>% 
+d <- d %>% 
   group_by(StatRec, year) %>% 
   mutate(oxy_rec = mean(oxy),
          cpue_cod_rec = mean(cpue_cod),
@@ -912,20 +1044,18 @@ d2 <- d2 %>%
   ungroup()
 
 # Plot spatial distribution of samples by rectangle
-d2 %>%
-  ggplot(., aes(y = lat, x = lon, color = factor(StatRec))) +
-  geom_point(size = 1) +
-  theme_bw() +
-  geom_sf(data = world, inherit.aes = F, size = 0.2) +
-  coord_sf(xlim = c(8, 25), ylim = c(54, 60)) +
-  NULL
+# d %>%
+#   ggplot(., aes(y = lat, x = lon, color = factor(StatRec))) +
+#   geom_point(size = 1) +
+#   theme_bw() +
+#   geom_sf(data = world, inherit.aes = F, size = 0.2) +
+#   coord_sf(xlim = c(8, 25), ylim = c(54, 60)) +
+#   NULL
 
 # Finally, select only the main variables to make the data file smaller (for GitHub)
-d_analysis <- d2 %>% dplyr::select(year, depth, lat, lon, length_cm, weight_g, Fulton_K,
-                                   cpue_cod, cpue_cod_rec, cpue_fle, cpue_fle_rec,
-                                   oxy, oxy_rec, abun_spr, abun_spr_sd, abun_her, abun_her_sd)
+d_analysis <- d %>% dplyr::select(year, depth, lat, lon, length_cm, weight_g, Fulton_K,
+                                  cpue_cod, cpue_cod_rec, cpue_fle, cpue_fle_rec,
+                                  oxy, oxy_rec, abun_spr, abun_spr_sd, abun_her, abun_her_sd)
 
 write.csv(d_analysis, file = "data/for_analysis/mdat_cond.csv", row.names = FALSE)
-
-
 
