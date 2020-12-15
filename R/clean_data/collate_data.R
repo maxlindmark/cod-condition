@@ -739,7 +739,6 @@ test_herring %>%
 
 
 #** Regarding sizes ================================================================
-#** Regarding sizes ================================================================
 # How to select which ages to use as predictor variables?
 # From Niiranen et al, it seems sprat in cod stomachs range between 50 and 150 mm and
 # herring range between essentially 0 to 300 mm. Which ages does that correspond to? For
@@ -757,7 +756,7 @@ test_herring %>%
 0.0042*30^3.14=182.5619
 # VBGE curves show that sprat at age 8 are on average <100g, hence we could probably include all ages
 
-# Conclusion: I will not filter any further
+# Conclusion: I will not filter any further as all could potentially be eaten by cod (given that the cod are large enough to eat herring (> 20 cm approx, which is majority of data)
 
 
 # # G. READ AND JOIN OCEANOGRAPHIC DATA ============================================
