@@ -41,7 +41,7 @@ vignettes/*.pdf
 # Large documents
 2019_041-eng.pdf
 
-# Raw data & modell outputs
+# Raw data & model outputs
 SISP7 BITS 2017.pdf
 /data/DATRAS_cpue_length_haul
 /data/DATRAS_exchange
@@ -57,5 +57,8 @@ Checklist for cod_density project - Google Docs
 
 # Unnessesary & figures
 /figures/supp/oxygen_rasters/
+/figures/supp/cpue_oxygen_rasters/
 
+# Meeting slides
+/meetings
 
