@@ -62,3 +62,7 @@ Checklist for cod_density project - Google Docs
 # Meeting slides
 /meetings
 
+# Test scripts
+test.Rmd
+test.html
+R/guides/
