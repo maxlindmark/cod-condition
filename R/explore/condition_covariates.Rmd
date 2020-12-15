@@ -1,0 +1,280 @@
+---
+title: "Exploring condition covariates"
+author: "Max Lindmark"
+date: "9/18/2020"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include = FALSE, cache=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.asp = 0.618,
+  fig.align ='center'
+)
+```
+
+#### Setup libraries and data
+```{r packages, message=FALSE, warning=TRUE}
+library(tidyverse); theme_set(theme_classic())
+library(tidylog)
+library(viridis)
+library(sdmTMB) # remotes::install_github("pbs-assess/sdmTMB")
+library(marmap)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(sf)
+library(gganimate)
+library(gifski)
+library(png)
+library(qwraps2) # To load entire cache in interactive r session, do: qwraps2::lazyload_cache_dir(path = "R/analysis/condition-covariates_cache/html")
+
+# For adding maps to plots
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+# Specify map ranges
+ymin = 54; ymax = 58; xmin = 9.5; xmax = 22
+
+# Read data
+d <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cond.csv")
+
+# Calculate standardized variables
+d %>% 
+  mutate(oxy_st = oxy,
+         oxy_rec_st = oxy_rec,
+         abun_her_st = abun_her,
+         abun_her_sd_st = abun_her_sd,
+         abun_spr_st = abun_spr,
+         abun_spr_sd_st = abun_spr_sd,
+         cpue_cod_st = cpue_cod,
+         cpue_cod_rec_st = cpue_cod_rec,
+         cpue_fle_st = cpue_fle,
+         cpue_fle_rec_st = cpue_fle_rec) %>%
+  mutate_at(c("oxy_st", "oxy_rec_st", "abun_her_st", "abun_her_sd_st", "abun_spr_st",
+              "abun_spr_sd_st", "cpue_cod_st", "cpue_cod_rec_st", "cpue_fle_st", "cpue_fle_rec_st"),
+            ~(scale(.) %>% as.vector)) %>% 
+  mutate(year = as.integer(year))
+```
+
+## Background
+There are two Atlantic cod (*Gadus morhua*) stocks in the Baltic Sea: eastern and western, and mixing occurs mainly in the Arkona basin [Sean, it is west of the Bornholm island, the island in the centre]. The decline in growth and body condition of eastern Baltic since the regime shift in the early 1990's is well documented, and contributes to the very low productivity of the stock. In this study, we use data from the whole Baltic sea and model spatial variation through random effects.
+
+Several hypotheses have been put forward as to why (see below for a summary). What is common for all hypotheses are that they have been evaluated on a aggregated scales, i.e. either in pre-defined time periods and always on large spatial scales (sub-division). Therefore, the new angle in this paper is to 1) put all covariates in the same framework and compare them 2) use data on fine spatial scales across time. Below I attempt to summarize the main hypotheses (please correct me if I got something wrong!), the knowledge gaps, and suggest an appropriate variable to analyze its ability to explain variation in cod condition (in no particular order).
+
+## Hypotheses
+### 1. Declines in oxygen concentration on the sea floor
+#### Motivation
+* The oxygen concentrations are declining in the Baltic, and the extent of anoxic areas (< 1 ml/l) is increasing. Since larger organisms cannot survive in these conditions, it is believed that changes in oxygen concentrations on the sea floor have shrunken the available habitat of cod and reduced availability of food both directly (from the lack of oxygen) and by the higher densities of cod (and flounder) in the remaining areas with suitable oxygen condition (Casini *et al*. 2016). 
+* It has also been suggested that even mild hypoxia can reduce the metabolic rates, and therefore feeding rates, based on experiments (Chabot & Dutil, 1999; Brander, 2020). I.e., the direct effects of living in low-oxygen environments could be enough to reduce metabolism and apetite (Brander, 2020). In line with this, Limburg & Casini (2019), found using cod otholiths and hypoxia proxies that the condition was worse in cod with high exposure of hypoxia. (See also replies by Brander (2020) on Neuenfedlt *et al*., (2019), and the reply by Neuenfeldt *et al*., (2020)). Criticism against this idea of a purely direct effect is mainly that the experiments on hypoxia, metabolism and growth are from Atlantic cod in the Gulf of St Lawrence, which is a very different environment from the Baltic sea, and that the proportion of saduria has declined in the stomachs (see "flounder" section).
+
+#### Knowledge gaps
+* The oxygen content and change in it varies over space, but the spatial aspect has not been looked at yet. I.e. when using average condition by sub-division and extent of anoxic areas we cannot test if cod living in low-oxygen areas are in poorer condition.
+* It seems difficult to determine extent of hypoxia using thresholds (which are uncertain). Instead we could use continuous oxygen variables.
+
+#### Suggested variable
+Extracted oxygen concentration at the sea floor from the model "NEMO-SCOBI". Since there does not seem to be a clear threshold, we can just model this a linear effect.
+
+We can plot the changes in oxygen concentration to get a feeling for the spatiotemporal changes:
+```{r oxygen gif, echo=FALSE, out.width = "80%"}
+# All defaults
+knitr::include_graphics("/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/cod_condition/output/gif/oxy.gif")
+```
+
+And also the relationship between condition and oxygen on a haul level:
+```{r oxygen vs condition, message=FALSE}
+d %>% 
+  ggplot(., aes(oxy_st, Fulton_K)) +
+  geom_point(size = 0.75) +
+  stat_smooth(method = "lm")
+```
+
+### 2. Increased competition with flounder
+#### Motivation
+* Flounder density has increased in the southern Baltic Sea since 2000 (Orio *et al*., 2017)
+* The probability of co-encounter with cod has increased since 1980 (Orio *et al*., 2020)
+* Cod and flounder both both feed (to a varying degree) on the only large benthic macroinvertebrate organism in the eastern Baltic: the brackish water glacial relict *Saduria entomon* (Isopoda) (Haase, *et al*., 2020; Neuenfeldt *et al*., 2019)
+* The proportion of saduria in cod stomachs is lower since 1994 than before 1988. Moreover, it is essentially the only prey together with sprat (*Sprattus sprattus*) that has changed in their diet over time. Hence, quite naturally it has been suggested to drive the change in growth and condition (e.g. Neuenfeldt *et al*., 2019; Orio *et al*., 2020; Haase *et al*., 2020).
+
+#### Knowledge gaps
+* We do not know if there is stronger crowding - what we do know is that the spatial area of co-encounter has increased. For there to be changes in the competition, the densities matter (i.e. co-encounter can be large over space, but if the density in each overlap instance is small, it should not affect competition and condition). 
+* We do not know if the ratio of $(cod + flounder) / saduria$ has increased, i.e. a stronger predation pressure (see "Variables" below), and we do not have a good picture of the time series in the eastern Baltic sea of saduria. Current climate projections suggest saduria may even expand in both range and abundance with climate change (Gogina *et al*., 2020).
+* I do not think we can yet rule out that the proportion saduria in cod diets has decreased for other reasons besides from flounder taking their food. It could also be related to the changes in depth-distribution of cod. For instance, the depth with the highest CPUE of cod is deeper now than it was in e.g. the early 90's (Orio *et al*., 2019) (average 60 m vs 50 m), and therefore even further away from common depths for saduria, which peaks at ~30 m and then declines steadily until 100 m after which it becomes very rare [but does occur!]). This relocation of cod (and thus less overlap with saduria) could be driven by the larger presence of flounder, in which case the competition would be less exploitative and perhaps more like competitive exclusion. We also know that there seems to be a clear negative co-occurence on a haul level (see "Extra comments" below)
+
+#### Variables
+We use haul-level abundance CPUE of flounder by length group from the BITS bottom trawl survey, currently >20cm, ≤20 cm or total as a covariate (see below)
+
+#### Extra comments
+Without an index for benthic food resources, we cannot calculate prey-per-predator ratios. Ideally we would also have saduria density, but it will be very difficult to compile data and model outputs on this scale and with enough resolution (Mayya Gogina, *pers. comm*). Further, it is difficult to say if there is a clear trend overall in saduria abundance. In some areas it decreases and in some it increases.
+
+Therefore we do not know if there is more competition in areas with high density of flounder, because there could also be (likely is) more food there. However, the increase in spatial overlap (w.r.t. presence/absence) is likely not driven by sudden increases in benthic food production changing the distribution of both species. Thus, if competition in is manifested as "flounder steals food from cod", we would expect that areas with high flounder densities are associated with poor cod condition (although we will not be able to test competition definitively here).
+
+We can also discuss mechanisms and results by looking at the predictions in condition over space: does it match the predicted saduria distribution (pooled data over two decades) from Gogina *et al*., (2020)? Or does the change in condition occur mostly in depths where there is little flounder and saduria? Below I plot trends in CPUE of cod and flounder over time, as well as a the predicted distribution map for saduria in years 1981-2009. It is also important to note that where there is no saduria in the Eastern Baltic sea, east of Bornholm, there is no other macrobenthos that replaces it as a food sources because of the salinity gradient. In the western Baltic sea there are more marine species.
+
+I can also mention that in the next paper, we will "zoom" in on the Swedish Baltic coast in the last ~5-6 years or so, where we have data on diet, condition and density for both species, as well as a relatively reliable index of saduria catches in trawl hauls.
+
+To get a feeling of the spatiotemporal development of CPUE, we can plot it (not the standardized predictor, for clarity) for both cod and flounder:
+```{r plot cod and flounder, fig.width=12, message=FALSE}
+# Plot cod cpue
+ggplot(d, aes(lon, lat, color = log(cpue_cod))) +
+  geom_point(size = 0.75) +
+  scale_color_viridis(option = "magma") + 
+  facet_wrap(~ year, ncol = 5) + 
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  labs(x = "lon", y = "lat") + 
+  ggtitle("log(cpue_cod)")
+
+# Plot flounder cpue
+ggplot(d, aes(lon, lat, color = log(cpue_fle))) +
+  geom_point(size = 0.75) +
+  scale_color_viridis(option = "magma") + 
+  facet_wrap(~ year, ncol = 5) + 
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  labs(x = "lon", y = "lat") + 
+  ggtitle("log(cpue_flounder)")
+```
+
+It seems that flounder has the highest density west of Bornholm and along the coasts, whereas cod condition is lowest east of Bornholm and in deep areas (see model exploration). We can also show the predicted abundance of saduria from Gogina *et al*., (2020) across years 1981-2009:
+```{r gogina map, echo=FALSE, out.width = "50%"}
+# All defaults
+knitr::include_graphics("/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/cod_condition/figures/supp/gogina2020_pred_abund_saduria.png")
+```
+
+Looks like there is no saduria in the deepest areas, nor west of Bornholm. Hence, given the exploratory analysis, it seems that condition is worst in areas with low probability of saduria occurrence (though in the deepest areas where there is no saduria we also do not catch cod of course).
+
+### 3. Increased intraspecific competition
+#### Motivation
+* The spatial distribution of Baltic cod has shrunk and is now quite contracted (Orio *et al*., 2019) compared to historical distributions under other environmental regimes and fishing pressures.
+* The size-structure has been truncated, possibly because of the combined effects of high F and increasingly size-selective fisheries (Svedäng & Hornborg) while the absolute abundance of fish below 37 cm has increased. This, together with a correlation between cohort-specific $L_\infty$ and abundance, suggests there is strong density dependence. 
+
+#### Knowledge gaps
+* The relationship between density and $L_\infty$ was evaluated on a stock-level, thus not testing if large cod catches (on a finer scale) were associated with lower condition.
+
+#### Suggested variable
+If there is strong intraspecific competition, the local density of cod should be negatively correlated with cod condition. Therefore, we use haul-level abundance CPUE of flounder by length group from the BITS bottom trawl survey, currently >30cm, ≤30 cm or total as a covariate. Though, as with the flounder variable, without an index for benthic food resources, we cannot calculate prey-per-predator ratios. Therefore we do not know if there is more competition in areas with high density of cod, because there could also be more food there. That said, the spatial contraction of the cod stock is likely *not* driven by sudden increases in benthic food production in the south-west eastern Baltic sea...
+
+### 4. Reducued availability of pelagic prey: sprat
+#### Motivation
+* The proportion of the sprat fishery conducted in the the main cod distribution area has increased (ICES, 2020)
+* The centre of the sprat distribution is along the north-east coast of the study area (ICES, 2019) (and it might have changed during the study period, see below)
+* Sprat is the second out of two food sources that differs in proportions in cod stomachs since the condition started to decline (differs from 1994 onward compared to prior to the collapse <1988)
+* The size-structure of the sprat has changed (Gårdmark *et al*., 2015) [though later diet analysis suggest cod are not that size-selective actually, e.g. Niiranen *et al*., 2019].
+
+#### Knowledge gaps
+* We do not know if cod encounter less sprat through the time series, because that requires matching local densities of cod and sprat. For instance, the highest densities of sprat may be found north of the main cod-distribution, but there may still be enough sprat in the cod-distribution. To my knowledge, now one has quantified the changes of spatial distribution of sprat over time.
+
+#### Suggested variable
+The local abundance of sprat should be positively correlated to condition. I calculate these on the finest scale available for sprat data, which is ICES rectangle (30' lat 1° lon), from the acoustic survey BIAS. I do it for all ages combined (for the above argument about size-selectivity). (In theory we can also calculate the ratio between cod:sprat, but we have a few 0's so that omits ~5% of data, I think mainly in 1993).
+
+To see the data, we can plot the rectangle-level abundance of sprat (again, not using the scaled predictor for clarity) to see how the distributions has changed in the whole Baltic Sea:
+```{r spr distribution, echo=FALSE, out.width = "100%"}
+# All defaults
+knitr::include_graphics("/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/cod_condition/figures/supp/spr_distribution.png")
+```
+
+If we only look at the densities where we have cod data, it looks a little different (not easy to detect the shift from central to northeast (north of plotting area):
+```{r plot spr abundance, message=FALSE, fig.width=12}
+# Plot spr abundance
+ggplot(d, aes(lon, lat, color = log(abun_spr))) +
+  geom_point(size = 0.75) +
+  scale_color_viridis(option = "magma") + 
+  facet_wrap(~ year, ncol = 5) + 
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  labs(x = "lon", y = "lat") + 
+  ggtitle("log(abun_spr)")
+```
+
+### 5. Reducued availability of pelagic prey: herring
+#### Motivation
+* Less clear than sprat, because the changes in distribution are not as discussed, and their proportion in the diet has not changed as much (Neuenfeldt *et al*., (2019)). Casini *et al*., (2016) did not find herring to be an important predictor for cod condition on a sub-division scale. However, it is an important and nutritional prey for especially large cod and worth looking into!
+
+#### Knowledge gaps
+* As with sprat, we do not know if cod encounter less herring through the time series. The highest densities of herring may be found north of the main cod-distribution, but there may still be enough sprat in the cod-distribution. To my knowledge, now one has quantified the distributional changes of herring.
+
+#### Suggested variable
+The local abundance of herring should be positively correlated to condition. I calculate these on the finest scale available for herring data, which is ICES rectangle (30' lat 1° lon), from the acoustic survey BIAS. I do it for all ages combined (for the above argument about size-selectivity). (In theory we can also calculate the ratio between cod:sprat, but we have a few 0's so that omits ~5% of data, I think mainly in 1993).
+
+First we can plot the rectangle-level abundance of herring (again, not using the scaled predictor for clarity) to see how the distributions has changed in the whole Baltic Sea:
+```{r her distribution, echo=FALSE, out.width = "100%"}
+# All defaults
+knitr::include_graphics("/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/cod_condition/figures/supp/her_distribution.png")
+```
+
+If we only look at the densities where we have cod data, it looks a little different (not easy to detect the shift from central to northeast (north of plotting area):
+```{r plot herring abundance, message=FALSE, fig.width=12}
+# Plot herring abundance
+ggplot(d, aes(lon, lat, color = log(abun_her))) +
+  geom_point(size = 0.75) +
+  scale_color_viridis(option = "magma") + 
+  facet_wrap(~ year, ncol = 5) + 
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  labs(x = "lon", y = "lat") + 
+  ggtitle("log(abun_her)")
+```
+
+### Lastly, some points about scale...
+How fine-scale we can/should go with respect to covariates depends on the mobility of the species, and when the sampling is conducted.
+
+Cod migrate seasonally between feeding and spawning grounds, and since the range of the distribution has shrunk towards the spawning area, the migrations are generally shorter (Hüssy *et al*., 2020). The spawning occurs over a large time (6-7 months) over the whole distribution area, and peaks around Jan/Feb in the Sounds (approximately western par of study area, between Sweden and Denmark), Feb-Jul (!) in the Arkona basin (west of Bornholm), ~July in the Bornholm basin and ~August in the Gdansk basin (Hüssy, 2011). Therefore, as we use data from the fourth quarter, it represents *roughly* the spatial location of the "between" spawning times (in contrast to the first quarter, which is the other sampling time). Hence, the location of the cod samples for cod condition are *probably somewhat* representative for the feeding area (Hüssy *et al*., 2020 shows that mobile cod use feeding grounds between Nov-Apr and spawning grounds between May-Oct.  
+
+Regarding movement, tagging experiments in the TABACOD project (Hüssy, 2020) reveal that there are essentially two types of movement behaviors of Eastern Baltic cod: stationary and mobile cod. Stationary cod have home ranges ~2400 km^2, whereas mobile cod 14700 km^2. For reference, the ICES rectangles, which is the grid-units for which we have data on the pelagics, is 3472 km^2.
+
+The figures below show the movement patterns of a stationary and mobile cod:
+```{r release location, echo=FALSE, out.width = "80%"}
+# All defaults
+knitr::include_graphics("/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/cod_condition/figures/supp/mobile_stationary_cod.png")
+```
+
+Therefore, using haul-level data on oxygen, flounder and cod density, as well as ICES-rectangle data for the pelagics, seems reasonable for the stationary cod, but perhaps they do not represent the average environment experienced up until the sampling for the mobile cod. In particular for the pelagic species, which themselves are very mobile.
+
+For now I have added models where the covariates are (rescaled) average abundance of sprat and herring by sub-division and year (because the sampling area has changed for the condition data over time, we cannot take the average CPUE on a sub-division level yet (might be other sources), and therefore we cannot calculate the pelagic:cod ratio). I also added the cod and flounder densities per ICES rectangle and year, assuming those covariates are more stationary than the pelagics. (I did not have time to run these due to the large # of knots needed for the flounder model to converge)
+
+## References
+Anderson, S.C., Keppel, E.A., Edwards, A.M. 2019. A reproducible data synopsis for over 100 species of British Columbia groundfsh. *DFO Can. Sci. Advis. Sec. Res. Doc*. 2019/041. vii + 321 p.
+
+Brander, K., 2020. Reduced growth in Baltic Sea cod may be due to mild hypoxia. *ICES Journal of Marine Science*.
+
+Casini, M., Käll, F., Hansson, M., Plikshs, M., Baranova, T., Karlsson, O., Lundström, K., Neuenfeldt, S., Gårdmark, A. and Hjelm, J., 2016. Hypoxic areas, density-dependence and food limitation drive the body condition of a heavily exploited marine fish predator. *Royal Society open science*, 3(10), p.160416.
+
+Chabot, D. and Dutil, J.D., 1999. Reduced growth of Atlantic cod in non‐lethal hypoxic conditions. *Journal of Fish Biology*, 55(3), pp.472-491.
+
+Froese, R., Thorson, J.T. and Reyes Jr, R.B., 2014. A Bayesian approach for estimating length‐weight relationships in fishes. *Journal of Applied Ichthyology*, 30(1), pp.78-85.
+
+Gogina, M., Zettler, M.L., Wåhlström, I., Andersson, H., Radtke, H., Kuznetsov, I. and MacKenzie, B.R., 2020. A combination of species distribution and ocean-biogeochemical models suggests that climate change overrides eutrophication as the driver of future distributions of a key benthic crustacean in the estuarine ecosystem of the Baltic Sea. *ICES Journal of Marine Science*, 77(6), pp.2089-2105.
+
+Grüss, A., Gao, J., Thorson, J.T., Rooper, C.N., Thompson, G., Boldt, J.L. and Lauth, R., 2020. Estimating synchronous changes in condition and density in eastern Bering Sea fishes. *Marine Ecology Progress Series*, 635, pp.169-185.
+
+Gårdmark, A., Casini, M., Huss, M., van Leeuwen, A., Hjelm, J., Persson, L. and de Roos, A.M., 2015. Regime shifts in exploited marine food webs: detecting mechanisms underlying alternative stable states using size-structured community dynamics theory. *Philosophical Transactions of the Royal Society B: Biological Sciences*, 370(1659), p.20130262.
+
+Hüssy, K., 2011. Review of western Baltic cod (Gadus morhua) recruitment dynamics. *ICES Journal of Marine Science*, 68(7), pp.1459-1471.
+
+Hüssy, K., Casini, M., Haase, S., Hilvarsson, A., Horbowy, J., Krüger-Johnsen, M., Krumme, U., Limburg, K., McQueen, K., Mion, M., Olesen, H.J. & Radtke, K. (2020). Tagging Baltic Cod – TABACOD. Eastern Baltic cod: Solving the ageing and stock assessment problems with combined state-of-the-art tagging me-thods. *DTU Aqua Report* no. 368-2020. National Institute of Aquatic Resources, Technical University of Denmark. 64 pp. + appendices
+
+ICES. 2019. Baltic Sea Ecoregion – Ecosystem overview. In Report of the ICES Advisory Committee, 2019. ICES Advice 2019, Section 4.1, https://doi.org/10.17895/ices.advice.5752.
+
+ICES. 2020. Sprat (Sprattus sprattus) in subdivisions 22–32 (Baltic Sea). In Report of the ICES Advisory Committee, 2020. ICES Advice 2020, spr.27.22-32. https://doi.org/10.17895/ices.advice.5879.
+
+Neuenfeldt, S., Bartolino, V., Orio, A., Andersen, K.H., Andersen, N.G., Niiranen, S., Bergström, U., Ustups, D., Kulatska, N. and Casini, M., 2020. Feeding and growth of Atlantic cod (Gadus morhua L.) in the eastern Baltic Sea under environmental change. *ICES Journal of Marine Science*, 77(2), pp.624-632.
+
+Neuenfeldt, S., Bartolino, V., Orio, A., Andersen, K.H., Andersen, N.G., Niiranen, S., Bergström, U., Ustups, D., Kulatska, N. and Casini, M., 2020. Reply to “Reduced growth in Baltic Sea cod may be due to mild hypoxia”—a comment to Neuenfeldt *et al*.(2020). *ICES Journal of Marine Science*, 77(5), pp.2006-2008.
+
+Niiranen, S., Orio, A., Bartolino, V., Bergström, U., Kallasvuo, M., Neuenfeldt, S., Ustups, D. and Casini, M., 2019. Predator-prey body size relationships of cod in a low-diversity marine system. *Marine Ecology Progress Series*, 627, pp.201-206.
+
+Orio, A., Florin, A.B., Bergström, U., Šics, I., Baranova, T. and Casini, M., 2017. Modelling indices of abundance and size-based indicators of cod and flounder stocks in the Baltic Sea using newly standardized trawl survey data. *ICES Journal of Marine Science*, 74(5), pp.1322-1333.
+
+Orio, A., Bergström, U., Florin, A.B., Lehmann, A., Šics, I. and Casini, M., 2019. Spatial contraction of demersal fish populations in a large marine ecosystem. *Journal of Biogeography*, 46(3), pp.633-645.
+
+Orio, A., Bergström, U., Florin, A-B., Sics, I. and Casini, M., 2020. Long-term changes in spatial overlap between interacting cod and flounder in the Baltic Sea. *Hydrobiologia*, 847(11), pp.2541-2553.
+
+Svedäng, H. and Hornborg, S., 2014. Selective fishing induces density-dependent growth. *Nature communications*, 5(1), pp.1-6.
+
+Thorson, J.T., 2015. Spatio-temporal variation in fish condition is not consistently explained by density, temperature, or season for California Current groundfishes. *Marine Ecology Progress Series*, 526, pp.101-112.
