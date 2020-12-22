@@ -13,7 +13,7 @@
 #   After that, we join in the abundance of sprat and herring. This is available on 
 #   an ICES rectangle-level, so many hauls will end up with the same abundance
 # 
-#   Lastly, we join in OCEANOGRAPHIC data (oxygen, temperature).This is model output
+#   Lastly, we join in OCEANOGRAPHIC data (oxygen, temperature). This is model output
 #   from NEMO_Nordic_SCOBI, downloaded from:
 #   https://resources.marine.copernicus.eu/?option=com_csw&task=results
 #
@@ -60,6 +60,7 @@ world <- ne_countries(scale = "medium", returnclass = "sf")
 
 # Specify map ranges
 ymin = 54; ymax = 58; xmin = 9.5; xmax = 22
+
 
 # B. READ HAUL DATA ================================================================
 # Load HH data using the DATRAS package to get catches
@@ -407,7 +408,7 @@ spr <- read_xlsx("data/BIAS/abundances_rectangles_1991-2019.xlsx",
   rename("StatRec" = "Rec") %>%
   mutate(StatRec = as.factor(StatRec),
          Species = "Sprat",
-         abun_spr = `Age 0`+`Age 1`+`Age 2`+`Age 3`+`Age 4`+`Age 5`+`Age 6`+`Age 7`+`Age 8+`, # omitting `1+` here
+         abun_spr = `Age 1`+`Age 2`+`Age 3`+`Age 4`+`Age 5`+`Age 6`+`Age 7`+`Age 8+`, # omitting `0+` here
          ID3 = paste(StatRec, Year, sep = ".")) # Make new ID)
   
 her <- read_xlsx("data/BIAS/abundances_rectangles_1991-2019.xlsx",
@@ -416,41 +417,44 @@ her <- read_xlsx("data/BIAS/abundances_rectangles_1991-2019.xlsx",
   rename("StatRec" = "Rect2") %>% # This is not called Rec in the data for some reason
   mutate(StatRec = as.factor(StatRec),
          Species = "Herring",
-         abun_her = `Age 0`+`Age 1`+`Age 2`+`Age 3`+`Age 4`+`Age 5`+`Age 6`+`Age 7`+`Age 8+`, # omitting `1+` here
+         abun_her = `Age 1`+`Age 2`+`Age 3`+`Age 4`+`Age 5`+`Age 6`+`Age 7`+`Age 8+`, # omitting `1+` here
          ID3 = paste(StatRec, Year, sep = ".")) # Make new ID
 
 # Plot distribution over time in the whole area
-# spr %>%
-#   mutate(lon = ices.rect(spr$StatRec)$lon) %>% 
-#   mutate(lat = ices.rect(spr$StatRec)$lat) %>% 
-#   filter(! StatRec %in% c("41G0", "41G1", "41G2", "42G1", "42G2", "43G1", "43G2", "44G0", "44G1")) %>% 
-#   ggplot(., aes(lon, lat, color = log(abun_spr))) +
-#   geom_point(size = 2.5, shape = 15) +
-#   scale_color_viridis() +
-#   facet_wrap(~ Year, ncol = 5) + 
-#   geom_sf(data = world, inherit.aes = F, size = 0.2) +
-#   coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
-#   labs(x = "lon", y = "lat") + 
-#   ggtitle("log(abun_spr)") +
-#   NULL
+spr %>%
+  mutate(lon = ices.rect(spr$StatRec)$lon) %>%
+  mutate(lat = ices.rect(spr$StatRec)$lat) %>%
+  filter(! StatRec %in% c("41G0", "41G1", "41G2", "42G1", "42G2", "43G1", "43G2", "44G0", "44G1")) %>%
+  ggplot(., aes(lon, lat, color = log(abun_spr))) +
+  geom_point(size = 2.5, shape = 15) +
+  scale_color_viridis() +
+  facet_wrap(~ Year, ncol = 5) +
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  labs(x = "lon", y = "lat") +
+  ggtitle("log(abun_spr)") +
+  NULL
 
-# ggsave("figures/supp/spr_distribution.png", width = 10, height = 10, dpi = 600)
+ggsave("figures/supp/spr_distribution.png", width = 10, height = 10, dpi = 600)
 
-# her %>%
-#   mutate(lon = ices.rect(her$StatRec)$lon) %>% 
-#   mutate(lat = ices.rect(her$StatRec)$lat) %>% 
-#   filter(! StatRec %in% c("41G0", "41G1", "41G2", "42G1", "42G2", "43G1", "43G2", "44G0", "44G1")) %>% 
-#   ggplot(., aes(lon, lat, color = log(abun_her))) +
-#   geom_point(size = 2.5, shape = 15) +
-#   scale_color_viridis() +
-#   facet_wrap(~ Year, ncol = 5) + 
-#   geom_sf(data = world, inherit.aes = F, size = 0.2) +
-#   coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
-#   labs(x = "lon", y = "lat") + 
-#   ggtitle("log(abun_her)") +
-#   NULL
+her %>%
+  mutate(lon = ices.rect(her$StatRec)$lon) %>%
+  mutate(lat = ices.rect(her$StatRec)$lat) %>%
+  filter(! StatRec %in% c("41G0", "41G1", "41G2", "42G1", "42G2", "43G1", "43G2", "44G0", "44G1")) %>%
+  ggplot(., aes(lon, lat, color = log(abun_her))) +
+  geom_point(size = 2.5, shape = 15) +
+  scale_color_viridis() +
+  facet_wrap(~ Year, ncol = 5) +
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  labs(x = "lon", y = "lat") +
+  ggtitle("log(abun_her)") +
+  NULL
 
-# ggsave("figures/supp/her_distribution.png", width = 10, height = 10, dpi = 600)
+ggsave("figures/supp/her_distribution.png", width = 10, height = 10, dpi = 600)
+
+# As can be seen in the above plots, we don't have data for all rectangles in all years
+# It is important those rectangles are made NA - not 0 - when merging
 
 # Check distribution of data
 # https://www.researchgate.net/publication/47933620_Environmental_factors_and_uncertainty_in_fisheries_management_in_the_northern_Baltic_Sea/figures?lo=1
@@ -543,7 +547,7 @@ her_sum %>%
 dat <- dat %>% mutate(StatRec = as.factor(StatRec))
 unique(is.na(dat$StatRec))
 
-# Create ID3 to match pelagics data
+# Create ID3 in main data to match pelagics data
 dat <- dat %>% mutate(ID3 = paste(StatRec, Year, sep = "."))
 
 # Are there any StatRec that are in the condition data that are not in the pelagics data?
@@ -579,11 +583,80 @@ dat %>% filter(ID == "1991.4.SOL.H20.34.49")
 
 nrow(dat)
 
-# REPLACE NA ABUNDANCES WITH 0
+# Replace NA abundances with 0 (But not all! Some are true NA's)
 dat$abun_her[is.na(dat$abun_her)] <- 0
 dat$abun_spr[is.na(dat$abun_spr)] <- 0
 
 unique(is.na(dat$abun_spr))
+unique(is.na(dat$abun_her))
+
+# Now, if an ID3 is not in the original sprat and herring data, it should in fact be NA
+# Test for a StatRec that is not in Year 1993: spr %>% filter(StatRec == "39G5") %>% distinct(Year)
+# Now get a vector of all the non-NA rectangles for spr and herring (should be the same tho)
+spr_non_na_rect <- spr %>% distinct(ID3)
+her_non_na_rect <- her %>% distinct(ID3)
+
+# Now replace the 0's with NAs if they are NOT in the above vectors
+dat <- dat %>% mutate(abun_spr2 = ifelse(ID3 %in% spr_non_na_rect$ID3, abun_spr, NA),
+                      abun_her2 = ifelse(ID3 %in% her_non_na_rect$ID3, abun_her, NA))
+
+unique(is.na(dat$abun_spr))
+unique(is.na(dat$abun_her))
+
+# Plot to see it's correct:
+p1 <- dat %>%
+  filter(Year < 1995) %>% 
+  #filter(! StatRec %in% c("41G0", "41G1", "41G2", "42G1", "42G2", "43G1", "43G2", "44G0", "44G1")) %>%
+  ggplot(., aes(ShootLong, ShootLat, color = abun_spr)) +
+  geom_point(size = 2.5, shape = 15) +
+  scale_color_viridis() +
+  facet_wrap(~ Year, ncol = 2) +
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  NULL
+
+p2 <- dat %>%
+  filter(Year < 1995) %>% 
+  #filter(! StatRec %in% c("41G0", "41G1", "41G2", "42G1", "42G2", "43G1", "43G2", "44G0", "44G1")) %>%
+  ggplot(., aes(ShootLong, ShootLat, color = abun_spr2)) +
+  geom_point(size = 2.5, shape = 15) +
+  scale_color_viridis() +
+  facet_wrap(~ Year, ncol = 2) +
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  NULL
+
+p1+p2
+
+# Plot to see it's correct:
+p3 <- dat %>%
+  filter(Year < 1995) %>% 
+  #filter(! StatRec %in% c("41G0", "41G1", "41G2", "42G1", "42G2", "43G1", "43G2", "44G0", "44G1")) %>%
+  ggplot(., aes(ShootLong, ShootLat, color = abun_her)) +
+  geom_point(size = 2.5, shape = 15) +
+  scale_color_viridis() +
+  facet_wrap(~ Year, ncol = 2) +
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  NULL
+
+p4 <- dat %>%
+  filter(Year < 1995) %>% 
+  #filter(! StatRec %in% c("41G0", "41G1", "41G2", "42G1", "42G2", "43G1", "43G2", "44G0", "44G1")) %>%
+  ggplot(., aes(ShootLong, ShootLat, color = abun_her2)) +
+  geom_point(size = 2.5, shape = 15) +
+  scale_color_viridis() +
+  facet_wrap(~ Year, ncol = 2) +
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  NULL
+
+p3+p4
+
+# Looks alright! We have NA's now in the variable abun_her2 and spr_her2. We can now replace
+# abun_her and abun_spr with those columns
+
+dat <- dat %>% mutate(abun_her = abun_her2, abun_spr = abun_spr2) %>% dplyr::select(-abun_spr2, -abun_her2)
 
 # Test an ID3 in spr/her and dat
 # > head(unique(dat$ID3))
@@ -736,6 +809,8 @@ test_herring %>%
   ggplot(., aes(Year, abun_her_sd, shape = source, color = source)) +
   geom_point(alpha = 0.4, size = 4) + 
   facet_wrap(~ Sub_Div, scales = "free")
+
+# Yes they are the same.
 
 
 #** Regarding sizes ================================================================
@@ -1009,9 +1084,245 @@ big_dat_sub_oxy2 <- big_dat_sub_oxy %>% distinct(id_oxy, .keep_all = TRUE)
 # Join the data with raster-derived oxygen with the full condition data
 dat <- left_join(dat, big_dat_sub_oxy2, by = "id_oxy")
 
+
 # ** Temperature ===================================================================
 # Open the netCDF file
-# This is currently very bugged... see example below in local folder!
+ncin <- nc_open("data/NEMO_Nordic_SCOBI/dataset-reanalysis-nemo-monthlymeans_1608127623694.nc")
+
+print(ncin)
+
+# Get longitude and latitude
+lon <- ncvar_get(ncin,"longitude")
+nlon <- dim(lon)
+head(lon)
+
+lat <- ncvar_get(ncin,"latitude")
+nlat <- dim(lat)
+head(lat)
+
+# Get time
+time <- ncvar_get(ncin,"time")
+time
+
+tunits <- ncatt_get(ncin,"time","units")
+nt <- dim(time)
+nt
+tunits
+
+# Get temperature
+dname <- "bottomT"
+
+temp_array <- ncvar_get(ncin,dname)
+dlname <- ncatt_get(ncin,dname,"long_name")
+dunits <- ncatt_get(ncin,dname,"units")
+fillvalue <- ncatt_get(ncin,dname,"_FillValue")
+dim(temp_array)
+
+# Get global attributes
+title <- ncatt_get(ncin,0,"title")
+institution <- ncatt_get(ncin,0,"institution")
+datasource <- ncatt_get(ncin,0,"source")
+references <- ncatt_get(ncin,0,"references")
+history <- ncatt_get(ncin,0,"history")
+Conventions <- ncatt_get(ncin,0,"Conventions")
+
+# Convert time: split the time units string into fields
+tustr <- strsplit(tunits$value, " ")
+tdstr <- strsplit(unlist(tustr)[3], "-")
+tmonth <- as.integer(unlist(tdstr)[2])
+tday <- as.integer(unlist(tdstr)[3])
+tyear <- as.integer(unlist(tdstr)[1])
+
+# Here I deviate from the guide a little bit. Save this info:
+dates <- chron(time, origin = c(tmonth, tday, tyear))
+
+# Crop the date variable
+months <- as.numeric(substr(dates, 2, 3))
+years <- as.numeric(substr(dates, 8, 9))
+years <- ifelse(years > 90, 1900 + years, 2000 + years)
+
+# Replace netCDF fill values with NA's
+temp_array[temp_array == fillvalue$value] <- NA
+
+# We only use Quarter 4 in this analysis, so now we want to loop through each time step,
+# and if it is a good month save it as a raster.
+# First get the index of months that correspond to Q4
+months
+
+index_keep <- which(months > 9)
+
+# Quarter 4 by keeping months in index_keep
+temp_q4 <- temp_array[, , index_keep]
+
+months_keep <- months[index_keep]
+
+years_keep <- years[index_keep]
+
+# Now we have an array with only Q4 data...
+# We need to now calculate the average within a year.
+# Get a sequence that takes every third value between 1: number of months (length)
+loop_seq <- seq(1, dim(temp_q4)[3], by = 3)
+
+# Create objects that will hold data
+dlist <- list()
+temp_10 <- c()
+temp_11 <- c()
+temp_12 <- c()
+temp_ave <- c()
+
+# Loop through the vector sequence with every third value, then take the average of
+# three consecutive months (i.e. q4)
+for(i in loop_seq) {
+  
+  temp_10 <- temp_q4[, , (i)]
+  temp_11 <- temp_q4[, , (i + 1)]
+  temp_12 <- temp_q4[, , (i + 2)]
+  
+  temp_ave <- (temp_10 + temp_11 + temp_12) / 3
+  
+  list_pos <- ((i/3) - (1/3)) + 1 # to get index 1:n(years)
+  
+  dlist[[list_pos]] <- temp_ave
+  
+}
+
+# Now name the lists with the year:
+names(dlist) <- unique(years_keep)
+
+# Now I need to make a loop where I extract the raster value for each year...
+# The condition data is called dat so far in this script
+
+# Filter years in the condition data frame to only have the years I have temperature for
+d_sub_temp <- dat %>% filter(Year %in% names(dlist)) %>% droplevels()
+
+# Create data holding object
+data_list <- list()
+
+# ... And for the temperature raster
+raster_list <- list()
+
+# Create factor year for indexing the list in the loop
+d_sub_temp$Year_f <- as.factor(d_sub_temp$Year)
+
+# Loop through each year and extract raster values for the condition data points
+for(i in unique(d_sub_temp$Year_f)) {
+  
+  # Subset a year
+  temp_slice <- dlist[[i]]
+  
+  # Create raster for that year (i)
+  r <- raster(t(temp_slice), xmn = min(lon), xmx = max(lon), ymn = min(lat), ymx = max(lat),
+              crs = CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs+ towgs84=0,0,0"))
+  
+  # Flip...
+  r <- flip(r, direction = 'y')
+  
+  plot(r, main = i)
+  
+  # Filter the same year (i) in the condition data and select only coordinates
+  d_slice <- d_sub_temp %>% filter(Year_f == i) %>% dplyr::select(ShootLong, ShootLat)
+  
+  # Make into a SpatialPoints object
+  data_sp <- SpatialPoints(d_slice)
+  
+  # Extract raster value (temperature)
+  rasValue <- raster::extract(r, data_sp)
+  
+  # Now we want to plot the results of the raster extractions by plotting the condition
+  # data points over a raster and saving it for each year.
+  # Make the SpatialPoints object into a raster again (for pl)
+  df <- as.data.frame(data_sp)
+  
+  # Add in the raster value in the df holding the coordinates for the condition data
+  d_slice$temp <- rasValue
+  
+  # Add in which year
+  d_slice$year <- i
+  
+  # Create a index for the data last where we store all years (because our loop index
+  # i is not continuous, we can't use it directly)
+  index <- as.numeric(d_slice$year)[1] - 1992
+  
+  # Add each years' data in the list
+  data_list[[index]] <- d_slice
+  
+  # Save to check each year is ok! First convert the raster to points for plotting
+  # (so that we can use ggplot)
+  map.p <- rasterToPoints(r)
+  
+  # Make the points a dataframe for ggplot
+  df_rast <- data.frame(map.p)
+  
+  # Rename y-variable and add year
+  df_rast <- df_rast %>% rename("temp" = "layer") %>% mutate(year = i)
+  
+  # Add each years' raster data frame in the list
+  raster_list[[index]] <- df_rast
+  
+  # Make appropriate column headings
+  colnames(df_rast) <- c("Longitude", "Latitude", "temp")
+  
+  # Now make the map
+  ggplot(data = df_rast, aes(y = Latitude, x = Longitude)) +
+    geom_raster(aes(fill = temp)) +
+    geom_point(data = d_slice, aes(x = ShootLong, y = ShootLat, fill = temp),
+               color = "black", size = 5, shape = 21) +
+    theme_bw() +
+    geom_sf(data = world, inherit.aes = F, size = 0.2) +
+    coord_sf(xlim = c(min(dat$ShootLong), max(dat$ShootLong)),
+             ylim = c(min(dat$ShootLat), max(dat$ShootLat))) +
+    scale_colour_gradientn(colours = rev(terrain.colors(10)),
+                           limits = c(2, 17)) +
+    scale_fill_gradientn(colours = rev(terrain.colors(10)),
+                         limits = c(2, 17)) +
+    NULL
+  
+  ggsave(paste("figures/supp/temp_rasters/", i,".png", sep = ""),
+         width = 6.5, height = 6.5, dpi = 600)
+  
+}
+
+# Now create a data frame from the list of all annual values
+big_dat_temp <- dplyr::bind_rows(data_list)
+big_raster_dat_temp <- dplyr::bind_rows(raster_list)
+
+big_dat_temp %>% drop_na(temp) %>% summarise(max = max(temp))
+big_dat_temp %>% drop_na(temp) %>% summarise(min = min(temp))
+
+# Plot data, looks like there's big inter-annual variation but a positive trend
+big_raster_dat_temp %>%
+  group_by(year) %>%
+  drop_na(temp) %>%
+  summarise(mean_temp = mean(temp)) %>%
+  mutate(year_num = as.numeric(year)) %>%
+  ggplot(., aes(year_num, mean_temp)) +
+  geom_point(size = 2) +
+  stat_smooth(method = "lm") +
+  NULL
+
+# Now add in the new temperature column in the original data:
+str(d_sub_temp)
+str(big_dat_temp)
+
+# Create an ID for matching the temperature data with the condition data
+dat$id_temp <- paste(dat$Year, dat$ShootLong, dat$ShootLat, sep = "_")
+big_dat_temp$id_temp <- paste(big_dat_temp$year, big_dat_temp$ShootLong, big_dat_temp$ShootLat, sep = "_")
+
+# Which id's are not in the condition data (dat)? (It's because I don't have those years, not about the location)
+ids <- dat$id_temp[!dat$id_temp %in% c(big_dat_temp$id_temp)]
+
+unique(ids)
+
+# Select only the columns we want to merge
+big_dat_sub_temp <- big_dat_temp %>% dplyr::select(id_temp, temp)
+
+# Remove duplicate ID (one temp value per id)
+big_dat_sub_temp2 <- big_dat_sub_temp %>% distinct(id_temp, .keep_all = TRUE)
+
+# Join the data with raster-derived oxygen with the full condition data
+dat <- left_join(dat, big_dat_sub_temp2, by = "id_temp")
+
+colnames(dat)
 
 
 # H. PREPARE DATA FOR ANALYSIS =====================================================
@@ -1022,22 +1333,25 @@ d <- dat %>%
          "year" = "Year",
          "sex" = "Sex",
          "depth" = "Depth") %>% 
-  mutate(Fulton_K = weight_g/(0.01*length_cm^3), # cod-specific, from FishBase
+  mutate(Fulton_K = weight_g/(0.01*length_cm^3), # not cod-specific
          sex = ifelse(sex == -9, "U", sex),
          sex = as.factor(sex),
          year_f = as.factor(year)) %>% 
   filter(Fulton_K < 3 & Fulton_K > 0.15) %>%  # Visual exploration, larger values likely data entry errors
   drop_na(oxy) %>% 
+  drop_na(temp) %>% 
   filter(depth > 0) %>% 
+  dplyr::select(-id_oxy, -id_temp) %>% 
   ungroup()
 
 # filter(d, Fulton_K < 0.5) %>% dplyr::select(Fulton_K, length_cm, weight_g) %>% arrange(Fulton_K) %>% as.data.frame()
 # filter(d, Fulton_K > 2.5) %>% dplyr::select(Fulton_K, length_cm, weight_g) %>% arrange(Fulton_K) %>% as.data.frame()
 
-# Calculate average cod & flounder densities by ICES rectangle
+# Calculate average cod & flounder densities and oxygen and temperatures, by ICES rectangle
 d <- d %>% 
   group_by(StatRec, year) %>% 
   mutate(oxy_rec = mean(oxy),
+         temp_rec = mean(temp),
          cpue_cod_rec = mean(cpue_cod),
          cpue_fle_rec = mean(cpue_fle)) %>% 
   ungroup()
@@ -1054,7 +1368,8 @@ d <- d %>%
 # Finally, select only the main variables to make the data file smaller (for GitHub)
 d_analysis <- d %>% dplyr::select(year, depth, lat, lon, length_cm, weight_g, Fulton_K,
                                   cpue_cod, cpue_cod_rec, cpue_fle, cpue_fle_rec,
-                                  oxy, oxy_rec, abun_spr, abun_spr_sd, abun_her, abun_her_sd)
+                                  oxy, oxy_rec, temp, temp_rec, 
+                                  abun_spr, abun_spr_sd, abun_her, abun_her_sd)
 
 write.csv(d_analysis, file = "data/for_analysis/mdat_cond.csv", row.names = FALSE)
 
