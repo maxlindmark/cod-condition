@@ -1,0 +1,478 @@
+---
+title: "Condition model"
+author: "Max Lindmark & Sean Andersson"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include = FALSE, cache=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 12,
+  fig.asp = 0.618,
+  fig.align ='center'
+)
+```
+
+## Aim
+Implement regularization using Gaussian priors with mean 0 different standard deviations, and compare the MSE on withheld and training data.
+
+## Fit models
+### Read data and set up spde mesh
+```{r packages, message=FALSE, warning=TRUE}
+library(tidyverse); theme_set(theme_classic())
+library(tidylog)
+library(viridis)
+library(sdmTMB) # remotes::install_github("pbs-assess/sdmTMB")
+library(marmap)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(sf)
+library(RColorBrewer)
+library(gganimate)
+library(gifski)
+library(latex2exp)
+library(patchwork)
+library(png)
+library(qwraps2) # To load entire cache in interactive r session, do: qwraps2::lazyload_cache_dir(path = "R/analysis/condition_model_cache/html")
+
+# For adding maps to plots
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+# Specify map ranges
+ymin = 54; ymax = 58; xmin = 9.5; xmax = 22
+```
+
+Now read data:
+
+```{r read and process data, message=FALSE, warning=FALSE}
+d <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cond.csv")
+
+# Calculate standardized variables
+# Calculate standardized variables
+d <- d %>% 
+  mutate(ln_length_cm = log(length_cm),
+         ln_weight_g = log(weight_g),
+         oxy_st = oxy,
+         oxy_rec_st = oxy_rec,
+         temp_st = temp,
+         temp_rec_st = temp_rec,
+         abun_her_st = abun_her,
+         abun_her_sd_st = abun_her_sd,
+         abun_spr_st = abun_spr,
+         abun_spr_sd_st = abun_spr_sd,
+         cpue_cod_st = cpue_cod,
+         cpue_cod_rec_st = cpue_cod_rec,
+         cpue_fle_st = cpue_fle,
+         cpue_fle_rec_st = cpue_fle_rec,
+         depth_st = depth) %>%
+  mutate_at(c("oxy_st", "oxy_rec_st", "temp_st", "temp_rec_st",
+              "abun_her_st", "abun_her_sd_st", "abun_spr_st", "abun_spr_sd_st",
+              "cpue_cod_st", "cpue_cod_rec_st", "cpue_fle_st", "cpue_fle_rec_st",
+              "depth_st"),
+            ~(scale(.) %>% as.vector)) %>% 
+  mutate(year = as.integer(year))
+```
+
+Read the prediction grids:
+
+```{r read and process prediction grid, message=FALSE, warning=FALSE}
+pred_grid <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid.csv")
+
+pred_grid <- pred_grid %>%
+  mutate(ln_length_cm = log(1)) %>% # For now we'll predict changes in the intercept ("condition factor")
+  mutate(X = lon,
+         Y = lat,
+         year = as.integer(year),
+         depth_st = 0) %>% # In this prediction grid I keep depth at its mean, below I have a more realistic prediction grid
+  filter(year %in% c(unique(d$year)))
+
+# And now read in pred_grid2 which has oxygen values at location and time and depth:
+pred_grid2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid2.csv")
+
+pred_grid2 <- pred_grid2 %>%
+  mutate(ln_length_cm = log(1)) %>% # For now we'll predict changes in the intercept ("condition factor")
+  mutate(X = lon, Y = lat, year = as.integer(year)) %>% 
+  filter(year %in% c(unique(d$year))) %>% 
+  mutate(depth_st = (depth - mean(d$depth))/sd(d$depth),
+         temp_st = (temp - mean(d$temp))/sd(d$temp),
+         oxy_st = (oxy - mean(d$oxy))/sd(d$oxy)) # Need to scale these to the mean and sd in the data!
+```
+
+In earlier versions we used this: `spde <- make_mesh(data = d, xy_cols = c("lon", "lat"), n_knots = 110, type = "kmeans", seed = 42)`. But now we have even more islands in the data since I am using also the western Baltic Sea, so we will use the `add_barrier_mesh` to include an island effect (following the example function). Note this also means we can increase the # of knots before hitting convergence issues (how much varies from model to model though!)
+
+```{r make barrier spde mesh, results='hide', message=FALSE}
+# Crop the polygon for plotting and efficiency:
+baltic_coast <- suppressWarnings(suppressMessages(
+  st_crop(world,
+          c(xmin = xmin, ymin = ymin, xmax = xmax, ymax = ymax))))
+
+crs <- 4326 # https://en.wikipedia.org/wiki/EPSG_Geodetic_Parameter_Dataset#Common_EPSG_codes, WGS84
+
+st_crs(baltic_coast) <- 4326 # 'WGS84'; necessary on some installs
+baltic_coast <- st_transform(baltic_coast, crs)
+
+# Project our survey data coordinates:
+survey <- d %>% dplyr::select(lon, lat, ln_weight_g) %>%
+  st_as_sf(crs = 4326, coords = c("lon", "lat")) 
+
+# Prepare for making the mesh
+# First, we will extract the coordinates:
+surv_coords <- st_coordinates(survey)
+
+spde <- make_mesh(d, xy_cols = c("lon", "lat"),
+                  n_knots = 160, # 180 works nice as well but 160 works with the 80% training data
+                  type = "kmeans", seed = 42)
+
+# Add on the barrier mesh component:
+bspde <- add_barrier_mesh(
+  spde, baltic_coast, range_fraction = 0.2,
+  proj_scaling = 1, plot = TRUE
+)
+
+# In the above, the grey dots are the centre of triangles that are in the
+# ocean. The red crosses are centres of triangles that are over land. The
+# spatial range will be assumed to be 0.2 (`range_fraction`) over land compared
+# to over water.
+
+# We can make a more advanced plot if we want:
+mesh_df_water <- bspde$mesh_sf[bspde$normal_triangles, ]
+mesh_df_land <- bspde$mesh_sf[bspde$barrier_triangles, ]
+
+# Now, when we fit our model with the new mesh, it will automatically
+# include a barrier structure in the spatial correlation:
+```
+
+### Default model (no additional covariates)
+```{r without covariates, cache=TRUE}
+mdef <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st -1, time_varying = ~ 1, data = d, time = "year",
+                spde = bspde, family = student(link = "identity", df = 5), ar1_fields = TRUE,
+                include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
+                silent = TRUE, newton_steps = 1, reml = FALSE)
+
+tidy(mdef, conf.int = TRUE)
+```
+
+### Full model
+```{r full model, cache=TRUE}
+mfull <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st + oxy_st + oxy_rec_st + cpue_fle_st + cpue_fle_rec_st + cpue_cod_st + cpue_cod_rec_st + abun_spr_st + abun_spr_sd_st + abun_her_st + abun_her_sd_st + oxy_st*depth_st + temp_st*depth_st -1, time_varying = ~ 1, data = d, time = "year",
+                spde = bspde, family = student(link = "identity", df = 5), ar1_fields = TRUE,
+                include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
+                silent = TRUE, newton_steps = 1, reml = FALSE)
+
+tidy(mfull, conf.int = TRUE)
+```
+
+### Full model with regularization
+```{r sd = 1, cache=TRUE}
+# Create a vector with standard deviations for the normal distribution (mean 0) that is the prior for the fixed effect. The penalties vector should correspond to the columns of the X_ij matrix.
+penalty_vec <- rep(1, length(colnames(mfull$tmb_data$X_ij)))
+
+# Remove penalty for the length-coefficient
+penalty_vec[1] <- NA
+
+mreg <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st + oxy_st + oxy_rec_st + cpue_fle_st + cpue_fle_rec_st + cpue_cod_st + cpue_cod_rec_st + abun_spr_st + abun_spr_sd_st + abun_her_st + abun_her_sd_st + oxy_st*depth_st + temp_st*depth_st -1, time_varying = ~ 1, data = d, time = "year",
+               spde = bspde, family = student(link = "identity", df = 5), ar1_fields = TRUE,
+               include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
+               silent = TRUE, newton_steps = 1, reml = FALSE,
+               penalties = penalty_vec)
+
+tidy(mreg, conf.int = TRUE)
+```
+
+### Full model with regularization (sd = 0.1)
+
+```{r sd = 0.1, cache=TRUE}
+# Create a vector with standard deviations for the normal distribution (mean 0) that is the prior for the fixed effect. The penalties vector should correspond to the columns of the X_ij matrix.
+penalty_vec2 <- rep(0.1, length(colnames(mfull$tmb_data$X_ij)))
+
+# Remove penalty for the length-coefficient
+penalty_vec2[1] <- NA
+
+mreg2 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st + oxy_st + oxy_rec_st + cpue_fle_st + cpue_fle_rec_st + cpue_cod_st + cpue_cod_rec_st + abun_spr_st + abun_spr_sd_st + abun_her_st + abun_her_sd_st + oxy_st*depth_st + temp_st*depth_st -1, time_varying = ~ 1, data = d, time = "year",
+               spde = bspde, family = student(link = "identity", df = 5), ar1_fields = TRUE,
+               include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
+               silent = TRUE, newton_steps = 1, reml = FALSE,
+               penalties = penalty_vec2)
+
+tidy(mreg2, conf.int = TRUE)
+```
+
+### Full model with regularization (sd = 0.01)
+
+```{r sd = 0.01, cache=TRUE}
+# Create a vector with standard deviations for the normal distribution (mean 0) that is the prior for the fixed effect. The penalties vector should correspond to the columns of the X_ij matrix.
+penalty_vec3 <- rep(0.01, length(colnames(mfull$tmb_data$X_ij)))
+
+# Remove penalty for the length-coefficient
+penalty_vec3[1] <- NA
+
+mreg3 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st + oxy_st + oxy_rec_st + cpue_fle_st + cpue_fle_rec_st + cpue_cod_st + cpue_cod_rec_st + abun_spr_st + abun_spr_sd_st + abun_her_st + abun_her_sd_st + oxy_st*depth_st + temp_st*depth_st -1, time_varying = ~ 1, data = d, time = "year",
+               spde = bspde, family = student(link = "identity", df = 5), ar1_fields = TRUE,
+               include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
+               silent = TRUE, newton_steps = 1, reml = FALSE,
+               penalties = penalty_vec3)
+
+tidy(mreg3, conf.int = TRUE)
+```
+
+### Full model with regularization (sd = 0.001)
+
+```{r sd = 0.001, cache=TRUE}
+# Create a vector with standard deviations for the normal distribution (mean 0) that is the prior for the fixed effect. The penalties vector should correspond to the columns of the X_ij matrix.
+penalty_vec4 <- rep(0.001, length(colnames(mfull$tmb_data$X_ij)))
+
+# Remove penalty for the length-coefficient
+penalty_vec4[1] <- NA
+
+mreg4 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st + oxy_st + oxy_rec_st + cpue_fle_st + cpue_fle_rec_st + cpue_cod_st + cpue_cod_rec_st + abun_spr_st + abun_spr_sd_st + abun_her_st + abun_her_sd_st + oxy_st*depth_st + temp_st*depth_st -1, time_varying = ~ 1, data = d, time = "year",
+               spde = bspde, family = student(link = "identity", df = 5), ar1_fields = TRUE,
+               include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
+               silent = TRUE, newton_steps = 1, reml = FALSE,
+               penalties = penalty_vec4)
+
+tidy(mreg4, conf.int = TRUE)
+```
+
+## Compare estimates across models
+```{r compare, cache=TRUE}
+est <- bind_rows(tidy(mfull, conf.int = TRUE) %>% mutate(model = "full no prior"),
+                 tidy(mreg, conf.int = TRUE) %>% mutate(model = "sd=1"),
+                 tidy(mreg2, conf.int = TRUE) %>% mutate(model = "sd=0.1"),
+                 tidy(mreg3, conf.int = TRUE) %>% mutate(model = "sd=0.01"),
+                 tidy(mreg4, conf.int = TRUE) %>% mutate(model = "sd=0.001"))
+
+dodge <- position_dodge(width = 0.5)
+
+mfull %>%
+  tidy(conf.int = TRUE) %>%
+  filter(!term == "ln_length_cm") %>% 
+  ggplot(., aes(estimate)) + geom_histogram()
+
+x <- data.frame(sample = rnorm(10000, 0, 0.1))
+
+ggplot(x, aes(sample)) +
+  geom_density() +
+  geom_vline(xintercept = c(-0.02, 0.02), linetype = 2)
+
+mreg4 %>%
+  tidy(conf.int = TRUE) %>%
+  filter(!term == "ln_length_cm") %>% 
+  ggplot(., aes(estimate)) + geom_histogram()
+
+
+# Check the length-exponent real quick
+est %>% filter(term == "ln_length_cm") 
+
+est %>% 
+  filter(!term == "ln_length_cm") %>% 
+  ggplot(., aes(reorder(term, estimate), estimate, color = model)) +
+  geom_point(size = 2, position = dodge) + 
+  geom_hline(yintercept = 0, linetype = 2, alpha = 0.3) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2, position = dodge) +
+  coord_flip() +
+  scale_color_brewer(palette = "Dark2") +
+  theme_classic(base_size = 16)
+  NULL
+```
+
+The difference in parameter estimates are very small when I include a prior, unless the sd is tight. See if the full model is overfit. If it has a tendency to overfitting compared to the default model, do regularization. Does the sd=1 regularization affect overfitting? If no, try smaller sds. How small? Determine which sd gives the best cross val error.
+
+### Evalute out-of-sample predictive accuracy
+```{r prep data for cross val, cache=TRUE}
+# Remove NA data (some rectangles don't have data for all years)
+d <- d %>% drop_na(abun_spr_st)
+
+# First take a random subset (80% of data) for training the model
+train_size <- 0.8*nrow(d)
+set.seed(42)
+train_rows <- sample.int(nrow(d), train_size)
+train <- d[train_rows, ]
+
+# Assign rows as either for training or for later prediction (withheld)
+d <- d %>% 
+  mutate(row_n = 1:n(),
+         split = ifelse(row_n %in% train_rows, "train", "withheld"))
+
+# Plot just to see 
+d %>% group_by(year, split) %>% summarize(n = n()) %>%
+  ggplot(., aes(factor(year), n, fill = factor(split))) +
+  geom_bar(stat = "identity", position = "dodge")
+
+# Now I think we need to redo the spde mesh, because we now fit the model using only 80 % of the data
+# Project our survey data coordinates:
+survey_train <- filter(d, split == "train") %>% dplyr::select(lon, lat, ln_weight_g) %>%
+  st_as_sf(crs = 4326, coords = c("lon", "lat")) 
+
+# Prepare for making the mesh
+# First, we will extract the coordinates:
+surv_coords <- st_coordinates(survey_train)
+
+spde_train <- make_mesh(filter(d, split == "train"), xy_cols = c("lon", "lat"),
+                        n_knots = 160,
+                        type = "kmeans", seed = 42)
+
+# Add on the barrier mesh component:
+bspde_train <- add_barrier_mesh(
+  spde_train, baltic_coast, range_fraction = 0.2,
+  proj_scaling = 1, plot = TRUE
+)
+
+# Now we need to extract the residuals from the predictions on the training data and the withheld data
+# First, borrow some functions from sdmTMB to calculate quantile residuals: https://github.com/pbs-assess/sdmTMB/blob/master/R/residuals.R
+pt_ls <- function(q, df, mu, sigma) stats::pt((q - mu)/sigma, df)
+
+qres_student <- function(object, y, mu) {
+  dispersion <- exp(object$model$par[["ln_phi"]])
+  u <- pt_ls(q = y, df = object$tmb_data$df, mu = mu, sigma = dispersion)
+  stats::qnorm(u)
+}
+```
+
+Now fit the models on the training data.
+
+```{r full model cv, cache=TRUE}
+# No penalty
+mnp <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st + oxy_st + oxy_rec_st + cpue_fle_st + cpue_fle_rec_st + cpue_cod_st + cpue_cod_rec_st + abun_spr_st + abun_spr_sd_st + abun_her_st + abun_her_sd_st + oxy_st*depth_st + temp_st*depth_st -1, time_varying = ~ 1,
+              data = filter(d, split == "train"),
+              time = "year", spde = bspde_train, family = student(link = "identity", df = 5),
+              ar1_fields = TRUE, include_spatial = TRUE, spatial_trend = FALSE,
+              spatial_only = FALSE, silent = TRUE, newton_steps = 1, reml = FALSE)
+
+# sd = 1
+m1 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st + oxy_st + oxy_rec_st + cpue_fle_st + cpue_fle_rec_st + cpue_cod_st + cpue_cod_rec_st + abun_spr_st + abun_spr_sd_st + abun_her_st + abun_her_sd_st + oxy_st*depth_st + temp_st*depth_st -1, time_varying = ~ 1,
+             data = filter(d, split == "train"),
+             time = "year", spde = bspde_train, family = student(link = "identity", df = 5),
+             ar1_fields = TRUE, include_spatial = TRUE, spatial_trend = FALSE,
+             spatial_only = FALSE, silent = TRUE, newton_steps = 1, reml = FALSE, 
+             penalties = penalty_vec)
+
+# sd = 0.1
+m01 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st + oxy_st + oxy_rec_st + cpue_fle_st + cpue_fle_rec_st + cpue_cod_st + cpue_cod_rec_st + abun_spr_st + abun_spr_sd_st + abun_her_st + abun_her_sd_st + oxy_st*depth_st + temp_st*depth_st -1, time_varying = ~ 1,
+              data = filter(d, split == "train"),
+              time = "year", spde = bspde_train, family = student(link = "identity", df = 5),
+              ar1_fields = TRUE, include_spatial = TRUE, spatial_trend = FALSE,
+              spatial_only = FALSE, silent = TRUE, newton_steps = 1, reml = FALSE, 
+              penalties = penalty_vec2)
+
+# sd = 0.01
+m001 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st + oxy_st + oxy_rec_st + cpue_fle_st + cpue_fle_rec_st + cpue_cod_st + cpue_cod_rec_st + abun_spr_st + abun_spr_sd_st + abun_her_st + abun_her_sd_st + oxy_st*depth_st + temp_st*depth_st -1, time_varying = ~ 1,
+               data = filter(d, split == "train"),
+               time = "year", spde = bspde_train, family = student(link = "identity", df = 5),
+               ar1_fields = TRUE, include_spatial = TRUE, spatial_trend = FALSE,
+               spatial_only = FALSE, silent = TRUE, newton_steps = 1, reml = FALSE, 
+               penalties = penalty_vec3)  
+
+# sd = 0.001
+m0001 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st + oxy_st + oxy_rec_st + cpue_fle_st + cpue_fle_rec_st + cpue_cod_st + cpue_cod_rec_st + abun_spr_st + abun_spr_sd_st + abun_her_st + abun_her_sd_st + oxy_st*depth_st + temp_st*depth_st -1, time_varying = ~ 1,
+                data = filter(d, split == "train"),
+                time = "year", spde = bspde_train, family = student(link = "identity", df = 5),
+                ar1_fields = TRUE, include_spatial = TRUE, spatial_trend = FALSE,
+                spatial_only = FALSE, silent = TRUE, newton_steps = 1, reml = FALSE, 
+                penalties = penalty_vec4)  
+
+# Also include the model without covariates just for comparison - no penalty
+mdef2 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st -1, time_varying = ~ 1,
+                data = filter(d, split == "train"),
+                time = "year", spde = bspde_train, family = student(link = "identity", df = 5),
+                ar1_fields = TRUE, include_spatial = TRUE, spatial_trend = FALSE,
+                spatial_only = FALSE, silent = TRUE, newton_steps = 1, reml = FALSE)
+```
+
+Calculate the models' predictive error
+
+```{r calculate MSE, cache=TRUE}
+# no penalty
+res_mnp_train <- qres_student(object = mnp,
+                              y = filter(d, split == "train")$ln_weight_g,
+                              mu = predict(mnp)$est)
+
+res_mnp_withheld <- qres_student(object = mnp,
+                                 y = filter(d, split == "withheld")$ln_weight_g,
+                                 mu = predict(mnp, newdata = filter(d, split == "withheld"))$est)
+
+# sd = 1
+res_m1_train <- qres_student(object = m1,
+                             y = filter(d, split == "train")$ln_weight_g,
+                             mu = predict(m1)$est)
+
+res_m1_withheld <- qres_student(object = m1,
+                                y = filter(d, split == "withheld")$ln_weight_g,
+                                mu = predict(m1, newdata = filter(d, split == "withheld"))$est)
+
+# sd = 0.1
+res_m01_train <- qres_student(object = m01,
+                              y = filter(d, split == "train")$ln_weight_g,
+                              mu = predict(m01)$est)
+
+res_m01_withheld <- qres_student(object = m01,
+                                 y = filter(d, split == "withheld")$ln_weight_g,
+                                 mu = predict(m01, newdata = filter(d, split == "withheld"))$est)
+
+# sd = 0.01
+res_m001_train <- qres_student(object = m001,
+                               y = filter(d, split == "train")$ln_weight_g,
+                               mu = predict(m001)$est)
+
+res_m001_withheld <- qres_student(object = m001,
+                                  y = filter(d, split == "withheld")$ln_weight_g,
+                                  mu = predict(m001, newdata = filter(d, split == "withheld"))$est)
+
+# sd = 0.001
+res_m0001_train <- qres_student(object = m0001,
+                                y = filter(d, split == "train")$ln_weight_g,
+                                mu = predict(m0001)$est)
+
+res_m0001_withheld <- qres_student(object = m0001,
+                                   y = filter(d, split == "withheld")$ln_weight_g,
+                                   mu = predict(m0001, newdata = filter(d, split == "withheld"))$est)
+
+# default model, no penalties
+res_mdef2_train <- qres_student(object = mdef2,
+                                y = filter(d, split == "train")$ln_weight_g,
+                                mu = predict(mdef2)$est)
+
+res_mdef2_withheld <- qres_student(object = mdef2,
+                                   y = filter(d, split == "withheld")$ln_weight_g,
+                                   mu = predict(mdef2, newdata = filter(d, split == "withheld"))$est)
+
+# Calculate mean squared error
+mse_mnp_train <- mean(res_mnp_train^2)
+mse_mnp_withheld <- mean(res_mnp_withheld^2)
+
+mse_m1_train <- mean(res_m1_train^2)
+mse_m1_withheld <- mean(res_m1_withheld^2)
+
+mse_m01_train <- mean(res_m01_train^2)
+mse_m01_withheld <- mean(res_m01_withheld^2)
+
+mse_m001_train <- mean(res_m001_train^2)
+mse_m001_withheld <- mean(res_m001_withheld^2)
+
+mse_m0001_train <- mean(res_m0001_train^2)
+mse_m0001_withheld <- mean(res_m0001_withheld^2)
+
+mse_mdef2_train <- mean(res_mdef2_train^2)
+mse_mdef2_withheld <- mean(res_mdef2_withheld^2)
+
+# Compare the relative error on the withheld data to the full data for the full model and the model with oxygen
+# Do this by plotting the relative error (withheld/train) as a function of sd
+
+error_df <- data.frame(sd = c("1", "0.1", "0.01", "0.001", "default model", "no penalty"),
+                       rel_error = c(mse_mnp_withheld / mse_mnp_train,
+                                     mse_m1_withheld / mse_m1_train,
+                                     mse_m01_withheld / mse_m01_train,
+                                     mse_m001_withheld / mse_m001_train,
+                                     mse_m0001_withheld / mse_m0001_train,
+                                     mse_mdef2_withheld / mse_mdef2_train))
+
+ggplot(error_df, aes(sd, rel_error)) +
+  geom_point()
+```
+
