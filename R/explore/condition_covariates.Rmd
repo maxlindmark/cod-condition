@@ -45,9 +45,14 @@ ymin = 54; ymax = 58; xmin = 9.5; xmax = 22
 d <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cond.csv")
 
 # Calculate standardized variables
-d %>% 
-  mutate(oxy_st = oxy,
+# Calculate standardized variables
+d <- d %>% 
+  mutate(ln_length_cm = log(length_cm),
+         ln_weight_g = log(weight_g),
+         oxy_st = oxy,
          oxy_rec_st = oxy_rec,
+         temp_st = temp,
+         temp_rec_st = temp_rec,
          abun_her_st = abun_her,
          abun_her_sd_st = abun_her_sd,
          abun_spr_st = abun_spr,
@@ -55,9 +60,12 @@ d %>%
          cpue_cod_st = cpue_cod,
          cpue_cod_rec_st = cpue_cod_rec,
          cpue_fle_st = cpue_fle,
-         cpue_fle_rec_st = cpue_fle_rec) %>%
-  mutate_at(c("oxy_st", "oxy_rec_st", "abun_her_st", "abun_her_sd_st", "abun_spr_st",
-              "abun_spr_sd_st", "cpue_cod_st", "cpue_cod_rec_st", "cpue_fle_st", "cpue_fle_rec_st"),
+         cpue_fle_rec_st = cpue_fle_rec,
+         depth_st = depth) %>%
+  mutate_at(c("oxy_st", "oxy_rec_st", "temp_st", "temp_rec_st",
+              "abun_her_st", "abun_her_sd_st", "abun_spr_st", "abun_spr_sd_st",
+              "cpue_cod_st", "cpue_cod_rec_st", "cpue_fle_st", "cpue_fle_rec_st",
+              "depth_st"),
             ~(scale(.) %>% as.vector)) %>% 
   mutate(year = as.integer(year))
 ```
@@ -219,6 +227,20 @@ ggplot(d, aes(lon, lat, color = log(abun_her))) +
   coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
   labs(x = "lon", y = "lat") + 
   ggtitle("log(abun_her)")
+```
+
+### 6. Extra - temperature and depth
+If we only look at the densities where we have cod data, it looks a little different (not easy to detect the shift from central to northeast (north of plotting area):
+```{r plot Fulton vs oxygen and depth, message=FALSE, fig.width=12}
+d %>% 
+  ggplot(., aes(temp_st, Fulton_K)) +
+  geom_point(size = 0.75) +
+  stat_smooth(method = "lm")
+
+d %>% 
+  ggplot(., aes(depth_st, Fulton_K)) +
+  geom_point(size = 0.75) +
+  stat_smooth(method = "lm")
 ```
 
 ### Lastly, some points about scale...
