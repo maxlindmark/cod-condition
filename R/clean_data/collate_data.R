@@ -841,7 +841,7 @@ test_herring %>%
 # https://rpubs.com/boyerag/297592
 # https://pjbartlein.github.io/REarthSysSci/netCDF.html#get-a-variable
 # Open the netCDF file
-ncin <- nc_open("data/NEMO_Nordic_SCOBI/dataset-reanalysis-scobi-monthlymeans_1603971995426.nc")
+ncin <- nc_open("data/NEMO_Nordic_SCOBI/dataset-reanalysis-scobi-monthlymeans_1610091357600.nc")
 
 print(ncin)
 
@@ -1324,6 +1324,7 @@ dat <- left_join(dat, big_dat_sub_temp2, by = "id_temp")
 
 colnames(dat)
 
+# sort(unique(dat$Year))
 
 # H. PREPARE DATA FOR ANALYSIS =====================================================
 d <- dat %>%
@@ -1370,6 +1371,8 @@ d_analysis <- d %>% dplyr::select(year, depth, lat, lon, length_cm, weight_g, Fu
                                   cpue_cod, cpue_cod_rec, cpue_fle, cpue_fle_rec,
                                   oxy, oxy_rec, temp, temp_rec, 
                                   abun_spr, abun_spr_sd, abun_her, abun_her_sd)
+
+# sort(unique(d_analysis$year))
 
 write.csv(d_analysis, file = "data/for_analysis/mdat_cond.csv", row.names = FALSE)
 

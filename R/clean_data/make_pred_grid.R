@@ -218,7 +218,7 @@ model_df %>%
 # https://rpubs.com/boyerag/297592
 # https://pjbartlein.github.io/REarthSysSci/netCDF.html#get-a-variable
 # Open the netCDF file
-ncin <- nc_open("data/NEMO_Nordic_SCOBI/dataset-reanalysis-scobi-monthlymeans_1603971995426.nc")
+ncin <- nc_open("data/NEMO_Nordic_SCOBI/dataset-reanalysis-scobi-monthlymeans_1610091357600.nc")
 
 print(ncin)
 
@@ -619,6 +619,8 @@ anim_save(filename = "output/gif/temp.gif")
 pred_grid <- left_join(pred_grid, pred_grid_temp)
 
 head(pred_grid)
+
+sort(unique(pred_grid$year))
 
 # Save
 write.csv(pred_grid, file = "data/for_analysis/pred_grid2.csv", row.names = FALSE)
