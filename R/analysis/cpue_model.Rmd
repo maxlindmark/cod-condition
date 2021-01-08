@@ -49,94 +49,41 @@ library(mapplots)
 library(qwraps2) # To load entire cache in interactive r session, do: qwraps2::lazyload_cache_dir(path = "R/analysis/cpue_cod_cache/html")
 ```
 
+Read data:
 
-### MOVE THIS TO A NEW DATA CLEANING SCRIPT
+```{r read and process data, message=FALSE, warning=FALSE}
+d <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cpue.csv")
 
-```{r data}
-# For adding maps to plots
-world <- ne_countries(scale = "medium", returnclass = "sf")
+# Calculate standardized variables
+d <- d %>% 
+  mutate(ln_length_cm = log(length_cm),
+         ln_weight_g = log(weight_g),
+         oxy_st = oxy,
+         oxy_rec_st = oxy_rec,
+         temp_st = temp,
+         temp_rec_st = temp_rec,
+         abun_her_st = abun_her,
+         abun_her_sd_st = abun_her_sd,
+         abun_spr_st = abun_spr,
+         abun_spr_sd_st = abun_spr_sd,
+         cpue_cod_st = cpue_cod,
+         cpue_cod_rec_st = cpue_cod_rec,
+         cpue_fle_st = cpue_fle,
+         cpue_fle_rec_st = cpue_fle_rec,
+         depth_st = depth) %>%
+  mutate_at(c("oxy_st", "oxy_rec_st", "temp_st", "temp_rec_st",
+              "abun_her_st", "abun_her_sd_st", "abun_spr_st", "abun_spr_sd_st",
+              "cpue_cod_st", "cpue_cod_rec_st", "cpue_fle_st", "cpue_fle_rec_st",
+              "depth_st"),
+            ~(scale(.) %>% as.vector)) %>% 
+  mutate(year = as.integer(year))
 
-# Specify map ranges
-# ymin = 54; ymax = 58; xmin = 9.5; xmax = 22
-ymin = 54; ymax = 58; xmin = 12.5; xmax = 22
+unique(is.na(d$abun_spr_st))
 
-# Make plot function
-plot_map_raster <- function(dat, column = "est") {
-  ggplot(dat, aes_string("X", "Y", fill = column)) +
-    geom_raster() +
-    facet_wrap(~year) +
-    coord_fixed() +
-    scale_fill_viridis_c() +
-    geom_sf(data = world, inherit.aes = F, size = 0.2) +
-    coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax))
-}
-
-# Read data
-cov_dat <- read.csv("data/DATRAS_cpue_length_haul/CPUE per length per haul per hour_2020-09-25 16_15_36.csv")
-
-# Remove hauls from outside the study area and select only quarter 4
-cov_dat <- cov_dat %>% 
-  filter(ShootLat < 58) %>% 
-  mutate(kattegatt = ifelse(ShootLat > 56 & ShootLong < 14, "Y", "N")) %>% 
-  filter(kattegatt == "N") %>% 
-  filter(Quarter == 4) %>% 
-  dplyr::select(-kattegatt)
-
-# I am now going to assume that a haul that is present in the condition data but not
-# in this covariate data means that the catch is 0
-cov_dat %>% arrange(CPUE_number_per_hour)
-cov_dat %>% filter(CPUE_number_per_hour == 0)
-
-# Create a new ID column. Note that I can't define a single ID column that works for
-# all data sets. The ID that I used for the Exchange data cannot be applied here. I
-# need to come up with a new ID here. Run this to see common columns:
-# colnames(dat)[colnames(dat) %in% colnames(cov_dat)]
-# First filter by species and convert length to cm, then add in ID
-
-cod <- cov_dat %>%
-  filter(Species == "Gadus morhua") %>% 
-  mutate(length_cm = LngtClass/10) %>% 
-  mutate(ID2 = paste(Year, Quarter, Ship, Gear, HaulNo, Depth, ShootLat, ShootLong, sep = "."))
-
-# First check if this is unique by haul. Then I should get 1 row per ID and size...
-cod %>%
-  group_by(ID2, LngtClass) %>% 
-  mutate(n = n()) %>% 
-  ungroup() %>% 
-  distinct(n, .keep_all = TRUE) %>% 
-  as.data.frame()
-
-# Now calculate the mean CPUE per haul
-cod_full <- cod %>% 
-  arrange(ID2) %>% 
-  group_by(ID2) %>% 
-  mutate(CPUE_number_per_hour_tot = sum(CPUE_number_per_hour)) %>% 
-  ungroup() %>% 
-  distinct(ID2, .keep_all = TRUE)
-
-# Test it worked, first by plotting n rows per ID
-cod_full %>% group_by(ID2) %>% mutate(n = n()) %>% 
-  ggplot(., aes(factor(n))) + geom_bar()
-
-# Next by calculating an example
-id <- unique(cod_full$ID2)[99]
-
-cod_full %>%
-  filter(ID2 == id) %>%
-  dplyr::select(ID2, CPUE_number_per_hour_tot)
-
-sum(filter(cod, ID2 == id)$CPUE_number_per_hour)
-
-# Correct! The data subset yields the same 
-cod <- cod_full %>%
-  rename("cpue" = "CPUE_number_per_hour_tot",
-         "year" = "Year",
-         "lat" = "ShootLat",
-         "lon" = "ShootLong",
-         "quarter" = "Quarter",
-         "depth" = "Depth") %>% 
-  dplyr::select(cpue, year, lat, lon, quarter, depth)
+d %>% drop_na(abun_spr_st)
+# almost 3k data points (3%) when dropping NA sprat... So we remove it?
 ```
+
 
 Read the prediction grids:
 
@@ -162,273 +109,6 @@ cod <- cod %>%
   drop_na(depth) %>% 
   mutate(depth_st = (depth - mean(pred_grid2$depth))/sd(pred_grid2$depth),
          depth_st_sq = depth_st*depth_st)
-```
-
-Prepare oxygen data. First get a dataframe with all oxygen values in the across the grid, but also match CPUE data with the local oxygen value (largely following the process in the data collation script)
-
-```{r prepare oxygen data, cache=TRUE, message=FALSE}
-# Downloaded from here: https://resources.marine.copernicus.eu/?option=com_csw&view=details&product_id=BALTICSEA_REANALYSIS_BIO_003_012
-# Extract raster points: https://gisday.wordpress.com/2014/03/24/extract-raster-values-from-points-using-r/comment-page-1/
-# https://rpubs.com/boyerag/297592
-# https://pjbartlein.github.io/REarthSysSci/netCDF.html#get-a-variable
-# Open the netCDF file
-ncin <- nc_open("data/NEMO_Nordic_SCOBI/dataset-reanalysis-scobi-monthlymeans_1603971995426.nc")
-
-print(ncin)
-
-# Get longitude and latitude
-lon <- ncvar_get(ncin,"longitude")
-nlon <- dim(lon)
-head(lon)
-
-lat <- ncvar_get(ncin,"latitude")
-nlat <- dim(lat)
-head(lat)
-
-# Get time
-time <- ncvar_get(ncin,"time")
-time
-
-tunits <- ncatt_get(ncin,"time","units")
-nt <- dim(time)
-nt
-tunits
-
-# Get oxygen
-dname <- "o2b"
-
-oxy_array <- ncvar_get(ncin,dname)
-dlname <- ncatt_get(ncin,dname,"long_name")
-dunits <- ncatt_get(ncin,dname,"units")
-fillvalue <- ncatt_get(ncin,dname,"_FillValue")
-dim(oxy_array)
-
-# Get global attributes
-title <- ncatt_get(ncin,0,"title")
-institution <- ncatt_get(ncin,0,"institution")
-datasource <- ncatt_get(ncin,0,"source")
-references <- ncatt_get(ncin,0,"references")
-history <- ncatt_get(ncin,0,"history")
-Conventions <- ncatt_get(ncin,0,"Conventions")
-
-# Convert time: split the time units string into fields
-tustr <- strsplit(tunits$value, " ")
-tdstr <- strsplit(unlist(tustr)[3], "-")
-tmonth <- as.integer(unlist(tdstr)[2])
-tday <- as.integer(unlist(tdstr)[3])
-tyear <- as.integer(unlist(tdstr)[1])
-
-# Here I deviate from the guide a little bit. Save this info:
-dates <- chron(time, origin = c(tmonth, tday, tyear))
-
-# Crop the date variable
-months <- as.numeric(substr(dates, 2, 3))
-years <- as.numeric(substr(dates, 8, 9))
-years <- ifelse(years > 90, 1900 + years, 2000 + years)
-
-# Replace netCDF fill values with NA's
-oxy_array[oxy_array == fillvalue$value] <- NA
-
-# We only use Quarter 4 in this analysis, so now we want to loop through each time step,
-# and if it is a good month save it as a raster.
-# First get the index of months that correspond to Q4
-months
-
-index_keep <- which(months > 9)
-
-oxy_q4 <- oxy_array[, , index_keep]
-
-months_keep <- months[index_keep]
-
-years_keep <- years[index_keep]
-
-# Now we have an array with only Q4 data...
-# We need to now calculate the average within a year.
-# Get a sequence that takes every third value between 1: number of months (length)
-loop_seq <- seq(1, dim(oxy_q4)[3], by = 3)
-
-# Create objects that will hold data
-dlist <- list()
-oxy_10 <- c()
-oxy_11 <- c()
-oxy_12 <- c()
-oxy_ave <- c()
-
-# Loop through the vector sequence with every third value, then take the average of
-# three consecutive months (i.e. q4)
-for(i in loop_seq) {
-
-  oxy_10 <- oxy_q4[, , (i)]
-  oxy_11 <- oxy_q4[, , (i + 1)]
-  oxy_12 <- oxy_q4[, , (i + 2)]
-
-  oxy_ave <- (oxy_10 + oxy_11 + oxy_12) / 3
-
-  list_pos <- ((i/3) - (1/3)) + 1 # to get index 1:n(years)
-
-  dlist[[list_pos]] <- oxy_ave
-
-}
-
-# Now name the lists with the year:
-names(dlist) <- unique(years_keep)
-
-# Now I need to make a loop where I extract the raster value for each year...
-# The condition data is called dat so far in this script
-
-# Filter years in the condition data frame to only have the years I have oxygen for
-d_sub_oxy <- cod %>% filter(year %in% names(dlist)) %>% droplevels()
-
-# Create data holding object
-data_list <- list()
-
-# ... And for the oxygen raster
-raster_list <- list()
-
-# Create factor year for indexing the list in the loop
-d_sub_oxy$Year_f <- as.factor(d_sub_oxy$year)
-
-# Loop through each year and extract raster values for the condition data points
-for(i in unique(d_sub_oxy$Year_f)) {
-
-  # Subset a year
-  oxy_slice <- dlist[[i]]
-
-  # Create raster for that year (i)
-  r <- raster(t(oxy_slice), xmn = min(lon), xmx = max(lon), ymn = min(lat), ymx = max(lat),
-              crs = CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs+ towgs84=0,0,0"))
-
-  # Flip...
-  r <- flip(r, direction = 'y')
-
-  plot(r, main = i)
-
-  # Filter the same year (i) in the cpue data and select only coordinates
-  d_slice <- d_sub_oxy %>% filter(Year_f == i) %>% dplyr::select(lon, lat)
-
-  # Make into a SpatialPoints object
-  data_sp <- SpatialPoints(d_slice)
-
-  # Extract raster value (oxygen)
-  rasValue <- raster::extract(r, data_sp)
-
-  # Now we want to plot the results of the raster extractions by plotting the condition
-  # data points over a raster and saving it for each year.
-  # Make the SpatialPoints object into a raster again (for pl)
-  df <- as.data.frame(data_sp)
-
-  # Add in the raster value in the df holding the coordinates for the condition data
-  d_slice$oxy <- rasValue
-
-  # Add in which year
-  d_slice$year <- i
-
-  # Create a index for the data last where we store all years (because our loop index
-  # i is not continuous, we can't use it directly)
-  index <- as.numeric(as.character(d_slice$year[1])) - 1992
-
-  # Add each years' data in the list
-  data_list[[index]] <- d_slice
-
-  # Save to check each year is ok! First convert the raster to points for plotting
-  # (so that we can use ggplot)
-  map.p <- rasterToPoints(r)
-
-  # Make the points a dataframe for ggplot
-  df_rast <- data.frame(map.p)
-
-  # Rename y-variable and add year
-  df_rast <- df_rast %>% rename("oxy" = "layer") %>% mutate(year = i)
-
-  # Add each years' raster data frame in the list
-  raster_list[[index]] <- df_rast
-
-  # Make appropriate column headings
-  colnames(df_rast) <- c("Longitude", "Latitude", "oxy")
-
-  # Now make the map
-  ggplot(data = df_rast, aes(y = Latitude, x = Longitude)) +
-    geom_raster(aes(fill = oxy)) +
-    geom_point(data = d_slice, aes(x = lon, y = lat, fill = oxy),
-               color = "black", size = 5, shape = 21) +
-    theme_bw() +
-    geom_sf(data = world, inherit.aes = F, size = 0.2) +
-    coord_sf(xlim = c(min(cod$lon), max(cod$lon)),
-             ylim = c(min(cod$lat), max(cod$lat))) +
-    scale_colour_gradientn(colours = rev(terrain.colors(10)),
-                           limits = c(-200, 400)) +
-    scale_fill_gradientn(colours = rev(terrain.colors(10)),
-                         limits = c(-200, 400)) +
-    NULL
-
-    ggsave(paste("figures/supp/cpue_oxygen_rasters/", i,".png", sep = ""),
-         width = 6.5, height = 6.5, dpi = 600)
-
-}
-
-# Now create a data frame from the list of all annual values
-big_dat_oxy <- dplyr::bind_rows(data_list)
-big_raster_dat_oxy <- dplyr::bind_rows(raster_list)
-
-# Plot data, looks like there's big inter-annual variation but a negative
-# Plot mean oxygen by year - filter to roughly correspond to the survey area:
-big_raster_dat_oxy %>%
-  mutate(kattegatt = ifelse(y > 56 & x < 14, "Y", "N")) %>% 
-  filter(kattegatt == "N") %>% 
-  filter(y > 54 & y < 58 & x > 9.5 & x < 22) %>% 
-  group_by(year) %>%
-  drop_na(oxy) %>%
-  summarise(mean_oxy = mean(oxy),
-            sd_oxy = sd(oxy)) %>%
-  mutate(year_num = as.numeric(year)) %>%
-  ggplot(., aes(year_num, mean_oxy)) +
-  #geom_errorbar(aes(ymin = mean_oxy - sd_oxy, ymax = mean_oxy + sd_oxy)) + 
-  geom_point(size = 2) +
-  stat_smooth(method = "lm") +
-  NULL
-
-# Plot number of cells with less than 0 oxygen
-big_raster_dat_oxy %>%
-  mutate(kattegatt = ifelse(y > 56 & x < 14, "Y", "N")) %>% 
-  filter(kattegatt == "N") %>% 
-  filter(y > 54 & y < 58 & x > 9.5 & x < 22) %>% 
-  group_by(year) %>%
-  drop_na(oxy) %>%
-  mutate(dead = ifelse(oxy < 0, "Y", "N")) %>%
-  filter(dead == "Y") %>%
-  mutate(n = n(),
-         year_num = as.numeric(year)) %>%
-  ggplot(., aes(year_num, n)) +
-  geom_point(size = 2) +
-  stat_smooth(method = "lm") +
-  NULL
-
-# Now add in the new oxygen column in the original data:
-str(d_sub_oxy)
-str(big_dat_oxy)
-
-# Create an ID for matching the oxygen data with the condition data
-cod$id_oxy <- paste(cod$year, cod$lon, cod$lat, sep = "_")
-big_dat_oxy$id_oxy <- paste(big_dat_oxy$year, big_dat_oxy$lon, big_dat_oxy$lat, sep = "_")
-
-# Which id's are not in the condition data (dat)?
-ids <- dat$id_oxy[!dat$id_oxy %in% c(big_dat_oxy$id_oxy)]
-
-unique(ids)
-
-# Select only the columns we want to merge
-big_dat_sub_oxy <- big_dat_oxy %>% dplyr::select(id_oxy, oxy)
-
-# Remove duplicate ID (one oxy value per id)
-big_dat_sub_oxy2 <- big_dat_sub_oxy %>% distinct(id_oxy, .keep_all = TRUE)
-
-# Join the data with raster-derived oxygen with the full condition data
-cod <- left_join(cod, big_dat_sub_oxy2, by = "id_oxy")
-
-cod <- cod %>%
-  drop_na(oxy) %>% 
-  mutate(oxy_st = (oxy - mean(oxy))/sd(oxy),
-         oxy_st_sq = oxy_st*oxy_st)
 ```
 
 Make barrier spde mesh:
