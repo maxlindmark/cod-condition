@@ -467,7 +467,17 @@ Compare the models using AIC:
 AIC(m2, m2c) %>% arrange(AIC)
 ```
 
-Much better to also include depth!
+Much better to also include depth! Check the parameter estimates...
+
+```{r print m2c, cache=TRUE}
+print(m2c)
+
+rw_intercepts <- data.frame(summary(TMB::sdreport(m2c$tmb_obj))) %>% 
+  rownames_to_column("param") %>%
+  filter(stringr::str_detect(param, 'b_rw_t'))
+
+mean(rw_intercepts$Estimate)
+```
 
 ### Plot predictions
 Now we can predict and plot estimates using all fixed and random effects on pre-made grid. This [grid is created](https://github.com/maxlindmark/cod_condition/blob/master/R/clean_data/make_pred_grid.R) by doing an `expand.grid` over the survey range, then filtering out areas that are actually in the ocean using ICES shapefiles. Lastly some areas are too deep for sampling (-120 m). There is a depth column in the prediction grad and we can make those predictions NA so it is clear they are different from e.g. land and islands (and so that the color gradient is not going too far because of the extreme predictions at these depths).
