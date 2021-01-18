@@ -822,19 +822,51 @@ test_herring %>%
 # estimated, we see the following:
 
 # Sprat: a 5 and 15 cm sprat weighs 1 and 32 g respectively. 
-0.0078*5^3.07=1.091271
-0.0078*15^3.07=31.8196
+# 0.0078*5^3.07=1.091271
+# 0.0078*15^3.07=31.8196
 # VBGE curves show that sprat at age 8 are on average <20g, hence we could probably include all ages
 
 # Herring: a 1 and 30 cm herring weighs <1 and 182 g respectively. 
-0.0042*1^3.14=0.0042
-0.0042*30^3.14=182.5619
+# 0.0042*1^3.14=0.0042
+# 0.0042*30^3.14=182.5619
 # VBGE curves show that sprat at age 8 are on average <100g, hence we could probably include all ages
 
 # Conclusion: I will not filter any further as all could potentially be eaten by cod (given that the cod are large enough to eat herring (> 20 cm approx, which is majority of data)
 
 
-# # G. READ AND JOIN OCEANOGRAPHIC DATA ============================================
+# # G. READ AND JOIN ENVIRONMENTAL DATA ============================================
+# ** Depth =========================================================================
+# Now we need to remove areas that haven't been sampled due to being too deep
+west <- raster("data/depth_geo_tif/D5_2018_rgb-1.tif")
+plot(west)
+
+east <- raster("data/depth_geo_tif/D6_2018_rgb-1.tif")
+plot(east)
+
+dep_rast <- raster::merge(west, east)
+
+dat$depth_rast <- extract(dep_rast, dat[, 32:31])
+
+# Convert to depth (instead of elevation)
+ggplot(dat, aes(depth_rast)) + geom_histogram()
+dat$depth_rast <- (dat$depth_rast - max(dat$depth_rast)) *-1
+ggplot(dat, aes(depth_rast)) + geom_histogram()
+
+# Compare to built in depth data
+ggplot(dat, aes(Depth, depth_rast)) + 
+  geom_point() +
+  geom_abline(color = "red")
+
+dat %>% 
+  filter(depth_rast < 0) %>% 
+  ggplot(., aes(ShootLong, ShootLat, color = depth_rast)) + 
+  scale_color_viridis() +
+  geom_sf(data = world, inherit.aes = F, size = 0.2, fill = NA) +
+  geom_point(size = 1) + 
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  NULL
+
+
 # ** Oxygen ========================================================================
 # Downloaded from here: https://resources.marine.copernicus.eu/?option=com_csw&view=details&product_id=BALTICSEA_REANALYSIS_BIO_003_012
 # Extract raster points: https://gisday.wordpress.com/2014/03/24/extract-raster-values-from-points-using-r/comment-page-1/
@@ -1333,7 +1365,7 @@ d <- dat %>%
          "lon" = "ShootLong",
          "year" = "Year",
          "sex" = "Sex",
-         "depth" = "Depth") %>% 
+         "depth" = "depth_rast") %>% 
   mutate(Fulton_K = weight_g/(0.01*length_cm^3), # not cod-specific
          sex = ifelse(sex == -9, "U", sex),
          sex = as.factor(sex),
