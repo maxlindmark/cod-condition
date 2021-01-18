@@ -281,6 +281,37 @@ dat <- cpue_tot %>%
 
 
 # C. READ AND JOIN OCEANOGRAPHIC DATA ==============================================
+# ** Depth =========================================================================
+# Now we need to remove areas that haven't been sampled due to being too deep
+west <- raster("data/depth_geo_tif/D5_2018_rgb-1.tif")
+#plot(west)
+
+east <- raster("data/depth_geo_tif/D6_2018_rgb-1.tif")
+# plot(east)
+
+dep_rast <- raster::merge(west, east)
+
+dat$depth_rast <- extract(dep_rast, dat[, 4:3])
+
+# Convert to depth (instead of elevation)
+ggplot(dat, aes(depth_rast)) + geom_histogram()
+dat$depth_rast <- (dat$depth_rast - max(drop_na(dat)$depth_rast)) *-1
+ggplot(dat, aes(depth_rast)) + geom_histogram()
+
+# Compare to built in depth data
+ggplot(dat, aes(depth, depth_rast)) + 
+  geom_point() +
+  geom_abline(color = "red")
+
+dat %>% 
+  filter(depth_rast < 0) %>% 
+  ggplot(., aes(lon, lat, color = depth_rast)) + 
+  scale_color_viridis() +
+  geom_sf(data = world, inherit.aes = F, size = 0.2, fill = NA) +
+  geom_point(size = 1) + 
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  NULL
+
 # ** Oxygen ========================================================================
 # Downloaded from here: https://resources.marine.copernicus.eu/?option=com_csw&view=details&product_id=BALTICSEA_REANALYSIS_BIO_003_012
 # Extract raster points: https://gisday.wordpress.com/2014/03/24/extract-raster-values-from-points-using-r/comment-page-1/
@@ -771,6 +802,15 @@ dat <- left_join(dat, big_dat_sub_temp2, by = "id_temp")
 
 colnames(dat)
 
+dat <- dat %>% dplyr::select(-id_temp, -id_oxy)
+
+# D. SAVE DATA =====================================================================
+head(dat)
+
+# Keep only the raster depth 
+dat <- dat %>% dplyr::select(-depth) %>% rename("depth" = "depth_rast")
+
+unique(dat$quarter)
+
 # Save data
 write.csv(dat, file = "data/for_analysis/mdat_cpue.csv", row.names = FALSE)
-
