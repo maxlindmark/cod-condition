@@ -29,7 +29,7 @@ vignettes/*.pdf
 /R/analysis/condition_model_reg.html
 /R/analysis/cpue_model.html
 /R/analysis/model_selection.html
-/R/analysis/condition_covariates.html
+/R/explore/condition_covariates.html
 
 # OAuth2 token, see https://github.com/hadley/httr/releases/tag/v0.3
 .httr-oauth
