@@ -167,6 +167,8 @@ pred_grid2 <- pred_grid2 %>%
   filter(year %in% c(unique(d$year))) %>% 
   mutate(depth_st = (depth - mean(d$depth))/sd(d$depth),
          oxy_st = (oxy - mean(d$oxy))/sd(d$oxy)) # Need to scale these to the mean and sd in the data!
+
+# Note that I'm not including temperature here, only oxygen
 ```
 
 We can now plot the length-weight relationship as well as Fulton K condition factor to get a glimpse of what we might expect (but in the main model we use Le Cren's condition index).

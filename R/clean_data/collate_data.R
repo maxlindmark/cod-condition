@@ -836,7 +836,6 @@ test_herring %>%
 
 # # G. READ AND JOIN ENVIRONMENTAL DATA ============================================
 # ** Depth =========================================================================
-# Now we need to remove areas that haven't been sampled due to being too deep
 west <- raster("data/depth_geo_tif/D5_2018_rgb-1.tif")
 plot(west)
 
@@ -858,7 +857,7 @@ ggplot(dat, aes(Depth, depth_rast)) +
   geom_abline(color = "red")
 
 dat %>% 
-  filter(depth_rast < 0) %>% 
+  filter(depth_rast > 0) %>% 
   ggplot(., aes(ShootLong, ShootLat, color = depth_rast)) + 
   scale_color_viridis() +
   geom_sf(data = world, inherit.aes = F, size = 0.2, fill = NA) +

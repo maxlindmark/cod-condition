@@ -231,7 +231,7 @@ ggplot(d, aes(lon, lat, color = log(abun_her))) +
 
 ### 6. Extra - temperature and depth
 If we only look at the densities where we have cod data, it looks a little different (not easy to detect the shift from central to northeast (north of plotting area):
-```{r plot Fulton vs oxygen and depth, message=FALSE, fig.width=12}
+```{r plot Fulton vs temp and depth, message=FALSE, fig.width=12}
 d %>% 
   ggplot(., aes(temp_st, Fulton_K)) +
   geom_point(size = 0.75) +

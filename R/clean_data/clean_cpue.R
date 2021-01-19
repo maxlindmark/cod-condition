@@ -161,7 +161,7 @@ cpue$weight_kg <- cpue$weight_g / 100
 #cpue %>% arrange(CPUE_number_per_hour)
 #cpue %>% filter(CPUE_number_per_hour == 0)
 
-# Calculate CPUE not in numbers per hour bu kg per hour
+# Calculate CPUE not in numbers per hour but kg per hour
 cpue <- cpue %>% mutate(CPUE_weight_per_hour = CPUE_number_per_hour*weight_kg)
 
 # Now calculate the sum of all CPUEs for each length class per haul
@@ -282,7 +282,6 @@ dat <- cpue_tot %>%
 
 # C. READ AND JOIN OCEANOGRAPHIC DATA ==============================================
 # ** Depth =========================================================================
-# Now we need to remove areas that haven't been sampled due to being too deep
 west <- raster("data/depth_geo_tif/D5_2018_rgb-1.tif")
 #plot(west)
 
@@ -311,6 +310,7 @@ dat %>%
   geom_point(size = 1) + 
   coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
   NULL
+
 
 # ** Oxygen ========================================================================
 # Downloaded from here: https://resources.marine.copernicus.eu/?option=com_csw&view=details&product_id=BALTICSEA_REANALYSIS_BIO_003_012

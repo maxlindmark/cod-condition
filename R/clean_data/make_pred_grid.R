@@ -65,6 +65,7 @@ pred_grid <- expand.grid(
 
 # Here I could convert to UTM to get even distance across space. But I am in two UTM
 # zones, 33 and 34, so perhaps I will stick with lat-long... 
+# the area of a grid cell is: 
 
 # Then remove Kattegatt...
 pred_grid <- pred_grid %>% 
@@ -322,7 +323,7 @@ names(dlist) <- unique(years_keep)
 
 # Now I need to make a loop where I extract the raster value for each year...
 
-# Filter years in the condition data frame to only have the years I have oxygen for
+# Filter years in the pred-grid data frame to only have the years I have oxygen for
 d_sub_oxy <- pred_grid %>% filter(year %in% names(dlist)) %>% droplevels()
 
 # Create data holding object
@@ -331,7 +332,7 @@ data_list <- list()
 # Create factor year for indexing the list in the loop
 d_sub_oxy$year_f <- as.factor(d_sub_oxy$year)
 
-# Loop through each year and extract raster values for the condition data points
+# Loop through each year and extract raster values for the pred-grid data points
 for(i in unique(d_sub_oxy$year_f)) {
   
   # Subset a year
@@ -346,7 +347,7 @@ for(i in unique(d_sub_oxy$year_f)) {
   
   plot(r, main = i)
   
-  # Filter the same year (i) in the condition data and select only coordinates
+  # Filter the same year (i) in the pred-grid data and select only coordinates
   d_slice <- d_sub_oxy %>% filter(year_f == i) %>% dplyr::select(lon, lat)
   
   # Make into a SpatialPoints object
@@ -355,12 +356,12 @@ for(i in unique(d_sub_oxy$year_f)) {
   # Extract raster value (oxygen)
   rasValue <- raster::extract(r, data_sp)
   
-  # Now we want to plot the results of the raster extractions by plotting the condition
+  # Now we want to plot the results of the raster extractions by plotting the pred-grid
   # data points over a raster and saving it for each year.
   # Make the SpatialPoints object into a raster again (for pl)
   df <- as.data.frame(data_sp)
   
-  # Add in the raster value in the df holding the coordinates for the condition data
+  # Add in the raster value in the df holding the coordinates for the pred-grid data
   d_slice$oxy <- rasValue
   
   # Add in which year
@@ -411,8 +412,14 @@ animate(anim, height = 1200, width = 1200)
 
 anim_save(filename = "output/gif/oxy.gif")
 
-# Left join in the depth again
-pred_grid <- left_join(pred_grid_oxy, pred_grid)
+# Add in oxygen to the main prediction grid
+pred_grid_oxy <- pred_grid_oxy %>% arrange(lon, lat, year)
+pred_grid <- pred_grid %>% arrange(lon, lat, year)
+
+str(pred_grid_oxy)
+str(pred_grid)
+
+pred_grid$oxy <- pred_grid_oxy$oxy
 
 # Save
 #write.csv(pred_grid, file = "data/for_analysis/pred_grid2.csv", row.names = FALSE)
@@ -523,9 +530,8 @@ for(i in loop_seq) {
 names(dlist) <- unique(years_keep)
 
 # Now I need to make a loop where I extract the raster value for each year...
-# The condition data is called dat so far in this script
 
-# Filter years in the condition data frame to only have the years I have temperature for
+# Filter years in the pred-grid data frame to only have the years I have temperature for
 d_sub_temp <- pred_grid %>% filter(year %in% names(dlist)) %>% droplevels()
 
 # Create data holding object
@@ -534,7 +540,7 @@ data_list <- list()
 # Create factor year for indexing the list in the loop
 d_sub_temp$year_f <- as.factor(d_sub_temp$year)
 
-# Loop through each year and extract raster values for the condition data points
+# Loop through each year and extract raster values for the pred-grid data points
 for(i in unique(d_sub_temp$year_f)) {
   
   # Subset a year
@@ -549,7 +555,7 @@ for(i in unique(d_sub_temp$year_f)) {
   
   plot(r, main = i)
   
-  # Filter the same year (i) in the condition data and select only coordinates
+  # Filter the same year (i) in the pred-grid data and select only coordinates
   d_slice <- d_sub_temp %>% filter(year_f == i) %>% dplyr::select(lon, lat)
   
   # Make into a SpatialPoints object
@@ -558,12 +564,12 @@ for(i in unique(d_sub_temp$year_f)) {
   # Extract raster value (temperature)
   rasValue <- raster::extract(r, data_sp)
   
-  # Now we want to plot the results of the raster extractions by plotting the condition
+  # Now we want to plot the results of the raster extractions by plotting the pred-grid
   # data points over a raster and saving it for each year.
   # Make the SpatialPoints object into a raster again (for pl)
   df <- as.data.frame(data_sp)
   
-  # Add in the raster value in the df holding the coordinates for the condition data
+  # Add in the raster value in the df holding the coordinates for the pred-grid data
   d_slice$temp <- rasValue
   
   # Add in which year
@@ -615,13 +621,14 @@ animate(anim, height = 1200, width = 1200)
 
 anim_save(filename = "output/gif/temp.gif")
 
-# Left join in the depth again
-pred_grid <- left_join(pred_grid, pred_grid_temp)
+# Add in oxygen to the main prediction grid
+pred_grid_temp <- pred_grid_temp %>% arrange(lon, lat, year)
+pred_grid <- pred_grid %>% arrange(lon, lat, year)
 
-head(pred_grid)
+str(pred_grid_temp)
+str(pred_grid)
 
-sort(unique(pred_grid$year))
+pred_grid$temp <- pred_grid_temp$temp
 
 # Save
 write.csv(pred_grid, file = "data/for_analysis/pred_grid2.csv", row.names = FALSE)
-
