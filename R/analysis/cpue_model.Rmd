@@ -46,7 +46,13 @@ library(marmap)
 library(rnaturalearth)
 library(rnaturalearthdata)
 library(mapplots)
-library(qwraps2) # To load entire cache in interactive r session, do: qwraps2::lazyload_cache_dir(path = "R/analysis/cpue_cod_cache/html")
+library(qwraps2) # To load entire cache in interactive r session, do: qwraps2::lazyload_cache_dir(path = "R/analysis/cpue_model_cache/html")
+
+# For adding maps to plots
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+# Specify map ranges
+ymin = 54; ymax = 58; xmin = 9.5; xmax = 22
 ```
 
 Read data:
@@ -56,34 +62,17 @@ d <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_conditio
 
 # Calculate standardized variables
 d <- d %>% 
-  mutate(ln_length_cm = log(length_cm),
-         ln_weight_g = log(weight_g),
-         oxy_st = oxy,
-         oxy_rec_st = oxy_rec,
-         temp_st = temp,
-         temp_rec_st = temp_rec,
-         abun_her_st = abun_her,
-         abun_her_sd_st = abun_her_sd,
-         abun_spr_st = abun_spr,
-         abun_spr_sd_st = abun_spr_sd,
-         cpue_cod_st = cpue_cod,
-         cpue_cod_rec_st = cpue_cod_rec,
-         cpue_fle_st = cpue_fle,
-         cpue_fle_rec_st = cpue_fle_rec,
-         depth_st = depth) %>%
-  mutate_at(c("oxy_st", "oxy_rec_st", "temp_st", "temp_rec_st",
-              "abun_her_st", "abun_her_sd_st", "abun_spr_st", "abun_spr_sd_st",
-              "cpue_cod_st", "cpue_cod_rec_st", "cpue_fle_st", "cpue_fle_rec_st",
-              "depth_st"),
+  mutate(oxy_sc = oxy,
+         temp_sc = temp,
+         depth_sc = depth,
+         ) %>%
+  mutate_at(c("oxy_sc", "temp_sc", "depth_sc"),
             ~(scale(.) %>% as.vector)) %>% 
-  mutate(year = as.integer(year))
+  mutate(year = as.integer(year)) %>% 
+  drop_na(oxy, depth, temp)
 
-unique(is.na(d$abun_spr_st))
-
-d %>% drop_na(abun_spr_st)
-# almost 3k data points (3%) when dropping NA sprat... So we remove it?
+ggplot(d, aes(lon, lat)) + geom_point(size = 0.3) + facet_wrap(~year)
 ```
-
 
 Read the prediction grids:
 
@@ -91,24 +80,15 @@ Read the prediction grids:
 # And now read in pred_grid2 which has oxygen values at location and time and depth:
 pred_grid2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid2.csv")
 
+
+# Standardize data with respect to prediction grid:
 pred_grid2 <- pred_grid2 %>%
   mutate(ln_length_cm = log(1)) %>% # For now we'll predict changes in the intercept ("condition factor")
   mutate(X = lon, Y = lat, year = as.integer(year)) %>% 
-  filter(year %in% c(unique(cod$year))) %>% 
-  mutate(depth_st = (depth - mean(cod$depth))/sd(cod$depth),
-         oxy_st = (oxy - mean(cod$oxy))/sd(cod$oxy)) # Need to scale these to the mean and sd in the data!
-```
-
-Standardize data with respect to prediction grid:
-
-```{r prep data for cod models, cache=TRUE}
-# Standardize variables with respect to the prediction grid
-pred_grid2 <- pred_grid2 %>% drop_na(depth)
-
-cod <- cod %>%
-  drop_na(depth) %>% 
-  mutate(depth_st = (depth - mean(pred_grid2$depth))/sd(pred_grid2$depth),
-         depth_st_sq = depth_st*depth_st)
+  filter(year %in% c(unique(d$year))) %>% 
+  mutate(depth_sc = (depth - mean(d$depth))/sd(d$depth),
+         temp_sc = (temp - mean(d$temp))/sd(d$temp),
+         oxy_sc = (oxy - mean(d$oxy))/sd(d$oxy)) # Need to scale these to the mean and sd in the data!
 ```
 
 Make barrier spde mesh:
@@ -125,14 +105,14 @@ st_crs(baltic_coast) <- 4326 # 'WGS84'; necessary on some installs
 baltic_coast <- st_transform(baltic_coast, crs)
 
 # Project our survey data coordinates:
-survey <- cod %>% dplyr::select(lon, lat, cpue) %>%
+survey <- d %>% dplyr::select(lon, lat, cpue) %>%
   st_as_sf(crs = 4326, coords = c("lon", "lat")) 
 
 # Prepare for making the mesh
 # First, we will extract the coordinates:
 surv_coords <- st_coordinates(survey)
 
-spde <- make_mesh(cod, xy_cols = c("lon", "lat"),
+spde <- make_mesh(d, xy_cols = c("lon", "lat"),
                   n_knots = 200, 
                   type = "kmeans", seed = 42)
 
@@ -155,66 +135,30 @@ bspde <- add_barrier_mesh(
 # include a barrier structure in the spatial correlation:
 ```
 
-Fit the models of cpue
-
-######### RTEMOVE INTERCEPT FORM THESE MODELS1!!!!!!!!
+Fit the models of cpue:
 
 ```{r fit, results='hide', cache=TRUE, message=FALSE}
-# Depth squared
-m1 <- sdmTMB(cpue ~ 0 + as.factor(year) + depth_st + depth_st_sq, data = cod,
-             spde = bspde, family = tweedie(link = "log"),
-             ar1_fields = TRUE, include_spatial = TRUE, time = "year",
-             spatial_only = FALSE, newton_steps = 1, reml = FALSE)
-
-# Depth spline
-m2 <- sdmTMB(cpue ~ 0 + as.factor(year) + s(depth_st, k = 3), data = cod,
-             spde = bspde, family = tweedie(link = "log"),
-             ar1_fields = TRUE, include_spatial = TRUE, time = "year",
-             spatial_only = FALSE, newton_steps = 1, reml = FALSE)
-
-# Depth squared + oxy squared
-m3 <- sdmTMB(cpue ~ 0 + as.factor(year) + depth_st + depth_st_sq + oxy_st + oxy_st_sq, data = cod,
-             spde = bspde, family = tweedie(link = "log"),
-             ar1_fields = TRUE, include_spatial = TRUE, time = "year",
-             spatial_only = FALSE, newton_steps = 1, reml = FALSE)
-
 # Depth spline + oxy spline
-m4 <- sdmTMB(cpue ~ 0 + as.factor(year) + s(depth_st, k = 3) + s(oxy_st, k = 3), data = cod,
-             spde = bspde, family = tweedie(link = "log"),
-             ar1_fields = TRUE, include_spatial = TRUE, time = "year",
-             spatial_only = FALSE, newton_steps = 1, reml = FALSE)
+m <- sdmTMB(cpue ~ 0 + as.factor(year) + s(depth_sc, k = 3) + s(oxy_sc, k = 3) + s(temp_sc, k = 3), data = d,
+            spde = bspde, family = tweedie(link = "log"),
+            ar1_fields = TRUE, include_spatial = TRUE, time = "year",
+            spatial_only = FALSE, newton_steps = 1, reml = FALSE)
 
-#tidy(mcod, conf.int = TRUE)
-cod$residualsm1 <- residuals(m1)
-cod$residualsm2 <- residuals(m2)
-cod$residualsm3 <- residuals(m3)
-cod$residualsm4 <- residuals(m4)
-qqnorm(cod$residualsm1); abline(a = 0, b = 1)
-qqnorm(cod$residualsm2); abline(a = 0, b = 1)
-qqnorm(cod$residualsm3); abline(a = 0, b = 1)
-qqnorm(cod$residualsm4); abline(a = 0, b = 1)
-
-AIC(m1, m2, m3, m4) %>% arrange(AIC)
+tidy(m, conf.int = TRUE)
+d$residualsm <- residuals(m)
+qqnorm(d$residualsm); abline(a = 0, b = 1)
 ```
 
 Check the AR1 parameter (`rho` is `ar_phi` on the -1 to 1 scale):
 
 ```{r check AR1 estimate}
-tidy(m4, effects = "ran_pars", conf.int = TRUE) %>% filter(term == "rho")
+tidy(m, effects = "ran_pars", conf.int = TRUE) %>% filter(term == "rho")
 ```
 
 Predict and extract CPUE-weighted mean oxygen and depth per prediction grid
 
-```{r predict}
-pred_grid2 <- pred_grid2 %>%
-  mutate(X = lon, Y = lat, year = as.integer(year)) %>% 
-  filter(year %in% c(unique(cod$year))) %>% 
-  mutate(depth_st = (depth - mean(cod$depth))/sd(cod$depth),
-         oxy_st = (oxy - mean(cod$oxy))/sd(cod$oxy),
-         depth_st_sq = depth_st*depth_st) %>% # Need to scale these to the mean and sd in the data!
-  drop_na(oxy_st)
-
-predcod <- predict(m4, newdata = pred_grid2)
+```{r predict, cache=TRUE}
+predcod <- predict(m, newdata = pred_grid2)
 ```
 
 Plot on map
@@ -222,10 +166,7 @@ Plot on map
 ```{r plot}
 predcod <- predcod %>% mutate(est2 = ifelse(depth > 120, NA, est))
 
-# predcod %>% mutate(est2_resp = exp(est2)) %>% arrange(exp(est2_resp)) %>% dplyr::select(est2_resp) %>% head(20)
-# predcod %>% mutate(est2_resp = exp(est2)) %>% arrange(desc(est2_resp)) %>% dplyr::select(est2_resp) %>% head(20)
-
-# Oxygen
+# Plot predicted CPUE
 predcod %>% 
   #filter(year %in% c("1993", "2018")) %>% 
   filter(exp(est2) < 2000) %>% 
@@ -243,33 +184,32 @@ predcod %>%
 
 We can also plot the annual index
 
-```{r annual condition factor, message=FALSE, cache=TRUE}
-# From these models, predict annual condition factor
+```{r cpue index, message=FALSE, cache=TRUE}
+# From these models, predict annual cpue
 # Grabbing the number of cells to help with calculating the average
-ncells <- filter(pred_grid2, year == max(pred_grid2$year)) %>% nrow()
 
-# Use the `area` argument here to turn the total into an average by giving it one over the number of cells
 pred_grid2 <- pred_grid2 %>% filter(depth < 120)
 
-preds_mcod <- predict(mcod, newdata = pred_grid2, return_tmb_object = TRUE, area = 1/ncells)
+unique(is.na(pred_grid2))
+ 
+pred_grid2 <- drop_na(pred_grid2)
 
-# Make a little helper function... bias correction shouldn't do anything here because of the identity link
-get_average_index <- function(obj, level = 0.95, ...)  {
-  sdmTMB:::get_generic(obj, value_name = "link_total",
-    bias_correct = FALSE, level = level, trans = I, ...)
-}
+ncells <- filter(pred_grid2, year == max(pred_grid2$year)) %>% nrow()
 
-avg_mcod <- get_average_index(preds_mcod)
+preds_mcod <- predict(m, newdata = pred_grid2, return_tmb_object = TRUE)
 
-avg_mcod <- avg_mcod %>% mutate(est_response = exp(est),
-                                lwr_response = exp(lwr),
-                                upr_response = exp(upr))
+ind <- get_index(preds_mcod)
 
-avg_mcod %>%
-  ggplot(., aes(year, est_response)) +
-  ylab("cpue") +
+# The total area is 4053 cells * 36.4 km^2 of a cell
+ind <- ind %>% mutate(est_kg_h = est/(ncells*36.4),
+                      lwr_kg_h = lwr/(ncells*36.4),
+                      upr_kg_h = upr/(ncells*36.4))
+ 
+ind %>%
+  ggplot(., aes(year, est_kg_h)) +
+  ylab("Average CPUE [kg/hour]") +
   geom_line() + 
-  geom_ribbon(aes(ymin = lwr_response, ymax = upr_response), alpha = 0.4) +
+  geom_ribbon(aes(ymin = lwr_kg_h, ymax = upr_kg_h), alpha = 0.4) +
   theme(axis.text.x = element_text(angle = 30),
         legend.position = c(0.8, 0.8)) +
   scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
@@ -296,6 +236,7 @@ predcod %>%
 ```
 
 Calculate cpue-weighted mean depth-at-location
+
 ```{r cpue-weighted mean depth plot}
 predcod %>% 
   drop_na(est2) %>% 
@@ -312,41 +253,38 @@ predcod %>%
   ggtitle("CPUE weighted average depth at location") 
 ```
 
-Marginal effect of depth
+Calculate cpue-weighted mean temperature-at-location
 
-```{r marginal effects depth, message=FALSE, cache=TRUE}
-# Prepare prediction data frame
-nd_dep <- data.frame(depth = seq(min(cod$depth), max(cod$depth), length.out = 100))
-nd_dep <- nd %>%
-  mutate(year = 2003L,
-         depth_st = (depth - mean(depth))/sd(depth),
-         depth_st_sq = depth_st*depth_st,
-         oxy_st = 0,
-         oxy_st_sq = 0)
-
-# Predict 
-p_margin_dep <- predict(m4, newdata = nd_dep, se_fit = TRUE, re_form = NA)
-
-ggplot(p_margin_dep, aes(depth, exp(est),
-  ymin = exp(est) - 1.96 * exp(est_se), ymax = exp(est) + 1.96 * exp(est_se))) +
-  geom_line() + 
-  geom_ribbon(alpha = 0.4)
+```{r cpue-weighted mean temperature plot}
+predcod %>% 
+  drop_na(est2) %>% 
+  group_by(year) %>% 
+  #filter(exp(est2) < 1000) %>% # remove some extremes to better see trends in space and time 
+  #filter(exp(est2) > 0.05) %>% # remove some extremes to better see trends in space and time
+  summarise(temp_wm = weighted.mean(temp, exp(est2))) %>% 
+  ggplot(., aes(year, temp_wm)) +
+  geom_point(size = 3) +
+  stat_smooth(method = "lm") +
+  theme(axis.text.x = element_text(angle = 30),
+        legend.position = c(0.8, 0.8)) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  ggtitle("CPUE weighted average temp at location") 
 ```
 
 Marginal effect of oxygen
 
 ```{r marginal effects oxygen, message=FALSE, cache=TRUE}
 # Prepare prediction data frame
-nd_oxy <- data.frame(oxy = seq(min(cod$oxy), max(cod$oxy), length.out = 100))
+nd_oxy <- data.frame(oxy = seq(min(d$oxy), max(d$oxy), length.out = 100))
+
 nd_oxy <- nd_oxy %>%
   mutate(year = 2003L,
-         depth_st = 0,
-         depth_st_sq = 0,
-         oxy_st = (oxy - mean(oxy))/sd(oxy),
-         oxy_st_sq = oxy_st*oxy_st)
+         depth_sc = 0,
+         oxy_sc = (oxy - mean(oxy))/sd(oxy),
+         temp_sc = 0)
 
 # Predict 
-p_margin_oxy <- predict(m4, newdata = nd_oxy, se_fit = TRUE, re_form = NA)
+p_margin_oxy <- predict(m, newdata = nd_oxy, se_fit = TRUE, re_form = NA)
 
 ggplot(p_margin_oxy, aes(oxy, exp(est),
   ymin = exp(est) - 1.96 * exp(est_se), ymax = exp(est) + 1.96 * exp(est_se))) +
@@ -354,3 +292,160 @@ ggplot(p_margin_oxy, aes(oxy, exp(est),
   geom_ribbon(alpha = 0.4)
 ```
 
+Marginal effect of depth
+
+```{r marginal effects depth, message=FALSE, cache=TRUE}
+# Prepare prediction data frame
+nd_dep <- data.frame(depth = seq(min(d$depth), max(d$depth), length.out = 100))
+
+nd_dep <- nd_dep %>%
+  mutate(year = 2003L,
+         depth_sc = (depth - mean(depth))/sd(depth),
+         oxy_sc = 0,
+         temp_sc = 0)
+
+# Predict 
+p_margin_dep <- predict(m, newdata = nd_dep, se_fit = TRUE, re_form = NA)
+
+ggplot(p_margin_dep, aes(depth, exp(est),
+  ymin = exp(est) - 1.96 * exp(est_se), ymax = exp(est) + 1.96 * exp(est_se))) +
+  geom_line() + 
+  geom_ribbon(alpha = 0.4)
+```
+
+Marginal effect of temperature
+
+```{r marginal effects temperature, message=FALSE, cache=TRUE}
+# Prepare prediction data frame
+nd_temp <- data.frame(temp = seq(min(d$temp), max(d$temp), length.out = 100))
+
+nd_temp <- nd_temp %>%
+  mutate(year = 2003L,
+         depth_sc = 0,
+         oxy_sc = 0,
+         temp_sc = (temp - mean(temp))/sd(temp))
+
+# Predict 
+p_margin_temp <- predict(m, newdata = nd_temp, se_fit = TRUE, re_form = NA)
+
+ggplot(p_margin_temp, aes(temp, exp(est),
+  ymin = exp(est) - 1.96 * exp(est_se), ymax = exp(est) + 1.96 * exp(est_se))) +
+  geom_line() + 
+  geom_ribbon(alpha = 0.4)
+```
+
+Combined plot:
+
+```{r combined plot, message=FALSE}
+cpue_index <- ind %>%
+  ggplot(., aes(year, est_kg_h)) +
+  ylab("Average CPUE [kg/hour]") +
+  geom_line() + 
+  geom_ribbon(aes(ymin = lwr_kg_h, ymax = upr_kg_h), alpha = 0.4) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  labs(x = "Year") +
+  theme_classic(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 20))
+
+plot_dep <- predcod %>% 
+  drop_na(est2) %>% 
+  group_by(year) %>% 
+  summarise(depth_wm = weighted.mean(depth, exp(est2))) %>% 
+  ggplot(., aes(year, depth_wm)) +
+  geom_point(size = 1.8) +
+  labs(y = "Depth [m]", x = "Year") + 
+  stat_smooth(method = "lm", color = "grey20") +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  theme_classic(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 20))
+
+# For these two plots we want to calculate the average in the prediction grid...
+annual_oxy_temp <- pred_grid2 %>% 
+  drop_na(oxy, temp) %>% 
+  mutate(Year = year) %>% 
+  group_by(Year) %>% 
+  summarize(mean_temp = mean(temp),
+            mean_oxy = mean(oxy)) %>% 
+  ungroup()
+
+# ggplot(annual_oxy_temp, aes(Year, mean_oxy)) + geom_point() + stat_smooth(method = "lm")
+  
+pal <- RColorBrewer::brewer.pal(name = "Dark2", n = 5)
+
+plot_oxy <- predcod %>% 
+  drop_na(est2) %>% 
+  group_by(year) %>% 
+  summarise(oxy_wm = weighted.mean(oxy, exp(est2))) %>% 
+  ggplot(.) +
+  geom_point(aes(year, oxy_wm, color = "red"), size = 1.8, show.legend = TRUE) +
+  geom_point(data = annual_oxy_temp, aes(Year, mean_oxy, color = "blue"), size = 1.8, show.legend = TRUE) +
+  stat_smooth(aes(year, oxy_wm), method = "lm", fill = pal[2], alpha = 0.2, color = pal[2]) +
+  stat_smooth(data = annual_oxy_temp, aes(Year, mean_oxy), method = "lm", fill = pal[3], alpha = 0.2, color = pal[3]) +
+  scale_color_manual(values = c(pal[3], pal[2]),
+                     name = c(""),
+                     labels = c("Environment", "CPUE-weighted")) +
+  labs(y = "Mean oxygen [unit?]", x = "Year") + 
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  theme_classic(base_size = 13) +
+  guides(colour = guide_legend(override.aes = list(size = 1)))+
+  theme(legend.position = c(0.8, 0.95),
+        legend.text = element_text(size = 7),
+        axis.text.x = element_text(angle = 20),
+        legend.background = element_rect(fill = NA),
+        legend.margin = margin(0, 0, 0, 0),
+        legend.spacing.x = unit(0, "pt"))
+
+plot_temp <- predcod %>% 
+  drop_na(est2) %>% 
+  group_by(year) %>% 
+  summarise(temp_wm = weighted.mean(temp, exp(est2))) %>% 
+  ggplot(.) +
+  geom_point(aes(year, temp_wm, color = "red"), size = 1.8, show.legend = TRUE) +
+  geom_point(data = annual_oxy_temp, aes(Year, mean_temp, color = "blue"), size = 1.8, show.legend = TRUE) +
+  stat_smooth(aes(year, temp_wm), method = "lm", fill = pal[2], alpha = 0.2, color = pal[2]) +
+  stat_smooth(data = annual_oxy_temp, aes(Year, mean_temp), method = "lm", fill = pal[3], alpha = 0.2, color = pal[3]) +
+  scale_color_manual(values = c(pal[3], pal[2]),
+                     name = c(""),
+                     labels = c("Environment", "CPUE-weighted")) +
+  labs(y = "Temperature [°C]", x = "Year") + 
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  theme_classic(base_size = 13) +
+  guides(colour = guide_legend(override.aes = list(size = 1)))+
+  theme(legend.position = c(0.25, 0.95),
+        legend.text = element_text(size = 7),
+        axis.text.x = element_text(angle = 20),
+        legend.background = element_rect(fill = NA),
+        legend.margin = margin(0, 0, 0, 0),
+        legend.spacing.x = unit(0, "pt"))
+
+(cpue_index + plot_dep) / (plot_oxy + plot_temp) +
+  plot_annotation(tag_levels = 'A')
+
+ggsave("figures/analysis/cpue.png", width = 6.5, height = 6.5, dpi = 600)
+
+# Do some simple stats...
+
+annual_oxy_temp$source <- "env"
+
+weigh <- predcod %>% 
+  drop_na(est2) %>% 
+  group_by(year) %>% 
+  summarise(mean_temp = weighted.mean(temp, exp(est2)),
+            mean_oxy = weighted.mean(oxy, exp(est2))) %>% 
+  mutate(source = "cpue_model") %>% 
+  rename("Year" = "year")
+  
+dd <- bind_rows(annual_oxy_temp, weigh)
+
+ggplot(dd, aes(Year, mean_temp, color = source)) +
+  geom_point() + 
+  stat_smooth(method = "lm")
+
+ggplot(dd, aes(Year, mean_oxy, color = source)) +
+  geom_point() + 
+  stat_smooth(method = "lm")
+
+summary(lm(mean_temp ~ Year*source, data = dd))
+
+summary(lm(mean_oxy ~ Year*source, data = dd))
+```

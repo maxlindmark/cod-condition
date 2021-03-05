@@ -728,24 +728,24 @@ ggplot(poxy2, aes(X, Y, fill = est2)) +
 ```
 
 ```{r gganimate condition, message=FALSE, include=FALSE}
-p <- ggplot(poxy2, aes(X, Y, fill = est2)) +
-  geom_raster() +
-  scale_fill_viridis(option = "magma", 
-                     name = "log(condition factor)") + 
-  geom_sf(data = world, inherit.aes = F, size = 0.2) +
-  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
-  labs(x = "lon", y = "lat")
-
-# Here comes the gganimate specific bits
-anim <- p +
-  labs(title = 'Year: {frame_time}') +
-  transition_time(as.integer(year)) +
-  ease_aes('linear') +
-  theme_classic(base_size = 24)
-
-gganimate::animate(anim, height = 1200, width = 1200)
-
-anim_save(filename = "/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/cod_condition/output/gif/cond_oxy.gif")  
+# p <- ggplot(poxy2, aes(X, Y, fill = est2)) +
+#   geom_raster() +
+#   scale_fill_viridis(option = "magma", 
+#                      name = "log(condition factor)") + 
+#   geom_sf(data = world, inherit.aes = F, size = 0.2) +
+#   coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+#   labs(x = "lon", y = "lat")
+# 
+# # Here comes the gganimate specific bits
+# anim <- p +
+#   labs(title = 'Year: {frame_time}') +
+#   transition_time(as.integer(year)) +
+#   ease_aes('linear') +
+#   theme_classic(base_size = 24)
+# 
+# gganimate::animate(anim, height = 1200, width = 1200)
+# 
+# anim_save(filename = "/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/cod_condition/output/gif/cond_oxy.gif")  
 ```
 
 Again, the story seems to be that condition is getting worse throughout the Baltic Sea and it's already worse in deep areas, especially east of Bornholm and north of the Gdansk deep  (see bathymetry map below), and maybe the time trend is also slightly stronger there!

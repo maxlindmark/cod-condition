@@ -1,5 +1,5 @@
 ---
-title: "Condition model"
+title: "Condition model oikos"
 author: "Max Lindmark & Sean Andersson"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
@@ -21,7 +21,7 @@ knitr::opts_chunk$set(
 ```
 
 ## Aim
-Implement regularization using Gaussian priors with mean 0 different standard deviations, and compare the MSE on withheld and training data.
+Fit main model (see exploratory scripts and model comparison), visualize results.
 
 ## Fit models
 ### Read data and set up spde mesh
@@ -55,57 +55,51 @@ Now read data:
 d <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cond.csv")
 
 # Calculate standardized variables
-# Calculate standardized variables
 d <- d %>% 
   mutate(ln_length_cm = log(length_cm),
          ln_weight_g = log(weight_g),
-         oxy_st = oxy,
-         oxy_rec_st = oxy_rec,
-         temp_st = temp,
-         temp_rec_st = temp_rec,
-         abun_her_st = abun_her,
-         abun_her_sd_st = abun_her_sd,
-         abun_spr_st = abun_spr,
-         abun_spr_sd_st = abun_spr_sd,
-         cpue_cod_st = cpue_cod,
-         cpue_cod_rec_st = cpue_cod_rec,
-         cpue_fle_st = cpue_fle,
-         cpue_fle_rec_st = cpue_fle_rec,
-         depth_st = depth) %>%
-  mutate_at(c("oxy_st", "oxy_rec_st", "temp_st", "temp_rec_st",
-              "abun_her_st", "abun_her_sd_st", "abun_spr_st", "abun_spr_sd_st",
-              "cpue_cod_st", "cpue_cod_rec_st", "cpue_fle_st", "cpue_fle_rec_st",
-              "depth_st"),
+         abun_her_sc = abun_her,
+         abun_her_sd_sc = abun_her_sd,
+         abun_spr_sc = abun_spr,
+         abun_spr_sd_sc = abun_spr_sd,
+         cpue_cod_sc = cpue_cod,
+         cpue_cod_rec_sc = cpue_cod_rec,
+         cpue_fle_sc = cpue_fle,
+         cpue_fle_rec_sc = cpue_fle_rec,
+         depth_sc = depth) %>%
+  mutate_at(c("abun_her_sc", "abun_her_sd_sc", "abun_spr_sc", "abun_spr_sd_sc",
+              "cpue_cod_sc", "cpue_cod_rec_sc", "cpue_fle_sc", "cpue_fle_rec_sc",
+              "depth_sc"),
             ~(scale(.) %>% as.vector)) %>% 
-  mutate(year = as.integer(year))
+  mutate(year = as.integer(year)) %>% 
+  group_by(year) %>%
+  mutate(oxy_sc = (oxy - mean(oxy))/sd(oxy),
+         temp_sc = (temp - mean(temp))/sd(temp))
 ```
 
 Read the prediction grids:
 
 ```{r read and process prediction grid, message=FALSE, warning=FALSE}
-pred_grid <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid.csv")
-
-pred_grid <- pred_grid %>%
-  mutate(ln_length_cm = log(1)) %>% # For now we'll predict changes in the intercept ("condition factor")
-  mutate(X = lon,
-         Y = lat,
-         year = as.integer(year),
-         depth_st = 0) %>% # In this prediction grid I keep depth at its mean, below I have a more realistic prediction grid
-  filter(year %in% c(unique(d$year)))
-
-# And now read in pred_grid2 which has oxygen values at location and time and depth:
+# pred_grid2 has oxygen and temp values at location and time and depth:
 pred_grid2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid2.csv")
 
+pred_grid2 <- pred_grid2 %>% drop_na(oxy, depth, temp)
+
+# Now standardize the variables in the data
 pred_grid2 <- pred_grid2 %>%
   mutate(ln_length_cm = log(1)) %>% # For now we'll predict changes in the intercept ("condition factor")
   mutate(X = lon, Y = lat, year = as.integer(year)) %>% 
   filter(year %in% c(unique(d$year))) %>% 
-  mutate(depth_st = (depth - mean(d$depth))/sd(d$depth),
-         temp_st = (temp - mean(d$temp))/sd(d$temp),
-         oxy_st = (oxy - mean(d$oxy))/sd(d$oxy)) # Need to scale these to the mean and sd in the data!
+  mutate(depth_sc = (depth - mean(d$depth))/sd(d$depth)) %>%
+  group_by(year) %>% 
+  ungroup() %>% 
+  mutate(oxy_sc = (oxy - mean(d$oxy))/sd(d$oxy),
+         temp_sc = (temp - mean(d$temp))/sd(d$temp))
+  
+# We centre the variable using the annual means in the data grid
 ```
 
-In earlier versions we used this: `spde <- make_mesh(data = d, xy_cols = c("lon", "lat"), n_knots = 110, type = "kmeans", seed = 42)`. But now we have even more islands in the data since I am using also the western Baltic Sea, so we will use the `add_barrier_mesh` to include an island effect (following the example function). Note this also means we can increase the # of knots before hitting convergence issues (how much varies from model to model though!)
+Make barrier spde mesh
 
 ```{r make barrier spde mesh, results='hide', message=FALSE}
 # Crop the polygon for plotting and efficiency:
@@ -127,7 +121,7 @@ survey <- d %>% dplyr::select(lon, lat, ln_weight_g) %>%
 surv_coords <- st_coordinates(survey)
 
 spde <- make_mesh(d, xy_cols = c("lon", "lat"),
-                  n_knots = 160, # 180 works nice as well but 160 works with the 80% training data
+                  n_knots = 180, # 180 works nice as well but 160 works with the 80% training data
                   type = "kmeans", seed = 42)
 
 # Add on the barrier mesh component:
@@ -149,19 +143,11 @@ mesh_df_land <- bspde$mesh_sf[bspde$barrier_triangles, ]
 # include a barrier structure in the spatial correlation:
 ```
 
-### Default model (no additional covariates)
-```{r without covariates, cache=TRUE}
-mdef <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st -1, time_varying = ~ 1, data = d, time = "year",
-                spde = bspde, family = student(link = "identity", df = 5), ar1_fields = TRUE,
-                include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
-                silent = TRUE, newton_steps = 1, reml = FALSE)
-
-tidy(mdef, conf.int = TRUE)
-```
-
 ### Full model
 ```{r full model, cache=TRUE}
-mfull <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st + oxy_st + oxy_rec_st + cpue_fle_st + cpue_fle_rec_st + cpue_cod_st + cpue_cod_rec_st + abun_spr_st + abun_spr_sd_st + abun_her_st + abun_her_sd_st + oxy_st*depth_st + temp_st*depth_st -1, time_varying = ~ 1, data = d, time = "year",
+mfull <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_sc + oxy_sc + temp_sc + 
+                  cpue_fle_sc + cpue_fle_rec_sc + cpue_cod_sc + cpue_cod_rec_sc + abun_spr_sc + abun_spr_sd_sc + abun_her_sc + abun_her_sd_sc + oxy_sc*depth_sc + temp_sc*depth_sc + oxy_sc*temp_sc 
+                  -1, time_varying = ~ 1, data = d, time = "year",
                 spde = bspde, family = student(link = "identity", df = 5), ar1_fields = TRUE,
                 include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
                 silent = TRUE, newton_steps = 1, reml = FALSE)
@@ -169,310 +155,266 @@ mfull <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st + oxy_st + oxy_r
 tidy(mfull, conf.int = TRUE)
 ```
 
-### Full model with regularization
-```{r sd = 1, cache=TRUE}
-# Create a vector with standard deviations for the normal distribution (mean 0) that is the prior for the fixed effect. The penalties vector should correspond to the columns of the X_ij matrix.
-penalty_vec <- rep(1, length(colnames(mfull$tmb_data$X_ij)))
+### Plot fixed and random effects
+```{r extract coefficients, message=FALSE}
+# Extract random and fixed coefficients from the full model
+mfull_est <- bind_rows(tidy(mfull, effects = "ran_par", conf.int = TRUE) %>%
+                         filter(term %in% c("sigma_O", "sigma_E")),
+                       tidy(mfull, effects = "fixed", conf.int = TRUE) %>%
+                         filter(!term %in% c("ln_length_cm"))) %>%
+  mutate(Model = "Oxygen model") %>%
+  mutate(term = factor(term)) %>%
+  mutate(term = recode(term,
+                       "oxy_sc" = "Oxygen",
+                       "temp_sc" = "Temp.",
+                       "abun_her_sc" = "Herring",
+                       "abun_her_sd_sc" = "Herring SD",
+                       "abun_spr_sc" = "Sprat",
+                       "abun_spr_sd_sc" = "Sprat SD",
+                       "cpue_cod_sc" = "Cod",
+                       "cpue_cod_rec_sc" = "Cod REC",
+                       "cpue_fle_sc" = "Flounder",
+                       "cpue_fle_rec_sc" = "Flounder rec",
+                       "depth_sc:temp_sc" = "Depth X Temp.",
+                       "depth_sc:oxy_sc" = "Depth X Oxygen",
+                       "oxy_sc:temp_sc" = "Oxygen X Temp.",
+                       "temp_sc:oxy_sc" = "Temp. X Oxygen",
+                       "sigma_O" = 'σ_O (spatial\nrandom s.d.)',
+                       "sigma_E" = 'σ_E (spatiotemporal\nrandom s.d.)',
+                       "depth_sc" = "Depth"))
 
-# Remove penalty for the length-coefficient
-penalty_vec[1] <- NA
+# Plot effects
+ggplot(mfull_est, aes(reorder(term, estimate), estimate)) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +
+  geom_hline(yintercept = 0, linetype = 2, color = "gray") +
+  labs(x = "", y = "Standardized coefficient") +
+  theme_classic(base_size = 16) +
+  coord_flip()
 
-mreg <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st + oxy_st + oxy_rec_st + cpue_fle_st + cpue_fle_rec_st + cpue_cod_st + cpue_cod_rec_st + abun_spr_st + abun_spr_sd_st + abun_her_st + abun_her_sd_st + oxy_st*depth_st + temp_st*depth_st -1, time_varying = ~ 1, data = d, time = "year",
-               spde = bspde, family = student(link = "identity", df = 5), ar1_fields = TRUE,
-               include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
-               silent = TRUE, newton_steps = 1, reml = FALSE,
-               penalties = penalty_vec)
-
-tidy(mreg, conf.int = TRUE)
+ggsave("figures/analysis/effect_sizes.png", width = 5, height = 7.5, dpi = 600)
 ```
 
-### Full model with regularization (sd = 0.1)
+Plot the annual condition factor
 
-```{r sd = 0.1, cache=TRUE}
-# Create a vector with standard deviations for the normal distribution (mean 0) that is the prior for the fixed effect. The penalties vector should correspond to the columns of the X_ij matrix.
-penalty_vec2 <- rep(0.1, length(colnames(mfull$tmb_data$X_ij)))
+```{r annual condition factor, message=FALSE,cache=TRUE}
+# From these models, predict annual condition factor
+# Grabbing the number of cells to help with calculating the average
+ncells <- filter(pred_grid2, year == max(pred_grid2$year)) %>% nrow()
 
-# Remove penalty for the length-coefficient
-penalty_vec2[1] <- NA
+pred_grid_oxy <- pred_grid2 %>% drop_na(oxy)
 
-mreg2 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st + oxy_st + oxy_rec_st + cpue_fle_st + cpue_fle_rec_st + cpue_cod_st + cpue_cod_rec_st + abun_spr_st + abun_spr_sd_st + abun_her_st + abun_her_sd_st + oxy_st*depth_st + temp_st*depth_st -1, time_varying = ~ 1, data = d, time = "year",
-               spde = bspde, family = student(link = "identity", df = 5), ar1_fields = TRUE,
-               include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
-               silent = TRUE, newton_steps = 1, reml = FALSE,
-               penalties = penalty_vec2)
+pred_grid_oxy <- pred_grid_oxy %>% 
+  mutate(cpue_fle_sc = 0,
+         cpue_fle_rec_sc = 0,
+         cpue_cod_sc = 0,
+         cpue_cod_rec_sc = 0,
+         abun_spr_sc = 0,
+         abun_spr_sd_sc = 0,
+         abun_her_sc = 0,
+         abun_her_sd_sc = 0)
 
-tidy(mreg2, conf.int = TRUE)
-```
+# For now I set all covariates to zero, but if we want to calculate annual averages with covariates (e.g. oxygen), then we should fit the model with oxygen centered to the mean in the prediction grid.
 
-### Full model with regularization (sd = 0.01)
+# Use the `area` argument here to turn the total into an average by giving it one over the number of cells
+preds_mfull <- predict(mfull, newdata = pred_grid_oxy, return_tmb_object = TRUE, area = 1/ncells)
 
-```{r sd = 0.01, cache=TRUE}
-# Create a vector with standard deviations for the normal distribution (mean 0) that is the prior for the fixed effect. The penalties vector should correspond to the columns of the X_ij matrix.
-penalty_vec3 <- rep(0.01, length(colnames(mfull$tmb_data$X_ij)))
-
-# Remove penalty for the length-coefficient
-penalty_vec3[1] <- NA
-
-mreg3 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st + oxy_st + oxy_rec_st + cpue_fle_st + cpue_fle_rec_st + cpue_cod_st + cpue_cod_rec_st + abun_spr_st + abun_spr_sd_st + abun_her_st + abun_her_sd_st + oxy_st*depth_st + temp_st*depth_st -1, time_varying = ~ 1, data = d, time = "year",
-               spde = bspde, family = student(link = "identity", df = 5), ar1_fields = TRUE,
-               include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
-               silent = TRUE, newton_steps = 1, reml = FALSE,
-               penalties = penalty_vec3)
-
-tidy(mreg3, conf.int = TRUE)
-```
-
-### Full model with regularization (sd = 0.001)
-
-```{r sd = 0.001, cache=TRUE}
-# Create a vector with standard deviations for the normal distribution (mean 0) that is the prior for the fixed effect. The penalties vector should correspond to the columns of the X_ij matrix.
-penalty_vec4 <- rep(0.001, length(colnames(mfull$tmb_data$X_ij)))
-
-# Remove penalty for the length-coefficient
-penalty_vec4[1] <- NA
-
-mreg4 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st + oxy_st + oxy_rec_st + cpue_fle_st + cpue_fle_rec_st + cpue_cod_st + cpue_cod_rec_st + abun_spr_st + abun_spr_sd_st + abun_her_st + abun_her_sd_st + oxy_st*depth_st + temp_st*depth_st -1, time_varying = ~ 1, data = d, time = "year",
-               spde = bspde, family = student(link = "identity", df = 5), ar1_fields = TRUE,
-               include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
-               silent = TRUE, newton_steps = 1, reml = FALSE,
-               penalties = penalty_vec4)
-
-tidy(mreg4, conf.int = TRUE)
-```
-
-## Compare estimates across models
-```{r compare, cache=TRUE}
-est <- bind_rows(tidy(mfull, conf.int = TRUE) %>% mutate(model = "full no prior"),
-                 tidy(mreg, conf.int = TRUE) %>% mutate(model = "sd=1"),
-                 tidy(mreg2, conf.int = TRUE) %>% mutate(model = "sd=0.1"),
-                 tidy(mreg3, conf.int = TRUE) %>% mutate(model = "sd=0.01"),
-                 tidy(mreg4, conf.int = TRUE) %>% mutate(model = "sd=0.001"))
-
-dodge <- position_dodge(width = 0.5)
-
-mfull %>%
-  tidy(conf.int = TRUE) %>%
-  filter(!term == "ln_length_cm") %>% 
-  ggplot(., aes(estimate)) + geom_histogram()
-
-x <- data.frame(sample = rnorm(10000, 0, 0.1))
-
-ggplot(x, aes(sample)) +
-  geom_density() +
-  geom_vline(xintercept = c(-0.02, 0.02), linetype = 2)
-
-mreg4 %>%
-  tidy(conf.int = TRUE) %>%
-  filter(!term == "ln_length_cm") %>% 
-  ggplot(., aes(estimate)) + geom_histogram()
-
-
-# Check the length-exponent real quick
-est %>% filter(term == "ln_length_cm") 
-
-est %>% 
-  filter(!term == "ln_length_cm") %>% 
-  ggplot(., aes(reorder(term, estimate), estimate, color = model)) +
-  geom_point(size = 2, position = dodge) + 
-  geom_hline(yintercept = 0, linetype = 2, alpha = 0.3) +
-  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2, position = dodge) +
-  coord_flip() +
-  scale_color_brewer(palette = "Dark2") +
-  theme_classic(base_size = 16)
-  NULL
-```
-
-The difference in parameter estimates are very small when I include a prior, unless the sd is tight. See if the full model is overfit. If it has a tendency to overfitting compared to the default model, do regularization. Does the sd=1 regularization affect overfitting? If no, try smaller sds. How small? Determine which sd gives the best cross val error.
-
-### Evalute out-of-sample predictive accuracy
-```{r prep data for cross val, cache=TRUE}
-# Remove NA data (some rectangles don't have data for all years)
-d <- d %>% drop_na(abun_spr_st)
-
-# First take a random subset (80% of data) for training the model
-train_size <- 0.8*nrow(d)
-set.seed(42)
-train_rows <- sample.int(nrow(d), train_size)
-train <- d[train_rows, ]
-
-# Assign rows as either for training or for later prediction (withheld)
-d <- d %>% 
-  mutate(row_n = 1:n(),
-         split = ifelse(row_n %in% train_rows, "train", "withheld"))
-
-# Plot just to see 
-d %>% group_by(year, split) %>% summarize(n = n()) %>%
-  ggplot(., aes(factor(year), n, fill = factor(split))) +
-  geom_bar(stat = "identity", position = "dodge")
-
-# Now I think we need to redo the spde mesh, because we now fit the model using only 80 % of the data
-# Project our survey data coordinates:
-survey_train <- filter(d, split == "train") %>% dplyr::select(lon, lat, ln_weight_g) %>%
-  st_as_sf(crs = 4326, coords = c("lon", "lat")) 
-
-# Prepare for making the mesh
-# First, we will extract the coordinates:
-surv_coords <- st_coordinates(survey_train)
-
-spde_train <- make_mesh(filter(d, split == "train"), xy_cols = c("lon", "lat"),
-                        n_knots = 160,
-                        type = "kmeans", seed = 42)
-
-# Add on the barrier mesh component:
-bspde_train <- add_barrier_mesh(
-  spde_train, baltic_coast, range_fraction = 0.2,
-  proj_scaling = 1, plot = TRUE
-)
-
-# Now we need to extract the residuals from the predictions on the training data and the withheld data
-# First, borrow some functions from sdmTMB to calculate quantile residuals: https://github.com/pbs-assess/sdmTMB/blob/master/R/residuals.R
-pt_ls <- function(q, df, mu, sigma) stats::pt((q - mu)/sigma, df)
-
-qres_student <- function(object, y, mu) {
-  dispersion <- exp(object$model$par[["ln_phi"]])
-  u <- pt_ls(q = y, df = object$tmb_data$df, mu = mu, sigma = dispersion)
-  stats::qnorm(u)
+# Make a little helper function... bias correction shouldn't do anything here because of the identity link
+get_average_condition <- function(obj, level = 0.95, ...)  {
+  sdmTMB:::get_generic(obj, value_name = "link_total",
+                       bias_correct = FALSE, level = level, trans = I, ...)
 }
+
+avg_mfull <- get_average_condition(preds_mfull)
+
+avg_mfull %>%
+  ggplot(., aes(year, est)) +
+  ylab("Average log(condition factor)") +
+  geom_point(size = 2) +
+  geom_errorbar(aes(x = year, ymax = upr, ymin = lwr),
+                width = 0.2, alpha = 0.8) +
+  theme(axis.text.x = element_text(angle = 30),
+        legend.position = c(0.8, 0.8)) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  labs(x = "Year") +
+  theme_classic(base_size = 14) + 
+  theme(aspect.ratio = 0.75) +
+  NULL
+
+ggsave("figures/analysis/condition_index.png", width = 6.5, height = 6.5, dpi = 600)
 ```
 
-Now fit the models on the training data.
+We can make a prediction over a grid with the oxygen values values at each location across time `pred_grid2`, but keeping all other covariates at their means:
+  
+```{r predict on grid with oxygen & depth & temp, message=FALSE, fig.width=12}
+pred_grid2 <- pred_grid2 %>% 
+  mutate(cpue_fle_sc = 0,
+         cpue_fle_rec_sc = 0,
+         cpue_cod_sc = 0,
+         cpue_cod_rec_sc = 0,
+         abun_spr_sc = 0,
+         abun_spr_sd_sc = 0,
+         abun_her_sc = 0,
+         abun_her_sd_sc = 0)
 
-```{r full model cv, cache=TRUE}
-# No penalty
-mnp <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st + oxy_st + oxy_rec_st + cpue_fle_st + cpue_fle_rec_st + cpue_cod_st + cpue_cod_rec_st + abun_spr_st + abun_spr_sd_st + abun_her_st + abun_her_sd_st + oxy_st*depth_st + temp_st*depth_st -1, time_varying = ~ 1,
-              data = filter(d, split == "train"),
-              time = "year", spde = bspde_train, family = student(link = "identity", df = 5),
-              ar1_fields = TRUE, include_spatial = TRUE, spatial_trend = FALSE,
-              spatial_only = FALSE, silent = TRUE, newton_steps = 1, reml = FALSE)
+poxy2 <- predict(mfull, newdata = pred_grid2)
 
-# sd = 1
-m1 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st + oxy_st + oxy_rec_st + cpue_fle_st + cpue_fle_rec_st + cpue_cod_st + cpue_cod_rec_st + abun_spr_st + abun_spr_sd_st + abun_her_st + abun_her_sd_st + oxy_st*depth_st + temp_st*depth_st -1, time_varying = ~ 1,
-             data = filter(d, split == "train"),
-             time = "year", spde = bspde_train, family = student(link = "identity", df = 5),
-             ar1_fields = TRUE, include_spatial = TRUE, spatial_trend = FALSE,
-             spatial_only = FALSE, silent = TRUE, newton_steps = 1, reml = FALSE, 
-             penalties = penalty_vec)
+# Replace too-deep predictions with NA
+poxy2 <- poxy2 %>% mutate(est2 = ifelse(depth > 120, NA, est))
 
-# sd = 0.1
-m01 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st + oxy_st + oxy_rec_st + cpue_fle_st + cpue_fle_rec_st + cpue_cod_st + cpue_cod_rec_st + abun_spr_st + abun_spr_sd_st + abun_her_st + abun_her_sd_st + oxy_st*depth_st + temp_st*depth_st -1, time_varying = ~ 1,
-              data = filter(d, split == "train"),
-              time = "year", spde = bspde_train, family = student(link = "identity", df = 5),
-              ar1_fields = TRUE, include_spatial = TRUE, spatial_trend = FALSE,
-              spatial_only = FALSE, silent = TRUE, newton_steps = 1, reml = FALSE, 
-              penalties = penalty_vec2)
+ggplot(poxy2, aes(X, Y, fill = est2)) +
+  geom_raster() +
+  facet_wrap(~year, ncol = 5) +
+  scale_fill_viridis(option = "magma",
+                     name = "log(condition factor)") +
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  labs(x = "lon", y = "lat") + 
+  theme_classic(base_size = 10) + 
+  theme(legend.position = c(0.7, 0.05),
+        axis.text.x = element_text(angle = 90),
+        axis.text = element_text(size = 6),
+        legend.direction = "horizontal")
 
-# sd = 0.01
-m001 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st + oxy_st + oxy_rec_st + cpue_fle_st + cpue_fle_rec_st + cpue_cod_st + cpue_cod_rec_st + abun_spr_st + abun_spr_sd_st + abun_her_st + abun_her_sd_st + oxy_st*depth_st + temp_st*depth_st -1, time_varying = ~ 1,
-               data = filter(d, split == "train"),
-               time = "year", spde = bspde_train, family = student(link = "identity", df = 5),
-               ar1_fields = TRUE, include_spatial = TRUE, spatial_trend = FALSE,
-               spatial_only = FALSE, silent = TRUE, newton_steps = 1, reml = FALSE, 
-               penalties = penalty_vec3)  
-
-# sd = 0.001
-m0001 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st + oxy_st + oxy_rec_st + cpue_fle_st + cpue_fle_rec_st + cpue_cod_st + cpue_cod_rec_st + abun_spr_st + abun_spr_sd_st + abun_her_st + abun_her_sd_st + oxy_st*depth_st + temp_st*depth_st -1, time_varying = ~ 1,
-                data = filter(d, split == "train"),
-                time = "year", spde = bspde_train, family = student(link = "identity", df = 5),
-                ar1_fields = TRUE, include_spatial = TRUE, spatial_trend = FALSE,
-                spatial_only = FALSE, silent = TRUE, newton_steps = 1, reml = FALSE, 
-                penalties = penalty_vec4)  
-
-# Also include the model without covariates just for comparison - no penalty
-mdef2 <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_st -1, time_varying = ~ 1,
-                data = filter(d, split == "train"),
-                time = "year", spde = bspde_train, family = student(link = "identity", df = 5),
-                ar1_fields = TRUE, include_spatial = TRUE, spatial_trend = FALSE,
-                spatial_only = FALSE, silent = TRUE, newton_steps = 1, reml = FALSE)
+ggsave("figures/analysis/condition_map.png", width = 6.5, height = 6.5, dpi = 600)
 ```
 
-Calculate the models' predictive error
-
-```{r calculate MSE, cache=TRUE}
-# no penalty
-res_mnp_train <- qres_student(object = mnp,
-                              y = filter(d, split == "train")$ln_weight_g,
-                              mu = predict(mnp)$est)
-
-res_mnp_withheld <- qres_student(object = mnp,
-                                 y = filter(d, split == "withheld")$ln_weight_g,
-                                 mu = predict(mnp, newdata = filter(d, split == "withheld"))$est)
-
-# sd = 1
-res_m1_train <- qres_student(object = m1,
-                             y = filter(d, split == "train")$ln_weight_g,
-                             mu = predict(m1)$est)
-
-res_m1_withheld <- qres_student(object = m1,
-                                y = filter(d, split == "withheld")$ln_weight_g,
-                                mu = predict(m1, newdata = filter(d, split == "withheld"))$est)
-
-# sd = 0.1
-res_m01_train <- qres_student(object = m01,
-                              y = filter(d, split == "train")$ln_weight_g,
-                              mu = predict(m01)$est)
-
-res_m01_withheld <- qres_student(object = m01,
-                                 y = filter(d, split == "withheld")$ln_weight_g,
-                                 mu = predict(m01, newdata = filter(d, split == "withheld"))$est)
-
-# sd = 0.01
-res_m001_train <- qres_student(object = m001,
-                               y = filter(d, split == "train")$ln_weight_g,
-                               mu = predict(m001)$est)
-
-res_m001_withheld <- qres_student(object = m001,
-                                  y = filter(d, split == "withheld")$ln_weight_g,
-                                  mu = predict(m001, newdata = filter(d, split == "withheld"))$est)
-
-# sd = 0.001
-res_m0001_train <- qres_student(object = m0001,
-                                y = filter(d, split == "train")$ln_weight_g,
-                                mu = predict(m0001)$est)
-
-res_m0001_withheld <- qres_student(object = m0001,
-                                   y = filter(d, split == "withheld")$ln_weight_g,
-                                   mu = predict(m0001, newdata = filter(d, split == "withheld"))$est)
-
-# default model, no penalties
-res_mdef2_train <- qres_student(object = mdef2,
-                                y = filter(d, split == "train")$ln_weight_g,
-                                mu = predict(mdef2)$est)
-
-res_mdef2_withheld <- qres_student(object = mdef2,
-                                   y = filter(d, split == "withheld")$ln_weight_g,
-                                   mu = predict(mdef2, newdata = filter(d, split == "withheld"))$est)
-
-# Calculate mean squared error
-mse_mnp_train <- mean(res_mnp_train^2)
-mse_mnp_withheld <- mean(res_mnp_withheld^2)
-
-mse_m1_train <- mean(res_m1_train^2)
-mse_m1_withheld <- mean(res_m1_withheld^2)
-
-mse_m01_train <- mean(res_m01_train^2)
-mse_m01_withheld <- mean(res_m01_withheld^2)
-
-mse_m001_train <- mean(res_m001_train^2)
-mse_m001_withheld <- mean(res_m001_withheld^2)
-
-mse_m0001_train <- mean(res_m0001_train^2)
-mse_m0001_withheld <- mean(res_m0001_withheld^2)
-
-mse_mdef2_train <- mean(res_mdef2_train^2)
-mse_mdef2_withheld <- mean(res_mdef2_withheld^2)
-
-# Compare the relative error on the withheld data to the full data for the full model and the model with oxygen
-# Do this by plotting the relative error (withheld/train) as a function of sd
-
-error_df <- data.frame(sd = c("1", "0.1", "0.01", "0.001", "default model", "no penalty"),
-                       rel_error = c(mse_mnp_withheld / mse_mnp_train,
-                                     mse_m1_withheld / mse_m1_train,
-                                     mse_m01_withheld / mse_m01_train,
-                                     mse_m001_withheld / mse_m001_train,
-                                     mse_m0001_withheld / mse_m0001_train,
-                                     mse_mdef2_withheld / mse_mdef2_train))
-
-ggplot(error_df, aes(sd, rel_error)) +
-  geom_point()
+```{r gganimate condition, message=FALSE}
+# p <- ggplot(poxy2, aes(X, Y, fill = est2)) +
+#   geom_raster() +
+#   scale_fill_viridis(option = "magma",
+#                      name = "log(condition factor)") +
+#   geom_sf(data = world, inherit.aes = F, size = 0.2) +
+#   coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+#   labs(x = "lon", y = "lat")
+# 
+# # Here comes the gganimate specific bits
+# anim <- p +
+#   labs(title = 'Year: {frame_time}') +
+#   transition_time(as.integer(year)) +
+#   ease_aes('linear') +
+#   theme_classic(base_size = 20)
+# 
+# gganimate::animate(anim, height = 600, width = 600)
+# 
+# anim_save(filename = "/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/cod_condition/R/analysis/condition_model_files/cond_oxy.gif")
 ```
 
+Visualize marginal effects of oxygen
+
+```{r marginal effects, message=FALSE, cache=TRUE}
+# Prepare prediction data frame
+nd_oxy <- data.frame(oxy_sc = seq(min(d$oxy_sc), max(d$oxy_sc), length.out = 100))
+
+nd_oxy <- nd_oxy %>%
+  mutate(year = 2003L,
+         annual_oxy = mean(d$annual_oxy),
+         ln_length_cm = 0,
+         depth_sc = 0,
+         temp_sc = 0,
+         cpue_fle_sc = 0,
+         cpue_fle_rec_sc = 0,
+         cpue_cod_sc = 0,
+         cpue_cod_rec_sc = 0,
+         abun_spr_sc = 0,
+         abun_spr_sd_sc = 0,
+         abun_her_sc = 0,
+         abun_her_sd_sc = 0)
+
+# Predict from full model (AIC-selected)
+p_margin_oxy <- predict(mfull, newdata = nd_oxy, se_fit = TRUE, re_form = NA)
+
+ggplot(p_margin_oxy, aes(oxy_sc, est,
+                         ymin = est - 1.96 * est_se, ymax = est + 1.96 * est_se)) +
+  geom_ribbon(alpha = 0.4) + geom_line() +
+  scale_color_brewer(palette = "Set1") +
+  scale_fill_brewer(palette = "Set1") +
+  theme(legend.position = c(0.1, 0.9))
+
+# # What is the difference in predicted weight? Approximately 5%. Still considerable variation!
+# exp(-4.475 + 2.98*log(50)) / exp(-4.525 + 2.98*log(50))
+```
+
+Plot spatial random effects:
+  
+```{r spatial omega map, message=FALSE, fig.width=12}
+# Replace too-deep predictions with NA and filter a single year
+poxy3 <- poxy2 %>% mutate(omega_s2 = ifelse(depth > 120, NA, omega_s)) %>% filter(year == 1999)
+
+ggplot(poxy3, aes(X, Y, fill = omega_s2)) +
+  geom_raster() +
+  scale_fill_gradient2() +
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  ggtitle("Spatial random field") +
+  theme_classic(base_size = 12) +
+  labs(x = "lon", y = "lat")
+```
+
+Calculate the "spatial trend" from the estimates:
+  
+```{r calculate "spatial trend", message=FALSE}
+# Fit a linear model to each prediction grid of the estimate over time
+# https://community.rstudio.com/t/extract-slopes-by-group-broom-dplyr/2751/7
+time_slopes_by_year <- poxy2 %>%
+  drop_na(est2) %>%
+  mutate(id = paste(lon, lat, sep = "_")) %>%
+  split(.$id) %>%
+  purrr::map(~lm(est2 ~ year, data = .x)) %>%
+  purrr::map_df(broom::tidy, .id = 'id') %>%
+  filter(term == 'year')
+
+# Plot the slopes
+time_slopes_by_year %>%
+  separate(id, c("X", "Y"), sep = "_") %>%
+  mutate(X = as.numeric(X),
+         Y = as.numeric(Y)) %>%
+  ggplot(., aes(X, Y, fill = estimate)) +
+  geom_raster() +
+  scale_fill_gradient2(midpoint = 0) +
+  #scale_fill_viridis() +
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  ggtitle("Time slopes by each pred grid") +
+  theme_classic(base_size = 12) +
+  labs(x = "lon", y = "lat")
+
+# Plot the standard errors
+time_slopes_by_year %>%
+  separate(id, c("X", "Y"), sep = "_") %>%
+  mutate(X = as.numeric(X),
+         Y = as.numeric(Y)) %>%
+  ggplot(., aes(X, Y, fill = std.error)) +
+  geom_raster() +
+  scale_fill_viridis() +
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  ggtitle("standard error of time slopes by each pred grid") +
+  labs(x = "lon", y = "lat")
+
+# Plot the upper CI
+time_slopes_by_year %>%
+  separate(id, c("X", "Y"), sep = "_") %>%
+  mutate(X = as.numeric(X),
+         Y = as.numeric(Y)) %>%
+  ggplot(., aes(X, Y, fill = estimate + std.error*1.96)) +
+  geom_raster() +
+  scale_fill_gradient2(midpoint = 0) +
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  ggtitle("Upper CI of time slopes by each pred grid") +
+  labs(x = "lon", y = "lat")
+
+# Lower CI
+time_slopes_by_year %>%
+  separate(id, c("X", "Y"), sep = "_") %>%
+  mutate(X = as.numeric(X),
+         Y = as.numeric(Y)) %>%
+  ggplot(., aes(X, Y, fill = estimate - std.error*1.96)) +
+  geom_raster() +
+  scale_fill_gradient2(midpoint = 0) +
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  ggtitle("Lower CI of time slopes by each pred grid") +
+  labs(x = "lon", y = "lat")
+``` 
