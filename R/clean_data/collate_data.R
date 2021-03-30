@@ -1115,6 +1115,14 @@ big_dat_sub_oxy2 <- big_dat_sub_oxy %>% distinct(id_oxy, .keep_all = TRUE)
 # Join the data with raster-derived oxygen with the full condition data
 dat <- left_join(dat, big_dat_sub_oxy2, by = "id_oxy")
 
+# Now the unit of oxygen is mmol/m3. I want it to be ml/L. The original model is in unit ml/L
+# and it's been converted by the data host. Since it was converted without accounting for
+# pressure or temperature, I can simply use the following conversion factor:
+# 1 ml/l = 103/22.391 = 44.661 μmol/l -> 1 ml/l = 0.044661 mmol/l = 44.661 mmol/m^3 -> 0.0223909 ml/l = 1mmol/m^3
+# https://ocean.ices.dk/tools/unitconversion.aspx
+
+dat$oxy <- dat$oxy * 0.0223909
+
 
 # ** Temperature ===================================================================
 # Open the netCDF file
