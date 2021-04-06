@@ -421,6 +421,14 @@ str(pred_grid)
 
 pred_grid$oxy <- pred_grid_oxy$oxy
 
+# Now the unit of oxygen is mmol/m3. I want it to be ml/L. The original model is in unit ml/L
+# and it's been converted by the data host. Since it was converted without accounting for
+# pressure or temperature, I can simply use the following conversion factor:
+# 1 ml/l = 103/22.391 = 44.661 μmol/l -> 1 ml/l = 0.044661 mmol/l = 44.661 mmol/m^3 -> 0.0223909 ml/l = 1mmol/m^3
+# https://ocean.ices.dk/tools/unitconversion.aspx
+
+pred_grid$oxy <- pred_grid$oxy * 0.0223909
+
 # Save
 #write.csv(pred_grid, file = "data/for_analysis/pred_grid2.csv", row.names = FALSE)
 
