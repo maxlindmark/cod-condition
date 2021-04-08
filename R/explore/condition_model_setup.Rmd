@@ -39,14 +39,14 @@ In fishes, weight is typically assumed to vary log-normally around an average al
 We model this individual-level relationship with a spatiotemporal GLMM of the form (minor deviations from this model are discussed in this document):
 
 $$
-\operatorname{log}(w_{s,t})\sim\operatorname{Student-t}(\mu_{s,t},\sigma,\nu)\\
+\operatorname{log}(w_{s,t})\sim\operatorname{Student-t}(\mu_{s,t},\nu,\phi)\\
 \mu_{s,t} = \alpha_t + \beta_ddepth + \boldsymbol\omega_s + \boldsymbol\epsilon_{s,t} + \sum^{n_k}_{k=1}\boldsymbol\gamma_k\boldsymbol{X_k} + \beta \operatorname{log}(l),
 $$ 
 
 where the degrees of freedom, $\nu$, are set to 2 and $\phi$ is the standard deviation. $\alpha_t$ is a time-varying intercept:
 
 $$
-\alpha_t \sim \operatorname{Normal}(\alpha_{t-1}, \sigma^2_\gamma).
+\alpha_t \sim \operatorname{Normal}(\alpha_{t-1}, \sigma^2_\alpha).
 $$
 
 $\beta_d$ is the coefficient for $depth$, $\boldsymbol\omega_s$ and $\boldsymbol\epsilon_{s,t}$ represent spatial and spatiotemporal random effects, respectively. $\boldsymbol{X_k}$ is a matrix of $n_k$ measured *additional* covariates and $\boldsymbol\gamma_k$ is the effect of the $k$-th *additional* covariate. $\beta$ is the length-coefficient, corresponding to the allometric exponent $b$. The spatial and spatiotemporal random effects are assumed to be drawn from a multivariate normal distribution:
@@ -60,7 +60,7 @@ We also consider the spatiotemporal random effects to be drawn from a multivaria
 
 $$
 \boldsymbol\delta_{t=1} \sim \operatorname{MVNormal}(\boldsymbol0, \boldsymbol\Sigma_\epsilon)\\
-\boldsymbol\delta_{t>1} = \phi\boldsymbol\delta_{t-1} + \sqrt{1-\phi^2}\boldsymbol\epsilon_t, \boldsymbol\epsilon_t \sim \operatorname{MVNormal}(\boldsymbol0, \boldsymbol\Sigma_\epsilon).
+\boldsymbol\delta_{t>1} = \phi_{\delta}\boldsymbol\delta_{t-1} + \sqrt{1-\phi_{\delta}^2}\boldsymbol\epsilon_t, \boldsymbol\epsilon_t \sim \operatorname{MVNormal}(\boldsymbol0, \boldsymbol\Sigma_\epsilon).
 $$
 
 In the spatial and spatiotemporal random fields, $\Sigma_\omega$ and $\Sigma_\epsilon$ are covariance matricies, where the covariance ($\Phi(s, s')$) between spatial points $s$ and $s'$ is given by a Matérn function:

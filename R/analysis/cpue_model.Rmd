@@ -232,6 +232,7 @@ predcod %>%
   theme(axis.text.x = element_text(angle = 30),
         legend.position = c(0.8, 0.8)) +
   scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  coord_cartesian(ylim = c(230, 300)) +
   ggtitle("CPUE weighted average oxygen at location") 
 ```
 
@@ -384,7 +385,7 @@ plot_oxy <- predcod %>%
   scale_color_manual(values = c(pal[3], pal[2]),
                      name = c(""),
                      labels = c("Environment", "CPUE-weighted")) +
-  labs(y = "Mean oxygen [unit?]", x = "Year") + 
+  labs(y = "Mean 02 [ml/L]", x = "Year") + 
   scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
   theme_classic(base_size = 13) +
   guides(colour = guide_legend(override.aes = list(size = 1)))+
@@ -448,4 +449,198 @@ ggplot(dd, aes(Year, mean_oxy, color = source)) +
 summary(lm(mean_temp ~ Year*source, data = dd))
 
 summary(lm(mean_oxy ~ Year*source, data = dd))
+```
+
+Now calculate the average cod density by sub-divisions and year, and compare that to the pelagic density
+
+```{r calculate cod-pelagics ratio}
+# Read the condition data which has the pelagics abundances
+cond <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cond.csv")
+
+# Add in ICES rectangle information
+cond$ices_rect <- ices.rect2(lon = cond$lon, lat = cond$lat)
+predcod$ices_rect <- ices.rect2(lon = predcod$lon, lat = predcod$lat) # predcod is predicted cod cpue across grid
+
+# Add in ICES sub-division information
+cond <- cond %>% 
+  mutate(SubDiv = NA) %>% 
+  mutate(SubDiv = ifelse(ices_rect %in% c("37G0", "37G1",
+                                          "38G0", "38G1", 
+                                          "39F9", "39G0", "39G1",
+                                          "40F9", "40G0", "40G1"), "22", SubDiv)) %>% 
+  mutate(SubDiv = ifelse(ices_rect == "40G2", "23", SubDiv)) %>% 
+  mutate(SubDiv = ifelse(ices_rect %in% c("37G2", "37G3", "37G4",
+                                          "38G1", "38G2", "38G3", "38G4", 
+                                          "39G1", "39G2", "39G3", "39G4",
+                                          "40G1"), "24", SubDiv)) %>% 
+  mutate(SubDiv = ifelse(ices_rect %in% c("40G4",
+                                          "37G5", "37G6", "37G7",
+                                          "38G5", "38G6", "38G7",
+                                          "39G5", "39G6", "39G7",
+                                          "40G5", "40G6", "40G7",
+                                          "41G5", "41G6", "41G7"), "25", SubDiv)) %>% 
+  mutate(SubDiv = ifelse(ices_rect %in% c("37G8", "37G9", "37H0",
+                                          "38G8", "38G9", "38H0",
+                                          "39G8", "39G9", "39H0",
+                                          "40G8", "40G9", "40H0",
+                                          "41G8", "41G9", "41H0"), "26", SubDiv)) %>% 
+  mutate(SubDiv = ifelse(ices_rect %in% c("42G6", "42G7",
+                                          "43G6", "43G7",
+                                          "44G6", "44G7", "44G8"), "27", SubDiv)) %>% 
+  mutate(SubDiv = ifelse(ices_rect %in% c("42G8", "42G9", "42H0", "42H1", "42H2",
+                                          "43G8", "43G9", "43H0", "43H1", "43H2",
+                                          "44G8", "44G9", "44H0", "44H1", "44H2"), "28", SubDiv)) %>%
+  mutate(SubDiv = ifelse(lat > 58.5 & lon > 19, "29", SubDiv)) %>%
+  mutate(SubDiv = ifelse(lat > 57 & lat < 58.5 & lon > 19 & lon < 22, "28", SubDiv)) %>%
+  mutate(SubDiv = ifelse(lat > 57 & lat < 58.5 & lon > 18 & lon < 22, "28", SubDiv)) %>%
+  mutate(SubDiv = ifelse(lat > 57 & lat < 60 & lon > 16 & lon < 18, "27", SubDiv)) %>%
+  mutate(SubDiv = ifelse(lat > 55.5 & lat < 56.5 & lon > 14 & lon < 16, "25", SubDiv))
+
+# Now for predicted CPUE
+predcod <- predcod %>% 
+  mutate(SubDiv = NA) %>% 
+  mutate(SubDiv = ifelse(ices_rect %in% c("37G0", "37G1",
+                                          "38G0", "38G1", 
+                                          "39F9", "39G0", "39G1",
+                                          "40F9", "40G0", "40G1"), "22", SubDiv)) %>% 
+  mutate(SubDiv = ifelse(ices_rect == "40G2", "23", SubDiv)) %>% 
+  mutate(SubDiv = ifelse(ices_rect %in% c("37G2", "37G3", "37G4",
+                                          "38G1", "38G2", "38G3", "38G4", 
+                                          "39G1", "39G2", "39G3", "39G4",
+                                          "40G1"), "24", SubDiv)) %>% 
+  mutate(SubDiv = ifelse(ices_rect %in% c("40G4",
+                                          "37G5", "37G6", "37G7",
+                                          "38G5", "38G6", "38G7",
+                                          "39G5", "39G6", "39G7",
+                                          "40G5", "40G6", "40G7",
+                                          "41G5", "41G6", "41G7"), "25", SubDiv)) %>% 
+  mutate(SubDiv = ifelse(ices_rect %in% c("37G8", "37G9", "37H0",
+                                          "38G8", "38G9", "38H0",
+                                          "39G8", "39G9", "39H0",
+                                          "40G8", "40G9", "40H0",
+                                          "41G8", "41G9", "41H0"), "26", SubDiv)) %>% 
+  mutate(SubDiv = ifelse(ices_rect %in% c("42G6", "42G7",
+                                          "43G6", "43G7",
+                                          "44G6", "44G7", "44G8"), "27", SubDiv)) %>% 
+  mutate(SubDiv = ifelse(ices_rect %in% c("42G8", "42G9", "42H0", "42H1", "42H2",
+                                          "43G8", "43G9", "43H0", "43H1", "43H2",
+                                          "44G8", "44G9", "44H0", "44H1", "44H2"), "28", SubDiv)) %>%
+  mutate(SubDiv = ifelse(lat > 58.5 & lon > 19, "29", SubDiv)) %>%
+  mutate(SubDiv = ifelse(lat > 57 & lat < 58.5 & lon > 19 & lon < 22, "28", SubDiv)) %>%
+  mutate(SubDiv = ifelse(lat > 57 & lat < 58.5 & lon > 18 & lon < 22, "28", SubDiv)) %>%
+  mutate(SubDiv = ifelse(lat > 57 & lat < 60 & lon > 16 & lon < 18, "27", SubDiv)) %>%
+  mutate(SubDiv = ifelse(lat > 55.5 & lat < 56.5 & lon > 14 & lon < 16, "25", SubDiv))
+
+# Plot and inspect
+ggplot(cond, aes(x = lon, y = lat, color = SubDiv)) +
+  geom_point() +
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  NULL
+
+ggplot(predcod, aes(x = lon, y = lat, color = SubDiv)) +
+  geom_point() +
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  NULL
+
+# Now calculate average sprat and herring density by sub-div
+pelagics <- cond %>%
+  drop_na(SubDiv, abun_spr_sd, abun_her_sd) %>% 
+  group_by(year, SubDiv) %>%
+  summarise(ave_abun_spr = mean(abun_spr_sd),
+            ave_abun_her = mean(abun_her_sd)) %>%
+  ungroup() %>% 
+  dplyr::select(year, SubDiv, ave_abun_spr, ave_abun_her) %>% 
+  mutate(id = paste(year, SubDiv, sep = "_"))
+
+# And average CPUE
+cod <- predcod %>%
+  drop_na(SubDiv, est) %>% 
+  group_by(year, SubDiv) %>%
+  summarise(ave_cpue_cod = mean(est)) %>%
+  ungroup() %>% 
+  mutate(id = paste(year, SubDiv, sep = "_")) %>% 
+  dplyr::select(id, ave_cpue_cod)
+  
+dat <- left_join(pelagics, cod)
+
+head(dat)
+
+dat <- dat %>% 
+  mutate(ave_abun_spr_sc = ave_abun_spr,
+         ave_abun_her_sc = ave_abun_her,
+         ave_cpue_cod_sc = ave_cpue_cod) %>%
+  mutate_at(c("ave_abun_spr_sc", "ave_abun_her_sc", "ave_cpue_cod_sc"), ~(scale(.) %>% as.vector))
+
+dat$cod_spr_ratio <- dat$ave_cpue_cod / dat$ave_abun_spr
+dat$cod_her_ratio <- dat$ave_cpue_cod / dat$ave_abun_her
+
+dat$cod_spr_ratio_sc <- dat$ave_cpue_cod_sc / dat$ave_abun_spr_sc
+dat$cod_her_ratio_sc <- dat$ave_cpue_cod_sc / dat$ave_abun_her_sc
+
+# Non-scaled variables
+p1 <- ggplot(dat, aes(year, log(cod_her_ratio), color = SubDiv)) +
+  geom_point() +
+  stat_smooth() +
+  scale_color_brewer(palette = "Dark2") +
+  ggtitle("Herring") +
+  theme(aspect.ratio = 3/4)
+
+# Sprat ratio
+p2 <- ggplot(dat, aes(year, log(cod_spr_ratio), color = SubDiv)) +
+  geom_point() +
+  stat_smooth() +
+  scale_color_brewer(palette = "Dark2") + 
+  ggtitle("Sprat") +
+  theme(aspect.ratio = 3/4)
+
+p1/p2
+
+# Scaled variables
+p3 <- ggplot(dat, aes(year, cod_her_ratio_sc, color = SubDiv)) +
+  geom_point() +
+  stat_smooth(se = FALSE) +
+  scale_color_brewer(palette = "Dark2") +
+  ggtitle("Herring") +
+  theme(aspect.ratio = 3/4) +
+  ylim(c(-10, 10))
+
+# Sprat ratio
+p4 <- ggplot(dat, aes(year, cod_spr_ratio_sc, color = SubDiv)) +
+  geom_point() +
+  stat_smooth(se = FALSE) +
+  scale_color_brewer(palette = "Dark2") + 
+  ggtitle("Sprat") +
+  theme(aspect.ratio = 3/4) + 
+  ylim(c(-10, 10))
+
+p3/p4
+
+# All separate
+# Cod
+p5 <- ggplot(dat, aes(year, ave_cpue_cod, color = SubDiv)) +
+  geom_point() +
+  stat_smooth(se = FALSE) +
+  scale_color_brewer(palette = "Dark2") +
+  ggtitle("Cod") +
+  theme(aspect.ratio = 3/4)
+
+# Herring
+p6 <- ggplot(dat, aes(year, ave_abun_her_sc, color = SubDiv)) +
+  geom_point() +
+  stat_smooth(se = FALSE) +
+  scale_color_brewer(palette = "Dark2") +
+  ggtitle("Herring") +
+  theme(aspect.ratio = 3/4)
+
+# Sprat ratio
+p7 <- ggplot(dat, aes(year, ave_abun_spr_sc, color = SubDiv)) +
+  geom_point() +
+  stat_smooth(se = FALSE) +
+  scale_color_brewer(palette = "Dark2") + 
+  ggtitle("Sprat") +
+  theme(aspect.ratio = 3/4) 
+
+p5/p6/p7
 ```
