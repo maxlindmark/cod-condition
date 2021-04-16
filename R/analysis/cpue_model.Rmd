@@ -159,13 +159,13 @@ Predict and extract CPUE-weighted mean oxygen and depth per prediction grid
 
 ```{r predict, cache=TRUE}
 predcod <- predict(m, newdata = pred_grid2)
+
+predcod <- predcod %>% mutate(est2 = ifelse(depth > 120, NA, est))
 ```
 
 Plot on map
 
 ```{r plot}
-predcod <- predcod %>% mutate(est2 = ifelse(depth > 120, NA, est))
-
 # Plot predicted CPUE
 predcod %>% 
   #filter(year %in% c("1993", "2018")) %>% 
@@ -220,7 +220,7 @@ ind %>%
 Calculate cpue-weighted mean oxygen-at-location
 
 ```{r cpue-weighted mean oxygen plot}
-predcod %>% 
+aa <- predcod %>% 
   drop_na(est2) %>% 
   group_by(year) %>% 
   #filter(exp(est2) < 1000) %>% # remove some extremes to better see trends in space and time 
@@ -232,8 +232,23 @@ predcod %>%
   theme(axis.text.x = element_text(angle = 30),
         legend.position = c(0.8, 0.8)) +
   scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
-  coord_cartesian(ylim = c(230, 300)) +
   ggtitle("CPUE weighted average oxygen at location") 
+
+# Only SD 25
+bb <- predcod %>% 
+  drop_na(est2) %>% 
+  group_by(year) %>% 
+  filter(lon > 15 & lon < 18 & lat < 56.5) %>% 
+  summarise(oxygen_wm = weighted.mean(oxy, exp(est2))) %>% 
+  ggplot(., aes(year, oxygen_wm)) +
+  geom_point(size = 3) +
+  stat_smooth(method = "lm") +
+  theme(axis.text.x = element_text(angle = 30),
+        legend.position = c(0.8, 0.8)) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  ggtitle("SD25: CPUE weighted average oxygen at location") 
+
+aa / bb
 ```
 
 Calculate cpue-weighted mean depth-at-location
@@ -276,7 +291,8 @@ Marginal effect of oxygen
 
 ```{r marginal effects oxygen, message=FALSE, cache=TRUE}
 # Prepare prediction data frame
-nd_oxy <- data.frame(oxy = seq(min(d$oxy), max(d$oxy), length.out = 100))
+d2 <- d %>% drop_na(oxy)
+nd_oxy <- data.frame(oxy = seq(min(d2$oxy), max(d2$oxy), length.out = 100))
 
 nd_oxy <- nd_oxy %>%
   mutate(year = 2003L,
@@ -297,7 +313,7 @@ Marginal effect of depth
 
 ```{r marginal effects depth, message=FALSE, cache=TRUE}
 # Prepare prediction data frame
-nd_dep <- data.frame(depth = seq(min(d$depth), max(d$depth), length.out = 100))
+nd_dep <- data.frame(depth = seq(min(d2$depth), max(d2$depth), length.out = 100))
 
 nd_dep <- nd_dep %>%
   mutate(year = 2003L,
@@ -447,8 +463,10 @@ ggplot(dd, aes(Year, mean_oxy, color = source)) +
   stat_smooth(method = "lm")
 
 summary(lm(mean_temp ~ Year*source, data = dd))
-
 summary(lm(mean_oxy ~ Year*source, data = dd))
+
+summary(lm(mean_oxy ~ Year, data = subset(dd, source == "env")))
+summary(lm(mean_oxy ~ Year, data = subset(dd, source == "cpue_model")))
 ```
 
 Now calculate the average cod density by sub-divisions and year, and compare that to the pelagic density
