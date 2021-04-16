@@ -1,5 +1,5 @@
 ---
-title: "Condition model oikos"
+title: "Condition model"
 author: "Max Lindmark & Sean Andersson"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
@@ -74,7 +74,8 @@ d <- d %>%
   mutate(year = as.integer(year)) %>% 
   group_by(year) %>%
   mutate(oxy_sc = (oxy - mean(oxy))/sd(oxy),
-         temp_sc = (temp - mean(temp))/sd(temp))
+         temp_sc = (temp - mean(temp))/sd(temp)) %>% 
+  drop_na(abun_spr_sc, abun_her_sc)
 ```
 
 Read the prediction grids:
@@ -300,15 +301,14 @@ ggsave("figures/analysis/condition_map.png", width = 6.5, height = 6.5, dpi = 60
 # anim_save(filename = "/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/cod_condition/R/analysis/condition_model_files/cond_oxy.gif")
 ```
 
-Visualize marginal effects of oxygen
+Visualize marginal effects
 
-```{r marginal effects, message=FALSE, cache=TRUE}
+```{r marginal effects of oxygen, message=FALSE, cache=TRUE}
 # Prepare prediction data frame
 nd_oxy <- data.frame(oxy_sc = seq(min(d$oxy_sc), max(d$oxy_sc), length.out = 100))
 
 nd_oxy <- nd_oxy %>%
   mutate(year = 2003L,
-         annual_oxy = mean(d$annual_oxy),
          ln_length_cm = 0,
          depth_sc = 0,
          temp_sc = 0,
@@ -333,6 +333,37 @@ ggplot(p_margin_oxy, aes(oxy_sc, est,
 
 # # What is the difference in predicted weight? Approximately 5%. Still considerable variation!
 # exp(-4.475 + 2.98*log(50)) / exp(-4.525 + 2.98*log(50))
+```
+
+Depth
+
+```{r marginal effects of depth, message=FALSE, cache=TRUE}
+# Prepare prediction data frame
+nd_dep <- data.frame(dep_sc = seq(min(d$dep_sc), max(d$dep_sc), length.out = 100))
+
+nd_dep <- nd_dep %>%
+  mutate(year = 2003L,
+         ln_length_cm = 0,
+         oxy_sc = 0,
+         temp_sc = 0,
+         cpue_fle_sc = 0,
+         cpue_fle_rec_sc = 0,
+         cpue_cod_sc = 0,
+         cpue_cod_rec_sc = 0,
+         abun_spr_sc = 0,
+         abun_spr_sd_sc = 0,
+         abun_her_sc = 0,
+         abun_her_sd_sc = 0)
+
+# Predict from full model (AIC-selected)
+p_margin_dep <- predict(mfull, newdata = nd_dep, se_fit = TRUE, re_form = NA)
+
+ggplot(p_margin_dep, aes(dep_sc, est,
+                         ymin = est - 1.96 * est_se, ymax = est + 1.96 * est_se)) +
+  geom_ribbon(alpha = 0.4) + geom_line() +
+  scale_color_brewer(palette = "Set1") +
+  scale_fill_brewer(palette = "Set1") +
+  theme(legend.position = c(0.1, 0.9))
 ```
 
 Plot spatial random effects:
@@ -418,3 +449,20 @@ time_slopes_by_year %>%
   ggtitle("Lower CI of time slopes by each pred grid") +
   labs(x = "lon", y = "lat")
 ``` 
+
+### Plot residuals
+```{r extract residuals}
+df <- data.frame(d)
+
+df$residuals_mfull <- residuals(mfull)
+
+qqnorm(df$residuals_mfull); abline(a = 0, b = 1)
+
+# Residuals vs length
+ggplot(df, aes(ln_length_cm, residuals_mfull)) +
+  geom_point(alpha = 0.1, color = "grey20") + 
+  geom_abline(color = "red", slope = 0, linetype = 2) +
+  geom_smooth()
+
+ggsave("figures/supp/residuals_vs_length.png", width = 6.5, height = 6.5, dpi = 600)
+```
