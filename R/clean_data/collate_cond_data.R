@@ -808,7 +808,8 @@ test_herring %>%
   filter(ID_sd %in% test_herring_dat$ID_sd) %>% 
   ggplot(., aes(Year, abun_her_sd, shape = source, color = source)) +
   geom_point(alpha = 0.4, size = 4) + 
-  facet_wrap(~ Sub_Div, scales = "free")
+  facet_wrap(~ Sub_Div, scales = "free") + 
+  stat_smooth()
 
 # Yes they are the same.
 
