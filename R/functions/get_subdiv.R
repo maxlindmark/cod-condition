@@ -1,5 +1,5 @@
 # Return sub_area based on coordinates
-get_sub_area <- function(dat, lon, lat){
+get_subdiv <- function(dat, lon, lat){
 
   # Get ICES rect
   dat$ices_rect <- mapplots::ices.rect2(lon = lon, lat = lat)
