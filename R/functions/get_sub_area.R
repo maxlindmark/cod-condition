@@ -39,23 +39,5 @@ get_sub_area <- function(dat, lon, lat){
     mutate(SubDiv = ifelse(lat > 55.5 & lat < 56.5 & lon > 14 & lon < 16, "25", SubDiv)) #%>%
     #mutate(SubDiv = factor(SubDiv))
 
-  # Now do a manual area, similar to sub divisions
-  dat$sub_area <- as.numeric(dat$SubDiv)
-  dat$sub_area <- as.factor(dat$sub_area)
-  
-  dat <- dat %>% mutate(sub_area = fct_recode(sub_area,
-                                              "1" = "24",
-                                              "2" = "25",
-                                              "3" = "26",
-                                              "4" = "27",
-                                              "5" = "28",
-                                              "6" = "29"))
-
-  # Now modify them...
-  dat <- dat %>%
-    mutate(sub_area = ifelse(lat > 56.18 & lon < 18, "4", sub_area)) %>% 
-    mutate(sub_area = ifelse(lon > 17.6 & lat >= 56.49, "5", sub_area)) %>% 
-    mutate(sub_area = ifelse(lon > 17 & lat < 56.49, "3", sub_area))
-
 }
 
