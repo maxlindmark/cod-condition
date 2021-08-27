@@ -7,8 +7,12 @@
 # A. Load libraries
 # 
 # B. Basic grid with depth
-#
+# 
 # C. Grid with oxygen & temperature
+# 
+# D. Add ICES areas
+# 
+# E. Make figures of environmental variables in prediction grid
 # 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -32,6 +36,7 @@ library(chron)
 library(gganimate)
 library(gifski)
 library(png)
+library(RCurl)
 
 # Print package versions
 # sessionInfo()
@@ -43,7 +48,7 @@ library(png)
 world <- ne_countries(scale = "medium", returnclass = "sf")
 
 
-# B. BASIC GRID ====================================================================
+# B. BASIC GRID WITH DEPTH =========================================================
 # Get the boundaries
 dat <- read.csv("data/for_analysis/mdat_cond.csv") 
 
@@ -402,15 +407,15 @@ p <- ggplot(pred_grid_oxy, aes(lon, lat, fill = oxy)) +
   coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax))
   
 # Here comes the gganimate specific bits
-anim <- p +
-  labs(title = 'Year: {frame_time}') +
-  transition_time(as.integer(year)) +
-  ease_aes('linear') +
-  theme_classic(base_size = 24)
-
-animate(anim, height = 1200, width = 1200)
-
-anim_save(filename = "output/gif/oxy.gif")
+# anim <- p +
+#   labs(title = 'Year: {frame_time}') +
+#   transition_time(as.integer(year)) +
+#   ease_aes('linear') +
+#   theme_classic(base_size = 24)
+# 
+# animate(anim, height = 1200, width = 1200)
+# 
+# anim_save(filename = "output/gif/oxy.gif")
 
 # Add in oxygen to the main prediction grid
 pred_grid_oxy <- pred_grid_oxy %>% arrange(lon, lat, year)
@@ -619,15 +624,15 @@ p <- ggplot(pred_grid_temp, aes(lon, lat, fill = temp)) +
   coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax))
 
 # Here comes the gganimate specific bits
-anim <- p +
-  labs(title = 'Year: {frame_time}') +
-  transition_time(as.integer(year)) +
-  ease_aes('linear') +
-  theme_classic(base_size = 24)
-
-animate(anim, height = 1200, width = 1200)
-
-anim_save(filename = "output/gif/temp.gif")
+# anim <- p +
+#   labs(title = 'Year: {frame_time}') +
+#   transition_time(as.integer(year)) +
+#   ease_aes('linear') +
+#   theme_classic(base_size = 24)
+# 
+# animate(anim, height = 1200, width = 1200)
+# 
+# anim_save(filename = "output/gif/temp.gif")
 
 # Add in oxygen to the main prediction grid
 pred_grid_temp <- pred_grid_temp %>% arrange(lon, lat, year)
@@ -639,4 +644,71 @@ str(pred_grid)
 pred_grid$temp <- pred_grid_temp$temp
 
 # Save
-write.csv(pred_grid, file = "data/for_analysis/pred_grid2.csv", row.names = FALSE)
+#write.csv(pred_grid, file = "data/for_analysis/pred_grid2.csv", row.names = FALSE)
+
+
+# D. ADD ICES AREAS ================================================================
+# Add in sub_area into data
+# Load function
+
+func <- 
+  getURL("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/R/functions/get_subdiv.R", 
+         ssl.verifypeer = FALSE)
+
+eval(parse(text = func))
+
+pred_grid <- get_sub_div(dat = pred_grid, lat = pred_grid$lat, lon = pred_grid$lon)
+
+ggplot(pred_grid, aes(lon, lat, color = SubDiv)) +
+  geom_point()
+
+# Filter only sub divs above 24...
+pred_grid <- pred_grid %>%
+  drop_na(SubDiv) %>% 
+  filter(!SubDiv %in% c("22", "23"))
+
+ggplot(pred_grid, aes(lon, lat, color = SubDiv)) +
+  geom_point()
+
+
+# E. PLOT ==========================================================================
+# Oxygen vs depth
+ggplot(pred_grid, aes(depth, oxy)) + geom_point()
+
+# Oxygen vs year
+pred_grid %>% 
+  drop_na(oxy) %>% 
+  group_by(year) %>% 
+  summarise(mean_oxy = mean(oxy),
+            sd_oxy = sd(oxy)) %>% 
+  ggplot(., aes(year, mean_oxy)) +
+  geom_point() + 
+  geom_errorbar(aes(x = year, ymin = mean_oxy - sd_oxy, ymax = mean_oxy + sd_oxy, width = 0), alpha = 0.5) + 
+  stat_smooth(method = "gam", formula = y ~ s(x, k = 3), color = "tomato") +
+  theme_classic(base_size = 12) + 
+  labs(y = "Mean 02 [ml/L]", x = "Year") +  
+  labs(y = expression(paste("Mean O" [2], " [ml/L]", sep = "")),
+       x = "Year") + 
+  theme(legend.position = c(0.8, 0.5))
+
+ggsave("figures/supp/env_oxy.png", width = 6.5, height = 6.5, dpi = 600)
+
+# Oxygen vs year and sd
+pred_grid %>% 
+  drop_na(oxy, SubDiv) %>% 
+  filter(!SubDiv == 22) %>% 
+  group_by(year, SubDiv) %>% 
+  summarise(mean_oxy = mean(oxy),
+            sd_oxy = sd(oxy)) %>% 
+  ggplot(., aes(year, mean_oxy)) +
+  geom_point() + 
+  facet_wrap(~ SubDiv) +
+  # geom_errorbar(aes(x = year, ymin = mean_oxy - sd_oxy, ymax = mean_oxy + sd_oxy, width = 0),
+  #               alpha = 0.5) + 
+  stat_smooth(method = "gam", formula = y ~ s(x, k = 3), color = "tomato") +
+  theme_classic(base_size = 12) + 
+  labs(y = "Mean 02 [ml/L]", x = "Year") +  
+  labs(y = expression(paste("Mean O" [2], " [ml/L]", sep = "")), x = "Year")
+
+ggsave("figures/supp/env_oxy_sd.png", width = 6.5, height = 6.5, dpi = 600)
+

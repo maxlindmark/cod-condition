@@ -4,6 +4,16 @@
 # - Code to clean CPUE data and add temperature and oxygen from NEMO NORDIC SCOBII MODEL
 #   https://resources.marine.copernicus.eu/?option=com_csw&task=results
 #
+# A. Load libraries
+# 
+# B. Read haul data
+# 
+# C. Read and join oceanographic data
+# 
+# D. Add ICES areas
+# 
+# E. Save data
+#
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 # A. LOAD LIBRARIES ================================================================
@@ -812,7 +822,31 @@ colnames(dat)
 
 dat <- dat %>% dplyr::select(-id_temp, -id_oxy)
 
-# D. SAVE DATA =====================================================================
+
+# D. Add ICES areas ================================================================
+func <- 
+  getURL("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/R/functions/get_subdiv.R", 
+         ssl.verifypeer = FALSE)
+
+eval(parse(text = func))
+
+dat <- get_sub_div(dat = dat, lat = dat$lat, lon = dat$lon)
+
+# Filter sub divisions used for analysis
+dat <- dat %>%
+  drop_na(SubDiv) %>% 
+  filter(!SubDiv %in% c("22", "23"))
+
+ggplot(dat, aes(lon, lat, color = SubDiv)) +
+  geom_point() + 
+  facet_wrap(~ year) +
+  theme_classic(base_size = 12) + 
+  scale_color_brewer(palette = "Dark2", name = "Sub Division")
+
+ggsave("figures/supp/cpue_data_hauls.png", width = 6.5, height = 6.5, dpi = 600)
+
+
+# E. SAVE DATA =====================================================================
 head(dat)
 
 # Keep only the raster depth 

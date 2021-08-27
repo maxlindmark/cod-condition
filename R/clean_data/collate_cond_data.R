@@ -1,4 +1,3 @@
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # 2020.06.16: Max Lindmark
 #
 # - Code to clean and merge BITS HH (Record with detailed haul information),
@@ -119,7 +118,7 @@ bits_ca$Species <- "Cod"
 bits_ca <- bits_ca %>% 
   mutate(ID = paste(Year, Quarter, Ship, Gear, HaulNo, StNo, sep = "."))
 
-# Check that per ID AND LNGTCLASS, there's only one row
+# Check # rows per unique ID AND LNGTCLASS (more than one since 1 row = 1 category, and NoAtLngt is the n in the category)
 bits_ca %>% 
   mutate(TEST = paste(ID, LngtClass)) %>% 
   group_by(TEST) %>% 
@@ -153,8 +152,11 @@ ggplot(bits_ca, aes(length_cm, fill = LngtCode)) + geom_histogram()
 
 
 # D. JOIN CONDITION AND HAUL DATA ==================================================
-# Check if any ID is in the HL but not HH data
+# Check if any ID is in the CA but not HH data
 # I will need to remove these because they do not have any spatial information
+length(unique(bits_ca$ID))
+length(unique(bits_hh_filter$ID))
+
 bits_ca$ID[!bits_ca$ID %in% bits_hh_filter$ID]
 
 # And other way around (this is expected since we have hauls without catches or data 
@@ -1410,7 +1412,7 @@ d <- d %>%
 d_analysis <- d %>% dplyr::select(year, depth, lat, lon, length_cm, weight_g, Fulton_K,
                                   cpue_cod, cpue_cod_rec, cpue_fle, cpue_fle_rec,
                                   oxy, oxy_rec, temp, temp_rec, 
-                                  abun_spr, abun_spr_sd, abun_her, abun_her_sd)
+                                  abun_spr, abun_spr_sd, abun_her, abun_her_sdm)
 
 # sort(unique(d_analysis$year))
 
