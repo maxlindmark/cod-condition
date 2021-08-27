@@ -4,7 +4,7 @@ get_sub_div <- function(dat, lon, lat){
   # Get ICES rect
   dat$ices_rect <- mapplots::ices.rect2(lon = lon, lat = lat)
 
-  # Color according to sub-division
+  # Get sub-div
   dat <- dat %>%
     mutate(SubDiv = NA) %>%
     mutate(SubDiv = ifelse(ices_rect %in% c("37G0", "37G1",
@@ -13,9 +13,8 @@ get_sub_div <- function(dat, lon, lat){
                                             "40F9", "40G0", "40G1"), "22", SubDiv)) %>%
     mutate(SubDiv = ifelse(ices_rect == "40G2", "23", SubDiv)) %>%
     mutate(SubDiv = ifelse(ices_rect %in% c("37G2", "37G3", "37G4",
-                                            "38G1", "38G2", "38G3", "38G4",
-                                            "39G1", "39G2", "39G3", "39G4",
-                                            "40G1"), "24", SubDiv)) %>%
+                                            "38G2", "38G3", "38G4",
+                                            "39G2", "39G3", "39G4"), "24", SubDiv)) %>%
     mutate(SubDiv = ifelse(ices_rect %in% c("40G4",
                                             "37G5", "37G6", "37G7",
                                             "38G5", "38G6", "38G7",
@@ -24,8 +23,8 @@ get_sub_div <- function(dat, lon, lat){
                                             "41G5", "41G6", "41G7"), "25", SubDiv)) %>%
     mutate(SubDiv = ifelse(ices_rect %in% c("37G8", "37G9", "37H0",
                                             "38G8", "38G9", "38H0",
-                                            "39G8", "39G9", "39H0",
-                                            "40G8", "40G9", "40H0",
+                                            "39G8", "39G9", "39H0", "39H1",
+                                            "40G8", "40G9", "40H0", "40H1",
                                             "41G8", "41G9", "41H0"), "26", SubDiv)) %>%
     mutate(SubDiv = ifelse(ices_rect %in% c("42G6", "42G7",
                                             "43G6", "43G7",
