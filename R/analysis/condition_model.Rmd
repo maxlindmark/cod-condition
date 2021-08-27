@@ -40,6 +40,7 @@ library(gifski)
 library(latex2exp)
 library(patchwork)
 library(png)
+library(RCurl)
 library(qwraps2) # To load entire cache in interactive r session, do: qwraps2::lazyload_cache_dir(path = "R/analysis/condition_model_cache/html")
 
 # For adding maps to plots
@@ -76,6 +77,25 @@ d <- d %>%
   mutate(oxy_sc = (oxy - mean(oxy))/sd(oxy),
          temp_sc = (temp - mean(temp))/sd(temp)) %>% 
   drop_na(abun_spr_sc, abun_her_sc)
+
+# Plot size distributions for all years
+# Add in SubDiv info:
+func <- 
+  getURL("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/R/functions/get_subdiv.R",
+         ssl.verifypeer = FALSE)
+
+eval(parse(text = func))
+
+d <- get_subdiv(dat = d, lat = d$lat, lon = d$lon)
+
+ggplot(d, aes(length_cm)) + geom_histogram() + facet_wrap(~year, scales = "free")
+
+d %>% 
+  filter(SubDiv %in% c(25, 27, 28)) %>% 
+  ggplot(., aes(length_cm)) + geom_histogram() + facet_wrap(~year, scales = "free")
+
+unique(d$SubDiv)
+
 ```
 
 Read the prediction grids:
@@ -125,6 +145,8 @@ spde <- make_mesh(d, xy_cols = c("lon", "lat"),
                   n_knots = 180, # 180 works nice as well but 160 works with the 80% training data
                   type = "kmeans", seed = 42)
 
+plot(spde)
+
 # Add on the barrier mesh component:
 bspde <- add_barrier_mesh(
   spde, baltic_coast, range_fraction = 0.2,
@@ -149,9 +171,9 @@ mesh_df_land <- bspde$mesh_sf[bspde$barrier_triangles, ]
 mfull <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_sc + oxy_sc + temp_sc + 
                   cpue_fle_sc + cpue_fle_rec_sc + cpue_cod_sc + cpue_cod_rec_sc + abun_spr_sc + abun_spr_sd_sc + abun_her_sc + abun_her_sd_sc + oxy_sc*depth_sc + temp_sc*depth_sc + oxy_sc*temp_sc 
                   -1, time_varying = ~ 1, data = d, time = "year",
-                spde = bspde, family = student(link = "identity", df = 5), ar1_fields = TRUE,
+                spde = bspde, family = student(link = "identity", df = 5), fields = "AR1",
                 include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
-                silent = TRUE, newton_steps = 1, reml = FALSE)
+                silent = TRUE, reml = FALSE, control = sdmTMBcontrol(newton_steps = 1))
 
 tidy(mfull, conf.int = TRUE)
 ```
@@ -243,6 +265,19 @@ avg_mfull %>%
   NULL
 
 ggsave("figures/analysis/condition_index.png", width = 6.5, height = 6.5, dpi = 600)
+
+# Plot the average condition factor as a function of year
+d %>% 
+  group_by(year) %>% 
+  summarise(mean_temp = mean(temp)) %>% 
+  bind_cols(avg_mfull$est) %>% 
+  rename("condition_factor" = "...3") %>% 
+  ggplot(., aes(mean_temp, condition_factor)) +
+    labs(x = "Mean temperature in condition data", y = "Annual condition factor") +
+    geom_point(size = 2) + 
+    theme_classic(base_size = 12) +
+
+ggsave("figures/supp/condition_index_temperature.png", width = 6.5, height = 6.5, dpi = 600)
 ```
 
 We can make a prediction over a grid with the oxygen values values at each location across time `pred_grid2`, but keeping all other covariates at their means:
@@ -339,7 +374,7 @@ Depth
 
 ```{r marginal effects of depth, message=FALSE, cache=TRUE}
 # Prepare prediction data frame
-nd_dep <- data.frame(dep_sc = seq(min(d$dep_sc), max(d$dep_sc), length.out = 100))
+nd_dep <- data.frame(depth_sc = seq(min(d$depth_sc), max(d$depth_sc), length.out = 100))
 
 nd_dep <- nd_dep %>%
   mutate(year = 2003L,
@@ -358,7 +393,7 @@ nd_dep <- nd_dep %>%
 # Predict from full model (AIC-selected)
 p_margin_dep <- predict(mfull, newdata = nd_dep, se_fit = TRUE, re_form = NA)
 
-ggplot(p_margin_dep, aes(dep_sc, est,
+ggplot(p_margin_dep, aes(depth_sc, est,
                          ymin = est - 1.96 * est_se, ymax = est + 1.96 * est_se)) +
   geom_ribbon(alpha = 0.4) + geom_line() +
   scale_color_brewer(palette = "Set1") +
@@ -465,4 +500,34 @@ ggplot(df, aes(ln_length_cm, residuals_mfull)) +
   geom_smooth()
 
 ggsave("figures/supp/residuals_vs_length.png", width = 6.5, height = 6.5, dpi = 600)
+
+# Residuals vs length and year
+ggplot(df, aes(x = year, y = ln_length_cm, color = residuals_mfull)) +
+  geom_point(size = 0.1, alpha = 1) + 
+  scale_color_gradient2()
+
+ggsave("figures/supp/residuals_vs_length_and_year.png", width = 6.5, height = 6.5, dpi = 600)
+
+ggplot(df, aes(x = ln_length_cm, y = residuals_mfull, color = residuals_mfull)) +
+  geom_point(size = 0.1, alpha = 1) + 
+  geom_hline(yintercept = 0, size = 0.5, color = "black", linetype = 2, alpha = 0.5) +
+  labs(x = "ln(length)", y = "Residuals", color = "") +
+  stat_smooth(color = "black", size = 0.5) +
+  facet_wrap(~year, ncol = 5) +
+  scale_color_gradient2() + 
+  theme_classic(base_size = 12)
+
+ggsave("figures/supp/residuals_vs_length_and_year2.png", width = 6.5, height = 6.5, dpi = 600)
+
+ggplot(df, aes(year, ln_length_cm, z = residuals_mfull)) +
+  stat_summary_2d(bins = 40) +
+  scale_fill_gradient2()
+
+ggsave("figures/supp/residuals_vs_length_and_year2.png", width = 6.5, height = 6.5, dpi = 600)
+
+ggplot(df, aes(year, length_cm, z = residuals_mfull)) +
+  stat_summary_2d(bins = 40) +
+  scale_fill_gradient2()
+
+ggsave("figures/supp/residuals_vs_length_and_year3.png", width = 6.5, height = 6.5, dpi = 600)
 ```

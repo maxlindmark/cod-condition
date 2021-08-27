@@ -116,6 +116,8 @@ spde <- make_mesh(d, xy_cols = c("lon", "lat"),
                   n_knots = 200, 
                   type = "kmeans", seed = 42)
 
+plot(spde)
+
 # Add on the barrier mesh component:
 bspde <- add_barrier_mesh(
   spde, baltic_coast, range_fraction = 0.2,
@@ -139,10 +141,12 @@ Fit the models of cpue:
 
 ```{r fit, results='hide', cache=TRUE, message=FALSE}
 # Depth spline + oxy spline
-m <- sdmTMB(cpue ~ 0 + as.factor(year) + s(depth_sc, k = 3) + s(oxy_sc, k = 3) + s(temp_sc, k = 3), data = d,
-            spde = bspde, family = tweedie(link = "log"),
-            ar1_fields = TRUE, include_spatial = TRUE, time = "year",
-            spatial_only = FALSE, newton_steps = 1, reml = FALSE)
+# Takes about 30 minutes
+m <- sdmTMB(cpue ~ 0 + as.factor(year) + s(depth_sc, k = 3) + s(oxy_sc, k = 3) + s(temp_sc, k = 3),
+            data = d, spde = bspde, family = tweedie(link = "log"),
+            fields = "AR1", include_spatial = TRUE, time = "year",
+            spatial_only = FALSE, reml = FALSE,
+            control = sdmTMBcontrol(newton_steps = 1))
 
 tidy(m, conf.int = TRUE)
 d$residualsm <- residuals(m)
@@ -152,6 +156,8 @@ qqnorm(d$residualsm); abline(a = 0, b = 1)
 Check the AR1 parameter (`rho` is `ar_phi` on the -1 to 1 scale):
 
 ```{r check AR1 estimate}
+m <- sdmTMB:::update_model(m) # Update the model formula instead...
+  
 tidy(m, effects = "ran_pars", conf.int = TRUE) %>% filter(term == "rho")
 ```
 
@@ -187,7 +193,6 @@ We can also plot the annual index
 ```{r cpue index, message=FALSE, cache=TRUE}
 # From these models, predict annual cpue
 # Grabbing the number of cells to help with calculating the average
-
 pred_grid2 <- pred_grid2 %>% filter(depth < 120)
 
 unique(is.na(pred_grid2))
@@ -269,6 +274,31 @@ predcod %>%
   ggtitle("CPUE weighted average depth at location") 
 ```
 
+Calculate weighted mean depth
+
+```{r stats on mean depth}
+dep <- predcod %>% 
+  drop_na(est2) %>% 
+  group_by(year) %>% 
+  #filter(exp(est2) < 1000) %>% # remove some extremes to better see trends in space and time 
+  #filter(exp(est2) > 0.05) %>% # remove some extremes to better see trends in space and time
+  summarise(depth_wm = weighted.mean(depth, exp(est2))) %>% 
+  mutate(year_ct = year - 1993)
+
+summary(lm(dep$depth_wm ~ dep$year_ct))
+
+46.06615 + 0.18151*(2019-1993)
+
+# Now plot oxygen vs depth
+# Plot oxygen vs depth
+ggplot(pred_grid2, aes(depth, oxy)) + geom_point() + stat_smooth(method = "lm")
+ggplot(pred_grid2, aes(depth, oxy)) +
+  geom_point() +
+  stat_smooth(method = "lm") +
+  coord_cartesian(xlim = c(46, 51), ylim = c(5.4, 5.7))
+
+```
+
 Calculate cpue-weighted mean temperature-at-location
 
 ```{r cpue-weighted mean temperature plot}
@@ -280,75 +310,11 @@ predcod %>%
   summarise(temp_wm = weighted.mean(temp, exp(est2))) %>% 
   ggplot(., aes(year, temp_wm)) +
   geom_point(size = 3) +
-  stat_smooth(method = "lm") +
+  stat_smooth(method = "gam", formula = y ~ s(x, k = 3)) +
   theme(axis.text.x = element_text(angle = 30),
         legend.position = c(0.8, 0.8)) +
   scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
   ggtitle("CPUE weighted average temp at location") 
-```
-
-Marginal effect of oxygen
-
-```{r marginal effects oxygen, message=FALSE, cache=TRUE}
-# Prepare prediction data frame
-d2 <- d %>% drop_na(oxy)
-nd_oxy <- data.frame(oxy = seq(min(d2$oxy), max(d2$oxy), length.out = 100))
-
-nd_oxy <- nd_oxy %>%
-  mutate(year = 2003L,
-         depth_sc = 0,
-         oxy_sc = (oxy - mean(oxy))/sd(oxy),
-         temp_sc = 0)
-
-# Predict 
-p_margin_oxy <- predict(m, newdata = nd_oxy, se_fit = TRUE, re_form = NA)
-
-ggplot(p_margin_oxy, aes(oxy, exp(est),
-  ymin = exp(est) - 1.96 * exp(est_se), ymax = exp(est) + 1.96 * exp(est_se))) +
-  geom_line() + 
-  geom_ribbon(alpha = 0.4)
-```
-
-Marginal effect of depth
-
-```{r marginal effects depth, message=FALSE, cache=TRUE}
-# Prepare prediction data frame
-nd_dep <- data.frame(depth = seq(min(d2$depth), max(d2$depth), length.out = 100))
-
-nd_dep <- nd_dep %>%
-  mutate(year = 2003L,
-         depth_sc = (depth - mean(depth))/sd(depth),
-         oxy_sc = 0,
-         temp_sc = 0)
-
-# Predict 
-p_margin_dep <- predict(m, newdata = nd_dep, se_fit = TRUE, re_form = NA)
-
-ggplot(p_margin_dep, aes(depth, exp(est),
-  ymin = exp(est) - 1.96 * exp(est_se), ymax = exp(est) + 1.96 * exp(est_se))) +
-  geom_line() + 
-  geom_ribbon(alpha = 0.4)
-```
-
-Marginal effect of temperature
-
-```{r marginal effects temperature, message=FALSE, cache=TRUE}
-# Prepare prediction data frame
-nd_temp <- data.frame(temp = seq(min(d$temp), max(d$temp), length.out = 100))
-
-nd_temp <- nd_temp %>%
-  mutate(year = 2003L,
-         depth_sc = 0,
-         oxy_sc = 0,
-         temp_sc = (temp - mean(temp))/sd(temp))
-
-# Predict 
-p_margin_temp <- predict(m, newdata = nd_temp, se_fit = TRUE, re_form = NA)
-
-ggplot(p_margin_temp, aes(temp, exp(est),
-  ymin = exp(est) - 1.96 * exp(est_se), ymax = exp(est) + 1.96 * exp(est_se))) +
-  geom_line() + 
-  geom_ribbon(alpha = 0.4)
 ```
 
 Combined plot:
@@ -356,27 +322,30 @@ Combined plot:
 ```{r combined plot, message=FALSE}
 cpue_index <- ind %>%
   ggplot(., aes(year, est_kg_h)) +
-  ylab("Average CPUE [kg/hour]") +
+  ylab("Mean CPUE [kg/hour]") +
   geom_line() + 
   geom_ribbon(aes(ymin = lwr_kg_h, ymax = upr_kg_h), alpha = 0.4) +
   scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
   labs(x = "Year") +
   theme_classic(base_size = 13) +
-  theme(axis.text.x = element_text(angle = 20))
+  theme(axis.text.x = element_text(angle = 20, size = 7))
 
 plot_dep <- predcod %>% 
   drop_na(est2) %>% 
   group_by(year) %>% 
-  summarise(depth_wm = weighted.mean(depth, exp(est2))) %>% 
+  summarise(depth_wm = weighted.mean(depth, exp(est2))) %>%
+  #summarise(depth_wm = weighted.mean(depth, est2)) %>% 
   ggplot(., aes(year, depth_wm)) +
   geom_point(size = 1.8) +
   labs(y = "Depth [m]", x = "Year") + 
-  stat_smooth(method = "lm", color = "grey20") +
+  stat_smooth(method = "gam", color = "grey20", formula = y ~ s(x, k = 3)) +
+  #stat_smooth(method = "gam", color = "grey20") +
   scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
   theme_classic(base_size = 13) +
-  theme(axis.text.x = element_text(angle = 20))
+  theme(axis.text.x = element_text(angle = 20, size = 7))
 
-# For these two plots we want to calculate the average in the prediction grid...
+# For these two plots we want to calculate the average in the prediction grid and contrast
+# that to the biomass-weighted
 annual_oxy_temp <- pred_grid2 %>% 
   drop_na(oxy, temp) %>% 
   mutate(Year = year) %>% 
@@ -393,21 +362,25 @@ plot_oxy <- predcod %>%
   drop_na(est2) %>% 
   group_by(year) %>% 
   summarise(oxy_wm = weighted.mean(oxy, exp(est2))) %>% 
+  #summarise(oxy_wm = weighted.mean(oxy, est2)) %>% 
   ggplot(.) +
   geom_point(aes(year, oxy_wm, color = "red"), size = 1.8, show.legend = TRUE) +
   geom_point(data = annual_oxy_temp, aes(Year, mean_oxy, color = "blue"), size = 1.8, show.legend = TRUE) +
-  stat_smooth(aes(year, oxy_wm), method = "lm", fill = pal[2], alpha = 0.2, color = pal[2]) +
-  stat_smooth(data = annual_oxy_temp, aes(Year, mean_oxy), method = "lm", fill = pal[3], alpha = 0.2, color = pal[3]) +
+  #stat_smooth(aes(year, oxy_wm), method = "lm", fill = pal[2], alpha = 0.2, color = pal[2]) + # lm
+  stat_smooth(aes(year, oxy_wm), method = "gam", formula = y ~ s(x, k = 10), fill = pal[2], alpha = 0.2, color = pal[2]) + # gam
+  #stat_smooth(data = annual_oxy_temp, aes(Year, mean_oxy), method = "lm", fill = pal[3], alpha = 0.2, color = pal[3]) +
+  stat_smooth(data = annual_oxy_temp, aes(Year, mean_oxy), method = "gam",
+              formula = y ~ s(x, k = 3), fill = pal[3], alpha = 0.2, color = pal[3]) + # gam
   scale_color_manual(values = c(pal[3], pal[2]),
                      name = c(""),
                      labels = c("Environment", "CPUE-weighted")) +
-  labs(y = "Mean 02 [ml/L]", x = "Year") + 
+  labs(y = expression(paste("Mean O" [2], " [ml/L]", sep = "")), x = "Year") + 
   scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
   theme_classic(base_size = 13) +
   guides(colour = guide_legend(override.aes = list(size = 1)))+
   theme(legend.position = c(0.8, 0.95),
         legend.text = element_text(size = 7),
-        axis.text.x = element_text(angle = 20),
+        axis.text.x = element_text(angle = 20, size = 7),
         legend.background = element_rect(fill = NA),
         legend.margin = margin(0, 0, 0, 0),
         legend.spacing.x = unit(0, "pt"))
@@ -415,12 +388,17 @@ plot_oxy <- predcod %>%
 plot_temp <- predcod %>% 
   drop_na(est2) %>% 
   group_by(year) %>% 
-  summarise(temp_wm = weighted.mean(temp, exp(est2))) %>% 
+  summarise(temp_wm = weighted.mean(temp, exp(est2))) %>%
+  #summarise(temp_wm = weighted.mean(temp, est2)) %>% 
   ggplot(.) +
   geom_point(aes(year, temp_wm, color = "red"), size = 1.8, show.legend = TRUE) +
   geom_point(data = annual_oxy_temp, aes(Year, mean_temp, color = "blue"), size = 1.8, show.legend = TRUE) +
-  stat_smooth(aes(year, temp_wm), method = "lm", fill = pal[2], alpha = 0.2, color = pal[2]) +
-  stat_smooth(data = annual_oxy_temp, aes(Year, mean_temp), method = "lm", fill = pal[3], alpha = 0.2, color = pal[3]) +
+  #stat_smooth(aes(year, temp_wm), method = "lm", fill = pal[2], alpha = 0.2, color = pal[2]) + # lm
+  stat_smooth(aes(year, temp_wm), method = "gam", formula = y ~ s(x, k = 3),
+              fill = pal[2], alpha = 0.2, color = pal[2]) + # gam
+  #stat_smooth(data = annual_oxy_temp, aes(Year, mean_temp), method = "lm", fill = pal[3], alpha = 0.2, color = pal[3]) +
+  stat_smooth(data = annual_oxy_temp, aes(Year, mean_temp), method = "gam", formula = y ~ s(x, k = 3),
+              fill = pal[3], alpha = 0.2, color = pal[3]) +
   scale_color_manual(values = c(pal[3], pal[2]),
                      name = c(""),
                      labels = c("Environment", "CPUE-weighted")) +
@@ -430,7 +408,7 @@ plot_temp <- predcod %>%
   guides(colour = guide_legend(override.aes = list(size = 1)))+
   theme(legend.position = c(0.25, 0.95),
         legend.text = element_text(size = 7),
-        axis.text.x = element_text(angle = 20),
+        axis.text.x = element_text(angle = 20, size = 7),
         legend.background = element_rect(fill = NA),
         legend.margin = margin(0, 0, 0, 0),
         legend.spacing.x = unit(0, "pt"))
@@ -439,9 +417,12 @@ plot_temp <- predcod %>%
   plot_annotation(tag_levels = 'A')
 
 ggsave("figures/analysis/cpue.png", width = 6.5, height = 6.5, dpi = 600)
+```
 
+Calculate slopes of average oxygen etc.
+
+```{r simple stats}
 # Do some simple stats...
-
 annual_oxy_temp$source <- "env"
 
 weigh <- predcod %>% 
@@ -616,24 +597,35 @@ p2 <- ggplot(dat, aes(year, log(cod_spr_ratio), color = SubDiv)) +
 p1/p2
 
 # Scaled variables
-p3 <- ggplot(dat, aes(year, cod_her_ratio_sc, color = SubDiv)) +
+p3 <- dat %>% filter(cod_her_ratio_sc > -10 & cod_her_ratio_sc < 10) %>% 
+  ggplot(., aes(year, cod_her_ratio_sc, color = SubDiv, fill = SubDiv)) +
   geom_point() +
-  stat_smooth(se = FALSE) +
-  scale_color_brewer(palette = "Dark2") +
-  ggtitle("Herring") +
-  theme(aspect.ratio = 3/4) +
-  ylim(c(-10, 10))
+  stat_smooth(alpha = 0.2) +
+  scale_color_brewer(palette = "Dark2") + 
+  scale_fill_brewer(palette = "Dark2") +
+  labs(x = "Year", y = "cod:herring ratio") +
+  theme(aspect.ratio = 3/4) + 
+  facet_wrap(~SubDiv, ncol = 2) +
+  guides(color = FALSE, fill = FALSE) +
+  NULL
 
 # Sprat ratio
-p4 <- ggplot(dat, aes(year, cod_spr_ratio_sc, color = SubDiv)) +
+p4 <- dat %>% filter(cod_spr_ratio_sc > -10 & cod_spr_ratio_sc < 10) %>% 
+  ggplot(., aes(year, cod_spr_ratio_sc, color = SubDiv, fill = SubDiv)) +
   geom_point() +
-  stat_smooth(se = FALSE) +
+  stat_smooth(alpha = 0.2) +
   scale_color_brewer(palette = "Dark2") + 
-  ggtitle("Sprat") +
+  scale_fill_brewer(palette = "Dark2") +
+  labs(x = "Year", y = "cod:sprat ratio") +
   theme(aspect.ratio = 3/4) + 
-  ylim(c(-10, 10))
+  facet_wrap(~SubDiv, ncol = 2) +
+  guides(color = FALSE, fill = FALSE) +
+  NULL
 
-p3/p4
+p3+p4
+
+ggsave("figures/supp/pelagics_ratio_time_series.png", width = 6.5, height = 6.5, dpi = 600)
+
 
 # All separate
 # Cod
@@ -645,20 +637,96 @@ p5 <- ggplot(dat, aes(year, ave_cpue_cod, color = SubDiv)) +
   theme(aspect.ratio = 3/4)
 
 # Herring
-p6 <- ggplot(dat, aes(year, ave_abun_her_sc, color = SubDiv)) +
-  geom_point() +
-  stat_smooth(se = FALSE) +
+p6 <- ggplot(dat, aes(year, ave_abun_her, color = SubDiv, fill = SubDiv)) +
+  geom_point(size = 1.1) +
+  stat_smooth(alpha = 0.4, size = 0.7) +
   scale_color_brewer(palette = "Dark2") +
-  ggtitle("Herring") +
-  theme(aspect.ratio = 3/4)
+  scale_fill_brewer(palette = "Dark2") + 
+  theme_classic(base_size = 10) +
+  theme(aspect.ratio = 3/4) +
+  facet_wrap(~SubDiv, ncol = 2) +
+  guides(color = FALSE, fill = FALSE) +
+  labs(x = "Year", y = "Herring abundance (averaged across ICES rectangles)") +
+  NULL
 
 # Sprat ratio
-p7 <- ggplot(dat, aes(year, ave_abun_spr_sc, color = SubDiv)) +
-  geom_point() +
-  stat_smooth(se = FALSE) +
-  scale_color_brewer(palette = "Dark2") + 
-  ggtitle("Sprat") +
-  theme(aspect.ratio = 3/4) 
+p7 <- ggplot(dat, aes(year, ave_abun_spr, color = SubDiv, fill = SubDiv)) +
+  geom_point(size = 1.1) +
+  stat_smooth(alpha = 0.4, size = 0.7) +
+  scale_color_brewer(palette = "Dark2") +
+  scale_fill_brewer(palette = "Dark2") + 
+  theme_classic(base_size = 10) +
+  theme(aspect.ratio = 3/4) +
+  facet_wrap(~SubDiv, ncol = 2) +
+  guides(color = FALSE, fill = FALSE) + 
+  labs(x = "Year", y = "Sprat abundance (averaged across ICES rectangles)") +
+  NULL
 
-p5/p6/p7
+p6 + p7 
+
+ggsave("figures/supp/pelagics_time_series.png", width = 6.5, height = 6.5, dpi = 600)
+```
+
+Marginal effect of oxygen
+
+```{r marginal effects oxygen, message=FALSE, cache=TRUE}
+# Prepare prediction data frame
+d2 <- d %>% drop_na(oxy)
+nd_oxy <- data.frame(oxy = seq(min(d2$oxy), max(d2$oxy), length.out = 100))
+
+nd_oxy <- nd_oxy %>%
+  mutate(year = 2003L,
+         depth_sc = 0,
+         oxy_sc = (oxy - mean(oxy))/sd(oxy),
+         temp_sc = 0)
+
+# Predict 
+p_margin_oxy <- predict(m, newdata = nd_oxy, se_fit = TRUE, re_form = NA)
+
+ggplot(p_margin_oxy, aes(oxy, exp(est),
+  ymin = exp(est) - 1.96 * exp(est_se), ymax = exp(est) + 1.96 * exp(est_se))) +
+  geom_line() + 
+  geom_ribbon(alpha = 0.4)
+```
+
+Marginal effect of depth
+
+```{r marginal effects depth, message=FALSE, cache=TRUE}
+# Prepare prediction data frame
+nd_dep <- data.frame(depth = seq(min(d2$depth), max(d2$depth), length.out = 100))
+
+nd_dep <- nd_dep %>%
+  mutate(year = 2003L,
+         depth_sc = (depth - mean(depth))/sd(depth),
+         oxy_sc = 0,
+         temp_sc = 0)
+
+# Predict 
+p_margin_dep <- predict(m, newdata = nd_dep, se_fit = TRUE, re_form = NA)
+
+ggplot(p_margin_dep, aes(depth, exp(est),
+  ymin = exp(est) - 1.96 * exp(est_se), ymax = exp(est) + 1.96 * exp(est_se))) +
+  geom_line() + 
+  geom_ribbon(alpha = 0.4)
+```
+
+Marginal effect of temperature
+
+```{r marginal effects temperature, message=FALSE, cache=TRUE}
+# Prepare prediction data frame
+nd_temp <- data.frame(temp = seq(min(d$temp), max(d$temp), length.out = 100))
+
+nd_temp <- nd_temp %>%
+  mutate(year = 2003L,
+         depth_sc = 0,
+         oxy_sc = 0,
+         temp_sc = (temp - mean(temp))/sd(temp))
+
+# Predict 
+p_margin_temp <- predict(m, newdata = nd_temp, se_fit = TRUE, re_form = NA)
+
+ggplot(p_margin_temp, aes(temp, exp(est),
+  ymin = exp(est) - 1.96 * exp(est_se), ymax = exp(est) + 1.96 * exp(est_se))) +
+  geom_line() + 
+  geom_ribbon(alpha = 0.4)
 ```
