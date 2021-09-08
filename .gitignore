@@ -60,7 +60,8 @@ SISP7 BITS 2017.pdf
 /data/NEMO_Nordic_SCOBI
 /data/depth_geo_tif
 /data/shapefiles
-/data/ICES_SubStatrec
+/data/ICES_StatRec_mapto_ICES_Areas
+/data/sweep
 /output/
 
 .Rproj.user
