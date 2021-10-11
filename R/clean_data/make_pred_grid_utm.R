@@ -10,9 +10,13 @@
 # 
 # C. Grid with oxygen & temperature
 # 
-# D. Add ICES areas
+# D. Add lat long
 # 
-# E. Make figures of environmental variables in prediction grid
+# E. Add ICES areas
+# 
+# F. Save
+#
+# G. Make figures of environmental variables in prediction grid
 # 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -20,13 +24,14 @@
 rm(list = ls())
 
 # Load libraries, install if needed
-library(tidyverse); theme_set(theme_classic())
+library(tidyverse); theme_set(theme_light(base_size = 12))
 library(tidylog)
 library(viridis)
 library(mapdata)
 library(rgdal)
 library(raster)
 library(sf)
+library(sp)
 library(marmap)
 library(rnaturalearth)
 library(rnaturalearthdata)
@@ -38,6 +43,7 @@ library(gifski)
 library(png)
 library(RCurl)
 library(sdmTMB)
+library(RColorBrewer)
 library(terra)
 
 # Print package versions
@@ -46,9 +52,6 @@ library(terra)
 # [1] forcats_0.5.0    stringr_1.4.0    dplyr_1.0.0      purrr_0.3.4      readr_1.3.1
 # tidyr_1.1.0      tibble_3.0.3    [8] ggplot2_3.3.2    tidyverse_1.3.0  glmmfields_0.1.4
 # Rcpp_1.0.5.1    
-
-world <- ne_countries(scale = "medium", returnclass = "sf")
-
 
 # B. BASIC GRID WITH DEPTH =========================================================
 # Get the boundaries
@@ -63,7 +66,7 @@ max(dat$lon)
 # These are the ranges I'm thinking of using. Convert these to UTM!
 ymin = 54
 ymax = 58
-xmin = 11
+xmin = 12
 xmax = 22
 
 # Function to go from lat long to UTM
@@ -81,28 +84,23 @@ LongLatToUTM(22, 53, 33)
 LongLatToUTM(22, 58, 33)
 
 # Round values based on above
-utm_x_min <- 220000
+utm_x_min <- 230000
 utm_x_max <- 960000
 utm_y_min <- 5900000
 utm_y_max <- 6450000
 
 # Make the evenly spaced (on UTM) grid 
 pred_grid <- expand.grid(
-  X = seq(utm_x_min, utm_x_max, by = 2000),
-  Y = seq(utm_y_min, utm_y_max, by = 2000)) # 2x2 km
+  X = seq(utm_x_min, utm_x_max, by = 4000),
+  Y = seq(utm_y_min, utm_y_max, by = 4000)) # 4x4 km
 
 # For adding maps to plots
 world <- ne_countries(scale = "medium", returnclass = "sf")
-
-# Specify map ranges
-ymin = 54; ymax = 58; xmin = 11; xmax = 22
 
 map_data <- rnaturalearth::ne_countries(
   scale = "medium",
   returnclass = "sf", continent = "europe")
 
-# Crop the polygon for plotting and efficiency:
-# st_bbox(map_data) # find the rough coordinates
 swe_coast <- suppressWarnings(suppressMessages(
   st_crop(map_data,
           c(xmin = xmin, ymin = ymin, xmax = xmax, ymax = ymax))))
@@ -120,7 +118,7 @@ ggplot(swe_coast_proj) + geom_sf() +
 
 # Looks OK!
 
-# Now we need to remove areas that haven't been sampled due to being too deep
+# Now we need to add depth
 west <- raster("data/depth_geo_tif/D5_2018_rgb-1.tif")
 plot(west)
 
@@ -132,27 +130,13 @@ dep_rast <- raster::merge(west, east)
 plot(dep_rast)
 
 # Do that by extracting depths of the pred grid
-# https://gis.stackexchange.com/questions/242941/extracting-values-from-raster-to-get-elevation-values-in-r
-# baltic_sea <- getNOAA.bathy(lon1 = xmin, lon2 = xmax, lat1 = ymin, lat2 = ymax, resolution = 1)
-# 
-# plot(baltic_sea, image = TRUE)
-# scaleBathy(baltic_sea, deg = 2, x = "bottomleft", inset = 5)
-# 
-# latlong <- water_dat %>% dplyr::select(lon, lat)
 utm_coords <- pred_grid %>% dplyr::select(X, Y)
-
-# data <- SpatialPoints(latlong)
-# 
-# plot(data, pch = 16, col = "red", add = TRUE)
-# 
-# sp <- get.depth(baltic_sea, latlong[, 1:2], locator = FALSE)
 
 # Reproject the raster to fit the UTM pred grid...
 # Define spatial reference 
 sr <- "+proj=utm +zone=33  +datum=WGS84 +units=m " 
 
-# Project Raster
-# This takes some time
+# Project Raster... This takes some time
 projected_raster <- projectRaster(dep_rast, crs = sr)
 
 utm_coords$depth <- extract(projected_raster, utm_coords[, 1:2])
@@ -172,7 +156,7 @@ ggplot(swe_coast_proj) + geom_sf() +
 
 df <- utm_coords %>% filter(depth < 0) %>% mutate(depth = depth*-1)
 
-# Now make a new grid. Can't use expand grid
+# Now make a new grid
 pred_grid <- data.frame(X = rep(df$X, length(unique(dat$year))),
                         Y = rep(df$Y, length(unique(dat$year))),
                         depth = rep(df$depth, length(unique(dat$year))),
@@ -180,10 +164,19 @@ pred_grid <- data.frame(X = rep(df$X, length(unique(dat$year))),
 
 pred_grid <- pred_grid %>% mutate(deep = ifelse(depth > 135, "Y", "N"))
 
-ggplot(swe_coast_proj) + geom_sf() +
-  geom_point(data = filter(pred_grid, year == "1999"), aes(x = X, y = Y, color = deep)) +
+ggplot(swe_coast_proj) + 
+  geom_raster(data = filter(pred_grid, year == "1999"), aes(x = X, y = Y, fill = deep)) +
+  geom_sf() +
   theme_light() +
   labs(x = "Longitude", y = "Latitude")
+
+ggplot(swe_coast_proj) + 
+  geom_raster(data = filter(pred_grid, year == "1999"), aes(x = X, y = Y, fill = depth)) +
+  geom_sf() +
+  theme_light() +
+  labs(x = "Longitude", y = "Latitude")
+
+hist(pred_grid$depth)
 
 
 # C. GRID WITH OXYGEN & TEMPERATURE ================================================
@@ -360,9 +353,10 @@ pred_grid_oxy <- dplyr::bind_rows(data_list)
 lims <- pred_grid_oxy %>% drop_na(oxy) %>% summarise(min = min(oxy),
                                                      max = max(oxy))
 # Plot and compare with rasters
-ggplot(swe_coast_proj) + geom_sf() +
+ggplot(swe_coast_proj) +
   geom_raster(data = pred_grid_oxy,
              aes(x = X, y = Y, fill = oxy)) +
+  geom_sf() +
   scale_fill_gradientn(colours = rev(terrain.colors(10)),
                          limits = c(lims$min, lims$max)) +
   theme_light() +
@@ -371,27 +365,26 @@ ggplot(swe_coast_proj) + geom_sf() +
   labs(x = "Longitude", y = "Latitude")
 
 # Animation
-pred_grid_oxy$year <- as.integer(pred_grid_oxy$year)
-
-p <- ggplot(swe_coast_proj) + geom_sf() +
-  geom_raster(data = pred_grid_oxy,
-              aes(x = X, y = Y, fill = oxy)) +
-  scale_fill_gradientn(colours = rev(terrain.colors(10)),
-                       limits = c(lims$min, lims$max)) +
-  theme_light() +
-  labs(fill = "Oxygen") +
-  labs(x = "Longitude", y = "Latitude")
-
-# Here comes the gganimate specific bits
-anim <- p +
-  labs(title = 'Year: {frame_time}') +
-  transition_time(as.integer(year)) +
-  ease_aes('linear') +
-  theme_classic(base_size = 12)
-
-gganimate::animate(anim, height = 600, width = 600)
-
-anim_save(filename = "output/gif/oxy.gif")
+# pred_grid_oxy$year <- as.integer(pred_grid_oxy$year)
+# 
+# p <- ggplot(swe_coast_proj) + geom_sf() +
+#   geom_raster(data = pred_grid_oxy,
+#               aes(x = X, y = Y, fill = oxy)) +
+#   scale_fill_gradientn(colours = rev(terrain.colors(10)),
+#                        limits = c(lims$min, lims$max)) +
+#   theme_light() +
+#   labs(fill = "Oxygen") +
+#   labs(x = "Longitude", y = "Latitude")
+# 
+# # Here comes the gganimate specific bits
+# anim <- p +
+#   labs(title = 'Year: {frame_time}') +
+#   transition_time(as.integer(year)) +
+#   ease_aes('linear')
+# 
+# gganimate::animate(anim, height = 600, width = 600)
+# 
+# anim_save(filename = "output/gif/oxy.gif")
 
 # Add in oxygen to the main prediction grid
 pred_grid_oxy <- pred_grid_oxy %>% arrange(X, Y, year)
@@ -409,9 +402,6 @@ pred_grid$oxy <- pred_grid_oxy$oxy
 # https://ocean.ices.dk/tools/unitconversion.aspx
 
 pred_grid$oxy <- pred_grid$oxy * 0.0223909
-
-# Save
-#write.csv(pred_grid, file = "data/for_analysis/pred_grid2.csv", row.names = FALSE)
 
 
 # ** Temperature ===================================================================
@@ -582,9 +572,10 @@ lims <- pred_grid_temp %>% drop_na(temp) %>% summarise(min = min(temp),
                                                        max = max(temp))
 
 # Plot and compare with rasters
-ggplot(swe_coast_proj) + geom_sf() +
+ggplot(swe_coast_proj) +
   geom_raster(data = pred_grid_temp,
               aes(x = X, y = Y, fill = temp)) +
+  geom_sf() +
   scale_fill_gradientn(colours = rev(terrain.colors(10)),
                        limits = c(lims$min, lims$max)) +
   theme_light() +
@@ -593,27 +584,26 @@ ggplot(swe_coast_proj) + geom_sf() +
   labs(x = "Longitude", y = "Latitude")
 
 # Animation
-pred_grid_temp$year <- as.integer(pred_grid_temp$year)
-
-p <- ggplot(swe_coast_proj) + geom_sf() +
-  geom_raster(data = pred_grid_temp,
-              aes(x = X, y = Y, fill = temp)) +
-  scale_fill_gradientn(colours = rev(terrain.colors(10)),
-                       limits = c(lims$min, lims$max)) +
-  theme_light() +
-  labs(fill = "Temperature") +
-  labs(x = "Longitude", y = "Latitude")
-
-# Here comes the gganimate specific bits
-anim <- p +
-  labs(title = 'Year: {frame_time}') +
-  transition_time(as.integer(year)) +
-  ease_aes('linear') +
-  theme_classic(base_size = 12)
-
-gganimate::animate(anim, height = 600, width = 600)
-
-anim_save(filename = "output/gif/temp.gif")
+# pred_grid_temp$year <- as.integer(pred_grid_temp$year)
+# 
+# p <- ggplot(swe_coast_proj) + geom_sf() +
+#   geom_raster(data = pred_grid_temp,
+#               aes(x = X, y = Y, fill = temp)) +
+#   scale_fill_gradientn(colours = rev(terrain.colors(10)),
+#                        limits = c(lims$min, lims$max)) +
+#   theme_light() +
+#   labs(fill = "Temperature") +
+#   labs(x = "Longitude", y = "Latitude")
+# 
+# # Here comes the gganimate specific bits
+# anim <- p +
+#   labs(title = 'Year: {frame_time}') +
+#   transition_time(as.integer(year)) +
+#   ease_aes('linear')
+# 
+# gganimate::animate(anim, height = 600, width = 600)
+# 
+# anim_save(filename = "output/gif/temp.gif")
 
 # Add in temperature to the main prediction grid
 pred_grid_temp <- pred_grid_temp %>% arrange(X, Y, year)
@@ -625,9 +615,7 @@ str(pred_grid)
 pred_grid$temp <- pred_grid_temp$temp
 
 
-# D. ADD ICES AREAS ================================================================
-# Add in sub_area into data
-# Load function
+# E. ADD LATLONG ===================================================================
 
 # Need to go from UTM to lat long for this one... 
 # https://stackoverflow.com/questions/30018098/how-to-convert-utm-coordinates-to-lat-and-long-in-r
@@ -639,74 +627,52 @@ lonlat <- geom(y)[, c("x", "y")]
 pred_grid$lon <- lonlat[, 1]
 pred_grid$lat <- lonlat[, 2]
 
-func <- 
-  getURL("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/R/functions/get_subdiv.R", 
-         ssl.verifypeer = FALSE)
-
-eval(parse(text = func))
-
-pred_grid <- get_sub_div(dat = pred_grid, lat = pred_grid$lat, lon = pred_grid$lon)
-
-pred_grid %>% 
-  filter(year < 1999) %>% 
-  ggplot(., aes(lon, lat, color = SubDiv)) +
-  geom_point()
-
-# Filter only sub divs above 24...
-pred_grid <- pred_grid %>%
-  drop_na(SubDiv) %>% 
-  filter(!SubDiv %in% c("22", "23"))
-
-ggplot(swe_coast_proj) + geom_sf() +
-  geom_raster(data = pred_grid, aes(x = X, y = Y, fill = SubDiv)) +
-  theme_light() +
-  labs(x = "Longitude", y = "Latitude")
-
-# https://gis.ices.dk/sf/
-# ices <- readOGR(dsn = "data/shapefiles/Shapefile.shp", stringsAsFactors = F)
-# ices2 <- spTransform(ices, CRS(sr))
-# plot(ices, axes = TRUE)
-# plot(ices2, axes = TRUE)
-# 
-# ggplot(swe_coast_proj) + geom_sf() +
-#   #geom_raster(data = pred_grid, aes(x = X, y = Y, fill = SubDiv)) +
-#   geom_polygon(data = ices, aes(x = long, y = lat, group = group), colour = "black", fill = NA)
-#   theme_light() +
-#   labs(x = "Longitude", y = "Latitude")
-# 
-# ggplot() + geom_polygon(data = ices, aes(x = long, y = lat, group = group), colour = "black", fill = NA)
-
-
-# Now test I get similar depth, temperature and oxygen values as when I don't use UTM
-# pred_grid2_latlong <- read.csv("data/for_analysis/pred_grid2_latlong.csv")
-# 
-# # Convert to UTM:
-# utm_coords <- LongLatToUTM(pred_grid2_latlong$lon, pred_grid2_latlong$lat, zone = 33)
-# 
-# pred_grid2_latlong$X <- utm_coords$X
-# pred_grid2_latlong$Y <- utm_coords$Y
-# 
-# p1 <- ggplot(pred_grid2_latlong, aes(lat, oxy)) + geom_point()
-# p2 <- ggplot(pred_grid, aes(lat, oxy))  + geom_point()
-# 
-# p1/p2
-# 
-# str(pred_grid2_latlong)
-# str(pred_grid)
-
-# Save
 pred_grid$X <- pred_grid$X/1000
 pred_grid$Y <- pred_grid$Y/1000
 
-write.csv(pred_grid, file = "data/for_analysis/pred_grid2.csv", row.names = FALSE)
+# E. ADD ICES AREAS VIA SHAPEFILE ==================================================
+# https://stackoverflow.com/questions/34272309/extract-shapefile-value-to-point-with-r
+# https://gis.ices.dk/sf/
+shape <- shapefile("data/ICES_StatRec_mapto_ICES_Areas/StatRec_map_Areas_Full_20170124.shp")
+head(shape)
+
+plot(shape, axes = TRUE)
+
+pts <- SpatialPoints(cbind(pred_grid$lon, pred_grid$lat), 
+                     proj4string = CRS(proj4string(shape)))
+
+pred_grid$subdiv <- over(pts, shape)$Area_27
+pred_grid$subdiv2 <- over(pts, shape)$AreasList
+
+# Rename subdivisions to the more common names and do some more filtering (by sub div and area)
+sort(unique(pred_grid$subdiv))
+
+pred_grid2 <- pred_grid %>% 
+  mutate(SubDiv = factor(subdiv),
+         SubDiv = fct_recode(subdiv,
+                             "24" = "3.d.24",
+                             "25" = "3.d.25",
+                             "26" = "3.d.26",
+                             "27" = "3.d.27",
+                             "28" = "3.d.28.1",
+                             "28" = "3.d.28.2"),
+         SubDiv = as.character(SubDiv)) %>% 
+  filter(SubDiv %in% c("24", "25", "26", "27", "28")) %>% 
+  filter(lat > 54 & lat < 58 & lon < 22)
+  
+
+# F. SAVE ==========================================================================
+# Save
+
+write.csv(pred_grid2, file = "data/for_analysis/pred_grid2.csv", row.names = FALSE)
 
 
-# E. PLOT ==========================================================================
+# G. PLOT ==========================================================================
 # Oxygen vs depth
-ggplot(pred_grid, aes(depth, oxy)) + geom_point()
+ggplot(pred_grid2, aes(depth, oxy)) + geom_point()
 
 # Oxygen vs year
-pred_grid %>% 
+pred_grid2 %>% 
   drop_na(oxy) %>% 
   group_by(year) %>% 
   summarise(mean_oxy = mean(oxy),
@@ -715,7 +681,6 @@ pred_grid %>%
   geom_point() + 
   geom_errorbar(aes(x = year, ymin = mean_oxy - sd_oxy, ymax = mean_oxy + sd_oxy, width = 0), alpha = 0.5) + 
   stat_smooth(method = "gam", formula = y ~ s(x, k = 3), color = "tomato") +
-  theme_classic(base_size = 12) + 
   labs(y = "Mean 02 [ml/L]", x = "Year") +  
   labs(y = expression(paste("Mean O" [2], " [ml/L]", sep = "")),
        x = "Year") + 
@@ -724,7 +689,7 @@ pred_grid %>%
 ggsave("figures/supp/env_oxy.png", width = 6.5, height = 6.5, dpi = 600)
 
 # Oxygen vs year and sd
-pred_grid %>% 
+pred_grid2 %>% 
   drop_na(oxy, SubDiv) %>% 
   filter(!SubDiv == 22) %>% 
   group_by(year, SubDiv) %>% 
@@ -736,14 +701,13 @@ pred_grid %>%
   # geom_errorbar(aes(x = year, ymin = mean_oxy - sd_oxy, ymax = mean_oxy + sd_oxy, width = 0),
   #               alpha = 0.5) + 
   stat_smooth(method = "gam", formula = y ~ s(x, k = 3), color = "tomato") +
-  theme_classic(base_size = 12) + 
   labs(y = "Mean 02 [ml/L]", x = "Year") +  
   labs(y = expression(paste("Mean O" [2], " [ml/L]", sep = "")), x = "Year")
 
 ggsave("figures/supp/env_oxy_sd.png", width = 6.5, height = 6.5, dpi = 600)
 
 # Oxygen vs year and sd by depth
-pred_grid %>% 
+pred_grid2 %>% 
   drop_na(oxy, SubDiv) %>% 
   mutate(deep = ifelse(depth < 50, "N", "Y")) %>% 
   filter(!SubDiv == 22) %>% 
@@ -756,9 +720,10 @@ pred_grid %>%
   # geom_errorbar(aes(x = year, ymin = mean_oxy - sd_oxy, ymax = mean_oxy + sd_oxy, width = 0),
   #               alpha = 0.5) + 
   stat_smooth(method = "gam", formula = y ~ s(x, k = 3)) +
-  theme_classic(base_size = 12) + 
   labs(y = "Mean 02 [ml/L]", x = "Year") +  
-  labs(y = expression(paste("Mean O" [2], " [ml/L]", sep = "")), x = "Year")
+  labs(y = expression(paste("Mean O" [2], " [ml/L]", sep = "")), x = "Year") +
+  theme(strip.text = element_text(colour = 'black'),
+        strip.background = element_rect(fill = "grey90"))
 
 ggsave("figures/supp/env_oxy_sd_depth.png", width = 6.5, height = 6.5, dpi = 600)
 
