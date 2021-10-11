@@ -1,6 +1,6 @@
 ---
 title: "Condition model"
-author: "Max Lindmark & Sean Andersson"
+author: "Max Lindmark, Sean Andersson, Michele Casini"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
   html_document:
@@ -20,16 +20,16 @@ knitr::opts_chunk$set(
 )
 ```
 
-## Aim
+# Fit condition model with environmental and biological predictors
 Fit main model (see exploratory scripts and model comparison), visualize results.
 
-## Fit models
-### Read data and set up spde mesh
+## Read data and set up spde mesh
+
 ```{r packages, message=FALSE, warning=TRUE}
-library(tidyverse); theme_set(theme_classic())
+library(tidyverse); theme_set(theme_light(base_size = 12))
 library(tidylog)
 library(viridis)
-library(sdmTMB) # remotes::install_github("pbs-assess/sdmTMB")
+library(sdmTMB) 
 library(marmap)
 library(rnaturalearth)
 library(rnaturalearthdata)
@@ -41,23 +41,89 @@ library(latex2exp)
 library(patchwork)
 library(png)
 library(RCurl)
+library(wesanderson)
 library(qwraps2) # To load entire cache in interactive r session, do: qwraps2::lazyload_cache_dir(path = "R/analysis/condition_model_cache/html")
-
-# For adding maps to plots
-world <- ne_countries(scale = "medium", returnclass = "sf")
-
-# Specify map ranges
-ymin = 54; ymax = 58; xmin = 9.5; xmax = 22
+remotes::install_github("pbs-assess/sdmTMB")
 ```
 
-Now read data:
+## For maps
+
+```{r read coastline data, message=FALSE, warning=FALSE}
+# Specify map ranges
+ymin = 54; ymax = 58; xmin = 12; xmax = 22
+
+map_data <- rnaturalearth::ne_countries(
+  scale = "medium",
+  returnclass = "sf", continent = "europe")
+
+# Crop the polygon for plotting and efficiency:
+# st_bbox(map_data) # find the rough coordinates
+swe_coast <- suppressWarnings(suppressMessages(
+  st_crop(map_data,
+          c(xmin = xmin, ymin = ymin, xmax = xmax, ymax = ymax))))
+
+# Transform our map into UTM 33 coordinates, which is the equal-area projection we fit in:
+utm_zone33 <- 32633
+swe_coast_proj <- sf::st_transform(swe_coast, crs = utm_zone33)
+
+ggplot(swe_coast_proj) + geom_sf() 
+
+# Define plotting theme for main plot
+theme_weighted_plot <- function(base_size = 10, base_family = "") {
+  theme_light(base_size = 10, base_family = "") +
+    theme(
+      axis.text.x = element_text(angle = 90),
+      axis.text = element_text(size = 8),
+      legend.text = element_text(size = 8),
+      legend.title = element_text(size = 8),
+      legend.position = "bottom",
+      legend.key.height = unit(0.2, "cm"),
+      legend.margin = margin(0, 0, 0, 0),
+      legend.box.margin = margin(-5, -5, -5, -5),
+      strip.text = element_text(size = 8, colour = 'black', margin = margin()),
+      strip.background = element_rect(fill = "grey90")
+      )
+}
+
+# Define plotting theme for facet_wrap map with years
+theme_facet_map <- function(base_size = 10, base_family = "") {
+  theme_light(base_size = 10, base_family = "") +
+    theme(
+        axis.text.x = element_text(angle = 90),
+        axis.text = element_text(size = 6),
+        strip.text = element_text(size = 8, colour = 'black', margin = margin()),
+        strip.background = element_rect(fill = "grey90")
+      )
+}
+```
+
+## Read data
 
 ```{r read and process data, message=FALSE, warning=FALSE}
 d <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cond.csv")
 
+t <- filter(d, length_cm > 70)
+t <- filter(d, length_cm < 20)
+
+# Create new large-scale variables
+# See if I use them in the end
+d <- d %>% 
+  rename("cpue_fle" = "density_fle",
+         "cpue_cod" = "density_cod") %>%
+  group_by(ices_rect, year) %>% 
+  mutate(cpue_fle_rec = mean(cpue_fle),
+         cpue_cod_rec = mean(cpue_cod)) %>% 
+  ungroup() %>% 
+  group_by(SD, year) %>% 
+  mutate(abun_spr_sd = mean(abun_spr),
+         abun_her_sd = mean(abun_her)) %>% 
+  ungroup()
+
 # Calculate standardized variables
 d <- d %>% 
+#  drop_na(abun_spr_sd, abun_her_sd) %>% 
   mutate(ln_length_cm = log(length_cm),
+         ln_length_cm_ct = ln_length_cm - mean(ln_length_cm),
          ln_weight_g = log(weight_g),
          abun_her_sc = abun_her,
          abun_her_sd_sc = abun_her_sd,
@@ -73,32 +139,11 @@ d <- d %>%
               "depth_sc"),
             ~(scale(.) %>% as.vector)) %>% 
   mutate(year = as.integer(year)) %>% 
-  group_by(year) %>%
   mutate(oxy_sc = (oxy - mean(oxy))/sd(oxy),
-         temp_sc = (temp - mean(temp))/sd(temp)) %>% 
-  drop_na(abun_spr_sc, abun_her_sc)
-
-# Plot size distributions for all years
-# Add in SubDiv info:
-func <- 
-  getURL("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/R/functions/get_subdiv.R",
-         ssl.verifypeer = FALSE)
-
-eval(parse(text = func))
-
-d <- get_subdiv(dat = d, lat = d$lat, lon = d$lon)
-
-ggplot(d, aes(length_cm)) + geom_histogram() + facet_wrap(~year, scales = "free")
-
-d %>% 
-  filter(SubDiv %in% c(25, 27, 28)) %>% 
-  ggplot(., aes(length_cm)) + geom_histogram() + facet_wrap(~year, scales = "free")
-
-unique(d$SubDiv)
-
+         temp_sc = (temp - mean(temp))/sd(temp))
 ```
 
-Read the prediction grids:
+## Read the prediction grids
 
 ```{r read and process prediction grid, message=FALSE, warning=FALSE}
 # pred_grid2 has oxygen and temp values at location and time and depth:
@@ -106,10 +151,10 @@ pred_grid2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod
 
 pred_grid2 <- pred_grid2 %>% drop_na(oxy, depth, temp)
 
-# Now standardize the variables in the data
+# Now standardize the variables in the data and center the variable using the annual means in the data grid
 pred_grid2 <- pred_grid2 %>%
-  mutate(ln_length_cm = log(1)) %>% # For now we'll predict changes in the intercept ("condition factor")
-  mutate(X = lon, Y = lat, year = as.integer(year)) %>% 
+  mutate(ln_length_cm = mean(d$ln_length_cm)) %>% # For now we'll predict changes in the intercept ("condition factor")
+  mutate(year = as.integer(year)) %>% 
   filter(year %in% c(unique(d$year))) %>% 
   mutate(depth_sc = (depth - mean(d$depth))/sd(d$depth)) %>%
   group_by(year) %>% 
@@ -117,75 +162,230 @@ pred_grid2 <- pred_grid2 %>%
   mutate(oxy_sc = (oxy - mean(d$oxy))/sd(d$oxy),
          temp_sc = (temp - mean(d$temp))/sd(d$temp))
   
-# We centre the variable using the annual means in the data grid
+# Add in the means of the centered covariates that are not in the prediction grid
+pred_grid2 <- pred_grid2 %>% 
+  mutate(cpue_fle_sc = 0,
+         cpue_fle_rec_sc = 0,
+         cpue_cod_sc = 0,
+         cpue_cod_rec_sc = 0,
+         abun_spr_sc = 0,
+         abun_spr_sd_sc = 0,
+         abun_her_sc = 0,
+         abun_her_sd_sc = 0)
+
+# Prediction grid with all covariates at their means (also oxygen, depth and temperature)
+pred_grid_avg <- pred_grid2 %>% 
+  mutate(depth_sc = 0,
+         oxy_sc = 0,
+         temp_sc = 0)
 ```
 
-Make barrier spde mesh
+## Make spde mesh
 
-```{r make barrier spde mesh, results='hide', message=FALSE}
-# Crop the polygon for plotting and efficiency:
-baltic_coast <- suppressWarnings(suppressMessages(
-  st_crop(world,
-          c(xmin = xmin, ymin = ymin, xmax = xmax, ymax = ymax))))
-
-crs <- 4326 # https://en.wikipedia.org/wiki/EPSG_Geodetic_Parameter_Dataset#Common_EPSG_codes, WGS84
-
-st_crs(baltic_coast) <- 4326 # 'WGS84'; necessary on some installs
-baltic_coast <- st_transform(baltic_coast, crs)
-
-# Project our survey data coordinates:
-survey <- d %>% dplyr::select(lon, lat, ln_weight_g) %>%
-  st_as_sf(crs = 4326, coords = c("lon", "lat")) 
-
-# Prepare for making the mesh
-# First, we will extract the coordinates:
-surv_coords <- st_coordinates(survey)
-
-spde <- make_mesh(d, xy_cols = c("lon", "lat"),
-                  n_knots = 180, # 180 works nice as well but 160 works with the 80% training data
+```{r make barrier spde mesh, results='hide', cache=TRUE, message=FALSE}
+spde <- make_mesh(d, xy_cols = c("X", "Y"),
+                  n_knots = 200, 
                   type = "kmeans", seed = 42)
 
 plot(spde)
-
-# Add on the barrier mesh component:
-bspde <- add_barrier_mesh(
-  spde, baltic_coast, range_fraction = 0.2,
-  proj_scaling = 1, plot = TRUE
-)
-
-# In the above, the grey dots are the centre of triangles that are in the
-# ocean. The red crosses are centres of triangles that are over land. The
-# spatial range will be assumed to be 0.2 (`range_fraction`) over land compared
-# to over water.
-
-# We can make a more advanced plot if we want:
-mesh_df_water <- bspde$mesh_sf[bspde$normal_triangles, ]
-mesh_df_land <- bspde$mesh_sf[bspde$barrier_triangles, ]
-
-# Now, when we fit our model with the new mesh, it will automatically
-# include a barrier structure in the spatial correlation:
 ```
 
-### Full model
+## Full model
+
 ```{r full model, cache=TRUE}
-mfull <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_sc + oxy_sc + temp_sc + 
-                  cpue_fle_sc + cpue_fle_rec_sc + cpue_cod_sc + cpue_cod_rec_sc + abun_spr_sc + abun_spr_sd_sc + abun_her_sc + abun_her_sd_sc + oxy_sc*depth_sc + temp_sc*depth_sc + oxy_sc*temp_sc 
-                  -1, time_varying = ~ 1, data = d, time = "year",
-                spde = bspde, family = student(link = "identity", df = 5), fields = "AR1",
+ptm <- proc.time()
+
+mfull <- sdmTMB(formula = ln_weight_g ~ ln_length_cm_ct + depth_sc + oxy_sc + temp_sc + 
+                  cpue_fle_sc + cpue_fle_rec_sc + cpue_cod_sc + cpue_cod_rec_sc +
+                  abun_spr_sc + abun_spr_sd_sc + abun_her_sc + abun_her_sd_sc + oxy_sc*depth_sc +
+                  temp_sc*depth_sc + oxy_sc*temp_sc -1,
+                time_varying = ~ 1, data = d, time = "year",
+                spde = spde, family = student(link = "identity", df = 5), fields = "AR1",
                 include_spatial = TRUE, spatial_trend = FALSE, spatial_only = FALSE,
-                silent = TRUE, reml = FALSE, control = sdmTMBcontrol(newton_steps = 1))
+                silent = TRUE, reml = FALSE,
+                control = sdmTMBcontrol(newton_loops = 1, eval.max = 10000, iter.max = 10000, nlminb_loops = 2))
+proc.time() - ptm
 
 tidy(mfull, conf.int = TRUE)
 ```
 
-### Plot fixed and random effects
+## Plot residuals
+
+```{r extract residuals}
+d$residuals_mfull <- residuals(mfull)
+
+png(file = "figures/supp/cond_qq.png", units = "in", width = 6.5, height = 6.5, res = 300)
+qqnorm(d$residuals_mfull); abline(a = 0, b = 1)
+dev.off()
+
+# Residuals on map
+ggplot(swe_coast_proj) +
+  geom_point(data = d, aes(x = X * 1000, y = Y * 1000, color = residuals_mfull)) +
+  geom_sf(size = 0.3) +
+  scale_colour_gradient2() +
+  facet_wrap(~ year, ncol = 5) +
+  labs(x = "Longitude", y = "Latitude", color = "residuals") +
+  theme_facet_map() + 
+  theme(strip.text = element_text(size = 8, colour = 'black', margin = margin()),
+        strip.background = element_rect(fill = "grey90"))
+
+ggsave("figures/supp/cond_spatial_resid.png", width = 6.5, height = 6.5, dpi = 600)
+
+# Residuals vs length
+ggplot(d, aes(ln_length_cm, residuals_mfull)) +
+  geom_point(alpha = 0.1, color = "grey20") + 
+  geom_abline(color = "red", slope = 0, linetype = 2) +
+  geom_smooth()
+
+ggsave("figures/supp/residuals_vs_length.png", width = 6.5, height = 6.5, dpi = 600)
+
+# Residuals vs length and year
+ggplot(d, aes(x = ln_length_cm, y = residuals_mfull, color = residuals_mfull)) +
+  geom_point(size = 0.1, alpha = 1) + 
+  geom_hline(yintercept = 0, size = 0.5, color = "black", linetype = 2, alpha = 0.5) +
+  labs(x = "ln(length)", y = "Residuals", color = "") +
+  stat_smooth(color = "black", size = 0.5) +
+  facet_wrap(~year, ncol = 5) +
+  scale_color_gradient2() + 
+  theme_classic(base_size = 12)
+
+ggsave("figures/supp/residuals_vs_length_and_year2.png", width = 6.5, height = 6.5, dpi = 600)
+
+ggplot(d, aes(year, ln_length_cm, z = residuals_mfull)) +
+  stat_summary_2d(bins = 40) +
+  scale_fill_gradient2()
+
+ggsave("figures/supp/residuals_vs_length_and_year2.png", width = 6.5, height = 6.5, dpi = 600)
+```
+
+## Calculate the annual condition factor
+
+```{r annual condition factor, message=FALSE,cache=TRUE}
+# From these models, predict annual condition factor
+# I will use the prediction grid with ALL covariates set to 0, incl. depth, temp and oxygen
+# Grabbing the number of cells to help with calculating the average
+ncells <- filter(pred_grid_avg, year == max(pred_grid_avg$year)) %>% nrow()
+
+# Use the `area` argument here to turn the total into an average by giving it one over the number of cells
+pred_avg <- predict(mfull, newdata = pred_grid_avg, return_tmb_object = TRUE, area = 1/ncells)
+
+# Make a little helper function... bias correction shouldn't do anything here because of the identity link
+get_average_condition <- function(obj, level = 0.95, ...)  {
+  sdmTMB:::get_generic(obj, value_name = "link_total",
+                       bias_correct = FALSE, level = level, trans = I, ...)
+}
+
+avg_pred <- get_average_condition(pred_avg)
+```
+
+## Plot condition factor, condition vs length, size-distribution and cv
+
+```{r plot condition intex and condition factor, message=FALSE}
+cond_inde <- avg_pred %>%
+  ggplot(., aes(year, est)) +
+  ylab("log(condition factor)") +
+  geom_point(size = 1.8) +
+  geom_errorbar(aes(x = year, ymax = upr, ymin = lwr),
+                width = 0.5, alpha = 0.8) +
+  #scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  labs(x = "Year") +
+  theme(plot.margin = unit(c(0.4, 0.4, 0.4, 0), "cm")) +
+  NULL
+  
+# Now add in the Le Cren condition index for d
+mean_tw_intercept <- mean(mfull$sd_report$par.random[1:27])
+d$le_cren <- d$weight_g / (exp(mean_tw_intercept)*d$length_cm^2.98)
+
+# Plot CV
+cv <- d %>% 
+  group_by(year) %>% 
+  summarise(cv = sd(le_cren) / mean(le_cren)) %>% 
+  ungroup() %>% 
+  mutate(year_n = as.numeric(year)) %>% 
+  as.data.frame() %>% 
+  ggplot(., aes(x = year_n, y = cv)) +
+  #stat_smooth(method = "gam", formula = y ~ s(x, k = 3), color = "tomato", size = 1.2, alpha = 0.5) +
+  stat_smooth(method = "lm", color = "tomato", size = 1.2, alpha = 0.5) + 
+  geom_point(size = 3, shape = 21, fill = "black", color = "white") +
+  labs(x = "Year", y = "CV", color = "Quantiles") +
+  theme(plot.margin = unit(c(0.4, 0.4, 0.4, 0), "cm")) +
+  NULL
+
+# Plot change in condition over size
+# Plot the slopes
+cond_year_slopes <- d %>%
+  mutate(lenCls = cut(length_cm, breaks = seq(0, 150, 10)),
+         lenCls_fct = factor(lenCls)) %>% 
+  mutate(year_ct = year - 1993) %>% 
+  split(.$lenCls_fct) %>%
+  purrr::map(~lm(le_cren ~ year_ct, data = .x)) %>%
+  purrr::map_df(broom::tidy, .id = 'lenCls_fct') %>%
+  filter(term %in% c('year_ct', "(Intercept)")) %>% 
+  dplyr::select(-c(statistic, p.value)) %>% 
+  filter(term == "year_ct")
+
+cond_slope_fig <- cond_year_slopes %>% 
+  separate(lenCls_fct, c("lwr", "upr"), sep = ",") %>%
+  separate(upr, c("upr", "scrap"), sep = "]") %>%
+  dplyr::select(-scrap) %>% 
+  mutate(upr_num = as.numeric(upr)) %>% 
+  #filter(upr_num > 10 & upr_num < 70) %>%
+  filter(upr_num > 10 & upr_num < 80) %>% 
+  ggplot(., aes(as.factor(upr_num), estimate)) +
+  geom_hline(yintercept = 0, alpha = 0.5, linetype = 2) +
+  geom_point(size = 1, position = position_dodge(width = 0.5)) + 
+  geom_errorbar(aes(x = as.factor(upr_num),
+                    ymax = estimate + 1.96*std.error,
+                    ymin = estimate - 1.96*std.error),
+                width = 0.3, position = position_dodge(width = 0.5)) +
+  labs(y = "Slope (condition factor ~ year)", x = "") +
+  NULL
+
+size_dist <- ggplot(d, aes(length_cm)) +
+  geom_density(alpha = 0.8, fill = "gray70", color = "gray50") +
+  #coord_cartesian(expand = 0, xlim = c(14, 66), ylim = c(0, 0.031)) +
+  coord_cartesian(expand = 0, xlim = c(14, 76), ylim = c(0, 0.031)) + 
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 7)) +
+  labs(y = "Density", x = "Length-class (upper value)") +
+  NULL
+
+cond_slope_fig / size_dist + plot_layout(heights = c(3, 1))
+
+cond_inde + cond_slope_fig + cv + size_dist + 
+  plot_annotation(tag_levels = 'A') +
+  plot_layout(ncol = 2, widths = c(1.5, 1))
+
+ggsave("figures/cond_index_sizes_change_cv.png", width = 6.5, height = 6.5, dpi = 600)
+
+# Plot quantiles...
+d %>% 
+  group_by(year) %>% 
+  summarise(q10 = hutils::weighted_quantile(v = le_cren, p = c(0.1)),
+            q50 = hutils::weighted_quantile(v = le_cren, p = c(0.5)),
+            q90 = hutils::weighted_quantile(v = le_cren, p = c(0.9))) %>% 
+  ungroup() %>% 
+  pivot_longer(2:4, names_to = "quantiles", values_to = "le_cren") %>% 
+  group_by(quantiles) %>% 
+  #mutate(le_cren_ct = le_cren - mean(le_cren)) %>% 
+  ggplot(., aes(year, le_cren, color = factor(quantiles), fill = factor(quantiles))) +
+  stat_smooth() + 
+  stat_smooth(se = FALSE) + 
+  guides(fill = FALSE) +
+  labs(x = "Year", y = "Le Cren's condition index", color = "Quantiles") +
+  scale_color_brewer(palette = "Dark2") +
+  scale_fill_brewer(palette = "Dark2") +
+  theme(aspect.ratio = 1, legend.position = c(0.85, 0.85), legend.background = element_blank()) + 
+  geom_point() 
+
+ggsave("figures/supp/le_cren_quantiles.png", width = 5, height = 7.5, dpi = 600)
+```
+
 ```{r extract coefficients, message=FALSE}
 # Extract random and fixed coefficients from the full model
 mfull_est <- bind_rows(tidy(mfull, effects = "ran_par", conf.int = TRUE) %>%
                          filter(term %in% c("sigma_O", "sigma_E")),
                        tidy(mfull, effects = "fixed", conf.int = TRUE) %>%
-                         filter(!term %in% c("ln_length_cm"))) %>%
-  mutate(Model = "Oxygen model") %>%
+                         filter(!term %in% c("ln_length_cm_ct"))) %>%
   mutate(term = factor(term)) %>%
   mutate(term = recode(term,
                        "oxy_sc" = "Oxygen",
@@ -208,115 +408,78 @@ mfull_est <- bind_rows(tidy(mfull, effects = "ran_par", conf.int = TRUE) %>%
 
 # Plot effects
 ggplot(mfull_est, aes(reorder(term, estimate), estimate)) +
+  geom_hline(yintercept = 0, linetype = 2, color = "red", alpha = 0.5) +
   geom_point(size = 2) +
   geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +
-  geom_hline(yintercept = 0, linetype = 2, color = "gray") +
   labs(x = "", y = "Standardized coefficient") +
-  theme_classic(base_size = 16) +
-  coord_flip()
+    scale_x_discrete(breaks = levels(mfull_est$term),
+                   labels = c(expression(Herring[rec]),
+                              expression(Herring[sd]),
+                              expression(Sprat[rec]),
+                              expression(Sprat[sd]),
+                              expression(Cod[rec]),
+                              expression(Cod[haul]),
+                              expression(Flounder[rec]),
+                              expression(Flounder[haul]),
+                              expression(Depth[haul]),
+                              expression(paste(Depth[haul]~"\u00D7"~Oxygen[haul])),
+                              expression(paste(Depth[haul]~"\u00D7"~Temp.[haul])),
+                              expression(Oxygen[haul]),
+                              expression(paste(Oxygen[haul]~"\u00D7"~Temp[haul])),
+                              expression(sigma[E]),
+                              expression(sigma[O]),
+                              expression(Temp[haul]))) +
+  coord_flip() +
+  theme(plot.margin = unit(c(0.4, 0.4, 0.4, 0), "cm")) +
+  
+ggsave("figures/effect_size.png", width = 4.5, height = 6.5, dpi = 600)
 
-ggsave("figures/analysis/effect_sizes.png", width = 5, height = 7.5, dpi = 600)
-```
-
-Plot the annual condition factor
-
-```{r annual condition factor, message=FALSE,cache=TRUE}
-# From these models, predict annual condition factor
-# Grabbing the number of cells to help with calculating the average
-ncells <- filter(pred_grid2, year == max(pred_grid2$year)) %>% nrow()
-
-pred_grid_oxy <- pred_grid2 %>% drop_na(oxy)
-
-pred_grid_oxy <- pred_grid_oxy %>% 
-  mutate(cpue_fle_sc = 0,
-         cpue_fle_rec_sc = 0,
-         cpue_cod_sc = 0,
-         cpue_cod_rec_sc = 0,
-         abun_spr_sc = 0,
-         abun_spr_sd_sc = 0,
-         abun_her_sc = 0,
-         abun_her_sd_sc = 0)
-
-# For now I set all covariates to zero, but if we want to calculate annual averages with covariates (e.g. oxygen), then we should fit the model with oxygen centered to the mean in the prediction grid.
-
-# Use the `area` argument here to turn the total into an average by giving it one over the number of cells
-preds_mfull <- predict(mfull, newdata = pred_grid_oxy, return_tmb_object = TRUE, area = 1/ncells)
-
-# Make a little helper function... bias correction shouldn't do anything here because of the identity link
-get_average_condition <- function(obj, level = 0.95, ...)  {
-  sdmTMB:::get_generic(obj, value_name = "link_total",
-                       bias_correct = FALSE, level = level, trans = I, ...)
-}
-
-avg_mfull <- get_average_condition(preds_mfull)
-
-avg_mfull %>%
-  ggplot(., aes(year, est)) +
-  ylab("Average log(condition factor)") +
+# Just a test to see the labels were alright
+effect_sizes <- ggplot(mfull_est, aes(reorder(term, estimate), estimate)) +
+  geom_hline(yintercept = 0, linetype = 2, color = "red", alpha = 0.5) +
   geom_point(size = 2) +
-  geom_errorbar(aes(x = year, ymax = upr, ymin = lwr),
-                width = 0.2, alpha = 0.8) +
-  theme(axis.text.x = element_text(angle = 30),
-        legend.position = c(0.8, 0.8)) +
-  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
-  labs(x = "Year") +
-  theme_classic(base_size = 14) + 
-  theme(aspect.ratio = 0.75) +
-  NULL
-
-ggsave("figures/analysis/condition_index.png", width = 6.5, height = 6.5, dpi = 600)
-
-# Plot the average condition factor as a function of year
-d %>% 
-  group_by(year) %>% 
-  summarise(mean_temp = mean(temp)) %>% 
-  bind_cols(avg_mfull$est) %>% 
-  rename("condition_factor" = "...3") %>% 
-  ggplot(., aes(mean_temp, condition_factor)) +
-    labs(x = "Mean temperature in condition data", y = "Annual condition factor") +
-    geom_point(size = 2) + 
-    theme_classic(base_size = 12) +
-
-ggsave("figures/supp/condition_index_temperature.png", width = 6.5, height = 6.5, dpi = 600)
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +
+  labs(x = "", y = "Standardized coefficient") +
+  coord_flip()
 ```
 
-We can make a prediction over a grid with the oxygen values values at each location across time `pred_grid2`, but keeping all other covariates at their means:
+## We can make a prediction over a grid with the oxygen, temperature and depth values values at each location across time `pred_grid2`, but keeping all other covariates at their means
   
 ```{r predict on grid with oxygen & depth & temp, message=FALSE, fig.width=12}
-pred_grid2 <- pred_grid2 %>% 
-  mutate(cpue_fle_sc = 0,
-         cpue_fle_rec_sc = 0,
-         cpue_cod_sc = 0,
-         cpue_cod_rec_sc = 0,
-         abun_spr_sc = 0,
-         abun_spr_sd_sc = 0,
-         abun_her_sc = 0,
-         abun_her_sd_sc = 0)
+pred2 <- predict(mfull, newdata = pred_grid2)
 
-poxy2 <- predict(mfull, newdata = pred_grid2)
+pal <- wes_palette("Zissou1", 21, type = "continuous")
 
-# Replace too-deep predictions with NA
-poxy2 <- poxy2 %>% mutate(est2 = ifelse(depth > 120, NA, est))
+ggplot(swe_coast_proj) +
+  geom_raster(data = pred2, aes(x = X*1000, y = Y*1000, fill = est)) +
+  geom_sf(size = 0.3) +
+  # scale_fill_viridis(option = "magma", name = "log(condition factor)") +
+  scale_fill_gradientn(colours = rev(pal), name = "log(condition factor)") + 
+  facet_wrap(~ year, ncol = 5) +
+  labs(x = "Longitude", y = "Latitude") +
+  theme_facet_map() +
+  theme(strip.text = element_text(size = 8, colour = 'black', margin = margin()),
+        strip.background = element_rect(fill = "grey90"))
 
-ggplot(poxy2, aes(X, Y, fill = est2)) +
-  geom_raster() +
-  facet_wrap(~year, ncol = 5) +
-  scale_fill_viridis(option = "magma",
-                     name = "log(condition factor)") +
-  geom_sf(data = world, inherit.aes = F, size = 0.2) +
-  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
-  labs(x = "lon", y = "lat") + 
-  theme_classic(base_size = 10) + 
-  theme(legend.position = c(0.7, 0.05),
-        axis.text.x = element_text(angle = 90),
-        axis.text = element_text(size = 6),
-        legend.direction = "horizontal")
+ggsave("figures/supp/allyrs_condition_map.png", width = 6.5, height = 6.5, dpi = 600)
 
-ggsave("figures/analysis/condition_map.png", width = 6.5, height = 6.5, dpi = 600)
+# And a smaller map for selected years
+ggplot(swe_coast_proj) +
+  geom_raster(data = filter(pred2, year %in% c(1993, 2001, 2008, 2018)),
+              aes(x = X*1000, y = Y*1000, fill = est)) +
+  geom_sf(size = 0.3) +
+  scale_fill_gradientn(colours = rev(pal), name = "log(condition factor)") + 
+  facet_wrap(~ year, ncol = 2) +
+  labs(x = "Longitude", y = "Latitude") +
+  theme_facet_map() +
+  theme(strip.text = element_text(size = 8, colour = 'black', margin = margin()),
+        strip.background = element_rect(fill = "grey90"))
+
+ggsave("figures/condition_map.png", width = 6.5, height = 6.5, dpi = 600)
 ```
 
 ```{r gganimate condition, message=FALSE}
-# p <- ggplot(poxy2, aes(X, Y, fill = est2)) +
+# p <- ggplot(poxy2, aes(X, Y, fill = est)) +
 #   geom_raster() +
 #   scale_fill_viridis(option = "magma",
 #                      name = "log(condition factor)") +
@@ -336,41 +499,84 @@ ggsave("figures/analysis/condition_map.png", width = 6.5, height = 6.5, dpi = 60
 # anim_save(filename = "/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/cod_condition/R/analysis/condition_model_files/cond_oxy.gif")
 ```
 
-Visualize marginal effects
+## Plot spatial and spatiotemporal random effects:
+  
+```{r spatial omega map, message=FALSE, fig.width=12}
+# Plot spatiotemporal random effect
+ggplot(swe_coast_proj) +
+  geom_raster(data = pred2, aes(x = X * 1000, y = Y * 1000, fill = epsilon_st)) +
+  geom_sf(size = 0.3) +
+  scale_fill_gradient2() +
+  facet_wrap(~ year, ncol = 5) +
+  labs(x = "Longitude", y = "Latitude") +
+  ggtitle("Spatiotemporal random effects") +
+  theme_facet_map()
 
-```{r marginal effects of oxygen, message=FALSE, cache=TRUE}
-# Prepare prediction data frame
-nd_oxy <- data.frame(oxy_sc = seq(min(d$oxy_sc), max(d$oxy_sc), length.out = 100))
+ggsave("figures/supp/cond_epsilon_st_map.png", width = 6.5, height = 6.5, dpi = 600)
 
-nd_oxy <- nd_oxy %>%
-  mutate(year = 2003L,
-         ln_length_cm = 0,
-         depth_sc = 0,
-         temp_sc = 0,
-         cpue_fle_sc = 0,
-         cpue_fle_rec_sc = 0,
-         cpue_cod_sc = 0,
-         cpue_cod_rec_sc = 0,
-         abun_spr_sc = 0,
-         abun_spr_sd_sc = 0,
-         abun_her_sc = 0,
-         abun_her_sd_sc = 0)
+# Plot spatial random effect
+ggplot(swe_coast_proj) + 
+  geom_raster(data = filter(pred2, year == 1999), aes(x = X * 1000, y = Y * 1000, fill = omega_s)) +
+  geom_sf(size = 0.3) +
+  scale_fill_gradient2() +
+  facet_wrap(~ year, ncol = 5) +
+  labs(x = "Longitude", y = "Latitude") +
+  theme_light(base_size = 10) + 
+  ggtitle("Spatial random effects")
 
-# Predict from full model (AIC-selected)
-p_margin_oxy <- predict(mfull, newdata = nd_oxy, se_fit = TRUE, re_form = NA)
-
-ggplot(p_margin_oxy, aes(oxy_sc, est,
-                         ymin = est - 1.96 * est_se, ymax = est + 1.96 * est_se)) +
-  geom_ribbon(alpha = 0.4) + geom_line() +
-  scale_color_brewer(palette = "Set1") +
-  scale_fill_brewer(palette = "Set1") +
-  theme(legend.position = c(0.1, 0.9))
-
-# # What is the difference in predicted weight? Approximately 5%. Still considerable variation!
-# exp(-4.475 + 2.98*log(50)) / exp(-4.525 + 2.98*log(50))
+ggsave("figures/supp/cond_omega_s_map.png", width = 6.5, height = 6.5, dpi = 600)
 ```
 
-Depth
+## Calculate the "spatial trend" from the estimates:
+  
+```{r calculate "spatial trend", message=FALSE}
+# Fit a linear model to each prediction grid of the estimate over time
+# https://community.rstudio.com/t/extract-slopes-by-group-broom-dplyr/2751/7
+# time_slopes_by_year <- pred2 %>%
+#   mutate(id = paste(lon, lat, sep = "_")) %>%
+#   split(.$id) %>%
+#   purrr::map(~lm(est ~ year, data = .x)) %>%
+#   purrr::map_df(broom::tidy, .id = 'id') %>%
+#   filter(term == 'year')
+# 
+# # Plot the slopes
+# time_slopes_by_year2 <- time_slopes_by_year %>%
+#   separate(id, c("X", "Y"), sep = "_") %>%
+#   mutate(X = as.numeric(X),
+#          Y = as.numeric(Y))
+# 
+# ggplot(swe_coast_proj) + 
+#   geom_raster(data = time_slopes_by_year2, aes(x = X * 1000, y = Y * 1000, fill = estimate)) +
+#   geom_sf(size = 0.3) +
+#   scale_fill_gradient2(midpoint = 0) +
+#   facet_wrap(~ year, ncol = 5) +
+#   labs(x = "Longitude", y = "Latitude") +
+#   theme_light(base_size = 10) + 
+#   ggtitle("Time slopes by each pred grid")
+# 
+# # Plot the upper CI
+# ggplot(swe_coast_proj) + 
+#   geom_raster(data = time_slopes_by_year2, aes(x = X * 1000, y = Y * 1000, fill = estimate + std.error*1.96)) +
+#   geom_sf(size = 0.3) +
+#   scale_fill_gradient2(midpoint = 0) +
+#   facet_wrap(~ year, ncol = 5) +
+#   labs(x = "Longitude", y = "Latitude") +
+#   theme_light(base_size = 10) + 
+#   ggtitle("Upper CI of time slopes by each pred grid") +
+# 
+# # Lower CI
+# ggplot(swe_coast_proj) + 
+#   geom_raster(data = time_slopes_by_year2, aes(x = X * 1000, y = Y * 1000, fill = estimate - std.error*1.96)) +
+#   geom_sf(size = 0.3) +
+#   scale_fill_gradient2(midpoint = 0) +
+#   facet_wrap(~ year, ncol = 5) +
+#   labs(x = "Longitude", y = "Latitude") +
+#   theme_light(base_size = 10) + 
+#   ggtitle("Lower CI of time slopes by each pred grid")
+``` 
+
+## Visualize marginal effects
+### Depth
 
 ```{r marginal effects of depth, message=FALSE, cache=TRUE}
 # Prepare prediction data frame
@@ -378,7 +584,7 @@ nd_dep <- data.frame(depth_sc = seq(min(d$depth_sc), max(d$depth_sc), length.out
 
 nd_dep <- nd_dep %>%
   mutate(year = 2003L,
-         ln_length_cm = 0,
+         ln_length_cm_ct = 0,
          oxy_sc = 0,
          temp_sc = 0,
          cpue_fle_sc = 0,
@@ -393,141 +599,146 @@ nd_dep <- nd_dep %>%
 # Predict from full model (AIC-selected)
 p_margin_dep <- predict(mfull, newdata = nd_dep, se_fit = TRUE, re_form = NA)
 
-ggplot(p_margin_dep, aes(depth_sc, est,
-                         ymin = est - 1.96 * est_se, ymax = est + 1.96 * est_se)) +
-  geom_ribbon(alpha = 0.4) + geom_line() +
-  scale_color_brewer(palette = "Set1") +
-  scale_fill_brewer(palette = "Set1") +
-  theme(legend.position = c(0.1, 0.9))
+mar_dep <- ggplot(p_margin_dep, aes(depth_sc, est, ymin = est - 1.96 * est_se, ymax = est + 1.96 * est_se)) +
+  geom_ribbon(alpha = 0.4) +
+  geom_line() +
+  coord_cartesian(ylim = c(-4.65, -4.4)) + 
+  theme(aspect.ratio = 1) + 
+  labs(x = expression(Depth[haul]))
 ```
 
-Plot spatial random effects:
-  
-```{r spatial omega map, message=FALSE, fig.width=12}
-# Replace too-deep predictions with NA and filter a single year
-poxy3 <- poxy2 %>% mutate(omega_s2 = ifelse(depth > 120, NA, omega_s)) %>% filter(year == 1999)
+### Oxygen 
 
-ggplot(poxy3, aes(X, Y, fill = omega_s2)) +
-  geom_raster() +
-  scale_fill_gradient2() +
-  geom_sf(data = world, inherit.aes = F, size = 0.2) +
-  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
-  ggtitle("Spatial random field") +
-  theme_classic(base_size = 12) +
-  labs(x = "lon", y = "lat")
+```{r marginal effects of oxygen, message=FALSE, cache=TRUE}
+# Prepare prediction data frame
+nd_oxy <- data.frame(oxy_sc = seq(min(d$oxy_sc), max(d$oxy_sc), length.out = 100))
+
+nd_oxy <- nd_oxy %>%
+  mutate(year = 2003L,
+         ln_length_cm_ct = 0,
+         depth_sc = 0,
+         temp_sc = 0,
+         cpue_fle_sc = 0,
+         cpue_fle_rec_sc = 0,
+         cpue_cod_sc = 0,
+         cpue_cod_rec_sc = 0,
+         abun_spr_sc = 0,
+         abun_spr_sd_sc = 0,
+         abun_her_sc = 0,
+         abun_her_sd_sc = 0)
+
+# Predict from full model (AIC-selected)
+p_margin_oxy <- predict(mfull, newdata = nd_oxy, se_fit = TRUE, re_form = NA)
+
+mar_oxy <- ggplot(p_margin_oxy, aes(oxy_sc, est, ymin = est - 1.96 * est_se, ymax = est + 1.96 * est_se)) +
+  geom_ribbon(alpha = 0.4) +
+  geom_line() +
+  coord_cartesian(ylim = c(-4.65, -4.4)) + 
+  theme(aspect.ratio = 1) + 
+  labs(x = expression(Oxygen[haul]))
+
+# # What is the difference in predicted weight? Approximately 5%.
+# exp(-4.475 + 2.98*log(50)) / exp(-4.525 + 2.98*log(50))
 ```
 
-Calculate the "spatial trend" from the estimates:
-  
-```{r calculate "spatial trend", message=FALSE}
-# Fit a linear model to each prediction grid of the estimate over time
-# https://community.rstudio.com/t/extract-slopes-by-group-broom-dplyr/2751/7
-time_slopes_by_year <- poxy2 %>%
-  drop_na(est2) %>%
-  mutate(id = paste(lon, lat, sep = "_")) %>%
-  split(.$id) %>%
-  purrr::map(~lm(est2 ~ year, data = .x)) %>%
-  purrr::map_df(broom::tidy, .id = 'id') %>%
-  filter(term == 'year')
+### Temperature
 
-# Plot the slopes
-time_slopes_by_year %>%
-  separate(id, c("X", "Y"), sep = "_") %>%
-  mutate(X = as.numeric(X),
-         Y = as.numeric(Y)) %>%
-  ggplot(., aes(X, Y, fill = estimate)) +
-  geom_raster() +
-  scale_fill_gradient2(midpoint = 0) +
-  #scale_fill_viridis() +
-  geom_sf(data = world, inherit.aes = F, size = 0.2) +
-  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
-  ggtitle("Time slopes by each pred grid") +
-  theme_classic(base_size = 12) +
-  labs(x = "lon", y = "lat")
+```{r marginal effects of temperature, message=FALSE, cache=TRUE}
+# Prepare prediction data frame
+nd_tem <- data.frame(temp_sc = seq(min(d$temp_sc), max(d$temp_sc), length.out = 100))
 
-# Plot the standard errors
-time_slopes_by_year %>%
-  separate(id, c("X", "Y"), sep = "_") %>%
-  mutate(X = as.numeric(X),
-         Y = as.numeric(Y)) %>%
-  ggplot(., aes(X, Y, fill = std.error)) +
-  geom_raster() +
-  scale_fill_viridis() +
-  geom_sf(data = world, inherit.aes = F, size = 0.2) +
-  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
-  ggtitle("standard error of time slopes by each pred grid") +
-  labs(x = "lon", y = "lat")
+nd_tem <- nd_tem %>%
+  mutate(year = 2003L,
+         ln_length_cm_ct = 0,
+         oxy_sc = 0,
+         depth_sc = 0,
+         cpue_fle_sc = 0,
+         cpue_fle_rec_sc = 0,
+         cpue_cod_sc = 0,
+         cpue_cod_rec_sc = 0,
+         abun_spr_sc = 0,
+         abun_spr_sd_sc = 0,
+         abun_her_sc = 0,
+         abun_her_sd_sc = 0)
 
-# Plot the upper CI
-time_slopes_by_year %>%
-  separate(id, c("X", "Y"), sep = "_") %>%
-  mutate(X = as.numeric(X),
-         Y = as.numeric(Y)) %>%
-  ggplot(., aes(X, Y, fill = estimate + std.error*1.96)) +
-  geom_raster() +
-  scale_fill_gradient2(midpoint = 0) +
-  geom_sf(data = world, inherit.aes = F, size = 0.2) +
-  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
-  ggtitle("Upper CI of time slopes by each pred grid") +
-  labs(x = "lon", y = "lat")
+# Predict from full model (AIC-selected)
+p_margin_tem <- predict(mfull, newdata = nd_tem, se_fit = TRUE, re_form = NA)
 
-# Lower CI
-time_slopes_by_year %>%
-  separate(id, c("X", "Y"), sep = "_") %>%
-  mutate(X = as.numeric(X),
-         Y = as.numeric(Y)) %>%
-  ggplot(., aes(X, Y, fill = estimate - std.error*1.96)) +
-  geom_raster() +
-  scale_fill_gradient2(midpoint = 0) +
-  geom_sf(data = world, inherit.aes = F, size = 0.2) +
-  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
-  ggtitle("Lower CI of time slopes by each pred grid") +
-  labs(x = "lon", y = "lat")
-``` 
-
-### Plot residuals
-```{r extract residuals}
-df <- data.frame(d)
-
-df$residuals_mfull <- residuals(mfull)
-
-qqnorm(df$residuals_mfull); abline(a = 0, b = 1)
-
-# Residuals vs length
-ggplot(df, aes(ln_length_cm, residuals_mfull)) +
-  geom_point(alpha = 0.1, color = "grey20") + 
-  geom_abline(color = "red", slope = 0, linetype = 2) +
-  geom_smooth()
-
-ggsave("figures/supp/residuals_vs_length.png", width = 6.5, height = 6.5, dpi = 600)
-
-# Residuals vs length and year
-ggplot(df, aes(x = year, y = ln_length_cm, color = residuals_mfull)) +
-  geom_point(size = 0.1, alpha = 1) + 
-  scale_color_gradient2()
-
-ggsave("figures/supp/residuals_vs_length_and_year.png", width = 6.5, height = 6.5, dpi = 600)
-
-ggplot(df, aes(x = ln_length_cm, y = residuals_mfull, color = residuals_mfull)) +
-  geom_point(size = 0.1, alpha = 1) + 
-  geom_hline(yintercept = 0, size = 0.5, color = "black", linetype = 2, alpha = 0.5) +
-  labs(x = "ln(length)", y = "Residuals", color = "") +
-  stat_smooth(color = "black", size = 0.5) +
-  facet_wrap(~year, ncol = 5) +
-  scale_color_gradient2() + 
-  theme_classic(base_size = 12)
-
-ggsave("figures/supp/residuals_vs_length_and_year2.png", width = 6.5, height = 6.5, dpi = 600)
-
-ggplot(df, aes(year, ln_length_cm, z = residuals_mfull)) +
-  stat_summary_2d(bins = 40) +
-  scale_fill_gradient2()
-
-ggsave("figures/supp/residuals_vs_length_and_year2.png", width = 6.5, height = 6.5, dpi = 600)
-
-ggplot(df, aes(year, length_cm, z = residuals_mfull)) +
-  stat_summary_2d(bins = 40) +
-  scale_fill_gradient2()
-
-ggsave("figures/supp/residuals_vs_length_and_year3.png", width = 6.5, height = 6.5, dpi = 600)
+mar_temp <- ggplot(p_margin_tem, aes(temp_sc, est, ymin = est - 1.96 * est_se, ymax = est + 1.96 * est_se)) +
+  geom_ribbon(alpha = 0.4) +
+  geom_line() +
+  coord_cartesian(ylim = c(-4.65, -4.4)) + 
+  theme(aspect.ratio = 1) + 
+  labs(x = expression(Temperature[haul]))
 ```
+
+### Cod
+
+```{r marginal effects of cod, message=FALSE, cache=TRUE}
+# Prepare prediction data frame
+nd_cod <- data.frame(cpue_cod_sc = seq(min(d$cpue_cod_sc), max(d$cpue_cod_sc), length.out = 100))
+
+nd_cod <- nd_cod %>%
+  mutate(year = 2003L,
+         ln_length_cm_ct = 0,
+         oxy_sc = 0,
+         temp_sc = 0,
+         cpue_fle_sc = 0,
+         cpue_fle_rec_sc = 0,
+         depth_sc = 0,
+         cpue_cod_rec_sc = 0,
+         abun_spr_sc = 0,
+         abun_spr_sd_sc = 0,
+         abun_her_sc = 0,
+         abun_her_sd_sc = 0)
+
+# Predict from full model (AIC-selected)
+p_margin_cod <- predict(mfull, newdata = nd_cod, se_fit = TRUE, re_form = NA)
+
+mar_cod <- ggplot(p_margin_cod, aes(cpue_cod_sc, est, ymin = est - 1.96 * est_se, ymax = est + 1.96 * est_se)) +
+  geom_ribbon(alpha = 0.4) +
+  geom_line() +
+  coord_cartesian(ylim = c(-4.65, -4.4)) + 
+  theme(aspect.ratio = 1) + 
+  labs(x = expression(Cod[haul]))
+```
+
+### Sprat
+
+```{r marginal effects of sprat, message=FALSE, cache=TRUE}
+# Prepare prediction data frame
+nd_spr <- data.frame(abun_spr_sd_sc = seq(min(d$abun_spr_sd_sc), max(d$abun_spr_sd_sc), length.out = 100))
+
+nd_spr <- nd_spr %>%
+  mutate(year = 2003L,
+         ln_length_cm_ct = 0,
+         oxy_sc = 0,
+         temp_sc = 0,
+         cpue_fle_sc = 0,
+         cpue_fle_rec_sc = 0,
+         depth_sc = 0,
+         cpue_cod_sc = 0,
+         cpue_cod_rec_sc = 0,
+         abun_spr_sc = 0,
+         abun_her_sc = 0,
+         abun_her_sd_sc = 0)
+
+# Predict from full model (AIC-selected)
+p_margin_spr <- predict(mfull, newdata = nd_spr, se_fit = TRUE, re_form = NA)
+
+mar_spr <- ggplot(p_margin_spr, aes(abun_spr_sd_sc, est, ymin = est - 1.96 * est_se, ymax = est + 1.96 * est_se)) +
+  geom_ribbon(alpha = 0.4) +
+  geom_line() +
+  coord_cartesian(ylim = c(-4.65, -4.4)) + 
+  theme(aspect.ratio = 1) + 
+  labs(x = expression(Sprat[sd]))
+```
+
+### Plot together
+```{r}
+mar_dep + mar_oxy + mar_temp + mar_cod + mar_spr + 
+  plot_annotation(tag_levels = 'A') 
+
+ggsave("figures/supp/marginal_effects.png", width = 6.5, height = 6.5, dpi = 600)
+```
+
