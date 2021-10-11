@@ -20,7 +20,7 @@
 rm(list = ls())
 
 # Load libraries, install if needed
-library(tidyverse); theme_set(theme_classic())
+library(tidyverse); theme_set(theme_light(base_size = 12))
 library(readxl)
 library(tidylog)
 library(RCurl)
@@ -54,32 +54,84 @@ library(geosphere)
 # [22] tidyr_1.1.0        tibble_3.0.3       ggplot2_3.3.2      tidyverse_1.3.0 
 
 # For adding maps to plots
+# These are the ranges I'm thinking of using. Convert these to UTM!
+ymin = 54
+ymax = 58
+xmin = 12
+xmax = 22
+
 world <- ne_countries(scale = "medium", returnclass = "sf")
 
-# Specify map ranges
-# ymin = 54; ymax = 58; xmin = 9.5; xmax = 22
-ymin = 54; ymax = 58; xmin = 12.5; xmax = 22
+map_data <- rnaturalearth::ne_countries(
+  scale = "medium",
+  returnclass = "sf", continent = "europe")
 
-# Make plot function
-plot_map_raster <- function(dat, column = "est") {
-  ggplot(dat, aes_string("X", "Y", fill = column)) +
-    geom_raster() +
-    facet_wrap(~year) +
-    coord_fixed() +
-    scale_fill_viridis_c() +
-    geom_sf(data = world, inherit.aes = F, size = 0.2) +
-    coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax))
-}
+swe_coast <- suppressWarnings(suppressMessages(
+  st_crop(map_data,
+          c(xmin = xmin, ymin = ymin, xmax = xmax, ymax = ymax))))
+
+# Transform our map into UTM 9 coordinates, which is the equal-area projection we fit in:
+utm_zone33 <- 32633
+swe_coast_proj <- sf::st_transform(swe_coast, crs = utm_zone33)
 
 
 # B. READ HAUL DATA ================================================================
 # Read data (length-specific CPUE) 
 # Unit is #Catch in numbers per hour of hauling"
-# In theory I could convert to "Catch per km2" or rather "Biomass per km2" to get the
-# same unit as in Sean Anderson...
+# I will convert to biomass[kg] / h
 cpue <- read.csv("data/DATRAS_cpue_length_haul/CPUE per length per haul per hour_2020-09-25 16_15_36.csv")
 
-head(cpue)
+# Add UTM coords
+# Function
+LongLatToUTM <- function(x, y, zone){
+  xy <- data.frame(ID = 1:length(x), X = x, Y = y)
+  coordinates(xy) <- c("X", "Y")
+  proj4string(xy) <- CRS("+proj=longlat +datum=WGS84")  ## for example
+  res <- spTransform(xy, CRS(paste("+proj=utm +zone=",zone," ellps=WGS84",sep='')))
+  return(as.data.frame(res))
+}
+
+utm_coords <- LongLatToUTM(cpue$ShootLong, cpue$ShootLat, zone = 33)
+cpue$X <- utm_coords$X/1000 # for computational reasons
+cpue$Y <- utm_coords$Y/1000 # for computational reasons
+
+# Add ICES areas via shapefiles
+# https://stackoverflow.com/questions/34272309/extract-shapefile-value-to-point-with-r
+# https://gis.ices.dk/sf/
+shape <- shapefile("data/ICES_StatRec_mapto_ICES_Areas/StatRec_map_Areas_Full_20170124.shp")
+head(shape)
+
+pts <- SpatialPoints(cbind(cpue$ShootLong, cpue$ShootLat), 
+                     proj4string = CRS(proj4string(shape)))
+
+cpue$subdiv <- over(pts, shape)$Area_27
+cpue$subdiv2 <- over(pts, shape)$AreasList
+
+# Rename subdivisions to the more common names and do some more filtering (by sub div and area)
+sort(unique(cpue$subdiv))
+
+cpue <- cpue %>% 
+  mutate(SubDiv = factor(subdiv),
+         SubDiv = fct_recode(subdiv,
+                             "24" = "3.d.24",
+                             "25" = "3.d.25",
+                             "26" = "3.d.26",
+                             "27" = "3.d.27",
+                             "28" = "3.d.28.1",
+                             "28" = "3.d.28.2"),
+         SubDiv = as.character(SubDiv)) %>% 
+  filter(SubDiv %in% c("24", "25", "26", "27", "28")) %>% 
+  filter(ShootLat > 54 & ShootLat < 58 & ShootLong < 22)
+
+ggplot(cpue, aes(X))
+
+ggplot(swe_coast_proj) +
+  geom_point(data = cpue, aes(x = X*1000, y = Y*1000, color = factor(SubDiv)), alpha = 0.8) +
+  geom_sf() +
+  scale_fill_brewer(palette = "Dark2") + 
+  theme_light(base_size = 12) +
+  labs(x = "Longitude", y = "Latitude")
+
 
 # Create a new ID column to distinguish hauls
 # Filter by species and convert length to cm, then add in ID
@@ -91,206 +143,77 @@ length(unique(cpue$ID))
 cpue <- cpue %>% filter(Species == "Gadus morhua")
 length(unique(cpue$ID))  
 
-# First check if this is unique by haul. Then I should get 1 row per ID and size...
+# First check if this ID is unique by haul. Then I should get 1 row per ID and size...
 cpue %>%
   group_by(ID, LngtClass) %>% 
   mutate(n = n()) %>% 
   ungroup() %>% 
   distinct(n)
 
-# # Test it's the same number of valid hauls as in the raw haul data
-# bits_hh <- read.csv("data/DATRAS_exchange/bits_hh.csv") %>% 
-#   mutate(ID = paste(Year, Quarter, Ship, Gear, HaulNo, ShootLat, ShootLong, sep = "."))
-# 
-# # Filter only valid hauls:
-# bits_hh <- bits_hh %>% filter(HaulVal == "V")
-# 
-# # Check that per ID, there's only one row
-# bits_hh %>%
-#   group_by(ID) %>% 
-#   mutate(n = n()) %>% 
-#   ungroup() %>% 
-#   distinct(n)
-# 
-# bits_hh %>%
-#   group_by(ID) %>% 
-#   mutate(n = n()) %>% 
-#   ungroup() %>% 
-#   filter(n == 2)
-# # Only 10 rows with n = 2, will remove
-# bits_hh <- bits_hh %>% 
-#   group_by(ID) %>% 
-#   mutate(n = n()) %>% 
-#   ungroup() %>% 
-#   filter(n == 1) %>% 
-#   dplyr::select(-n)
-# 
-# length(unique(bits_hh$ID))
-# length(unique(cpue$ID))
-# 
-# sort(unique(bits_hh$Year))
-# sort(unique(cpue$Year))
-# 
-# # Filter so that we have the same years (1991-2019)
-# bits_hh <- bits_hh %>% filter(Year < 2020 & Quarter == 4)
-# 
-# length(unique(bits_hh$ID))
-# length(unique(cpue$ID))
-# 
-# sort(unique(bits_hh$Year))
-# sort(unique(cpue$Year))
-# 
-# # Ok, which ID's are in the haul data but not in the CPUE data?
-# missing_ids <- bits_hh$ID[!bits_hh$ID %in% cpue$ID]
-# missing_ids
-# 
-# # "2019.4.26HF.TVS.68.57.0275.10.7215"
-# # ID = paste(Year, Quarter, Ship, Gear, HaulNo, ShootLat, ShootLong
-# 
-# # Check this ID in the cpue data... (it doesn't exist there but we can filter by almost all variables)
-# cpue %>% filter(Year == 2019 & Quarter == 4 & Ship == "26HF", Gear == "TVS") %>% arrange(desc(HaulNo)) %>% distinct(HaulNo)
-# 
-# # Ok, so there is no 68 HaulNo in the cpue data. Not sure why, but I will continue assuming that all the 0 hauls are present there...
+# Use only quarter 4
+cpue <- cpue %>% filter(Quarter == 4)
 
-# Remove hauls from outside the study area and select only quarter 4
-cpue <- cpue %>% 
-  filter(ShootLat < 58) %>% 
-  mutate(kattegatt = ifelse(ShootLat > 56 & ShootLong < 14, "Y", "N")) %>% 
-  filter(kattegatt == "N") %>% 
-  filter(Quarter == 4) %>% 
-  dplyr::select(-kattegatt)
+# Ensure we have 0 catches in the data as well. This number matches with Orio et al (2017)
+cpue %>% arrange(CPUE_number_per_hour)
+cpue %>% filter(CPUE_number_per_hour == 0)
+
+# What's the proportion of ID's that have zero catches?
+zero_catch_ids <- cpue %>%
+  group_by(ID) %>% 
+  mutate(sum_cpue_haul = sum(CPUE_number_per_hour)) %>% 
+  distinct(ID, .keep_all = TRUE) %>% 
+  filter(sum_cpue_haul == 0)
+  
+length(unique(zero_catch_ids$ID)) / length(unique(cpue$ID)) # 12% without catch... sounds right?
 
 # Now, calculate the weight based no their lengths, given the length-weight relationship
 # I have estimated in the condition script.
-cpue$log_length_cm <- log(cpue$length_cm)
-cpue$log_weight_g <- -4.6 + cpue$log_length_cm*2.98
-cpue$weight_g <- exp(cpue$log_weight_g)
-cpue$weight_kg <- cpue$weight_g / 100
-
-# Ensure we have 0 catches in the data as well
-#cpue %>% arrange(CPUE_number_per_hour)
-#cpue %>% filter(CPUE_number_per_hour == 0)
+cpue$weight_kg <- (0.01*cpue$length_cm^2.98) / 1000
+ggplot(filter(cpue, length_cm < 60), aes(length_cm, weight_kg)) + geom_point()
 
 # Calculate CPUE not in numbers per hour but kg per hour
-cpue <- cpue %>% mutate(CPUE_weight_per_hour = CPUE_number_per_hour*weight_kg)
+cpue <- cpue %>% mutate(CPUE_kg_per_hour = CPUE_number_per_hour*weight_kg)
 
-# Now calculate the sum of all CPUEs for each length class per haul
+# Now calculate the sum of all length-specific CPUEs by haul
 cpue_tot <- cpue %>% 
+  ungroup() %>% 
   group_by(ID) %>% 
-  mutate(CPUE_kg_hour_tot = sum(CPUE_weight_per_hour)) %>% 
+  mutate(CPUE_kg_hour_haul = sum(CPUE_kg_per_hour)) %>% 
   ungroup() %>% 
   distinct(ID, .keep_all = TRUE)
 
-# Test it worked, first by plotting n rows per ID
-cpue_tot %>% group_by(ID) %>% mutate(n = n()) %>% 
-  ggplot(., aes(factor(n))) + geom_bar()
+# Test it worked, calculate n rows per ID
+cpue_tot %>% group_by(ID) %>% mutate(n = n()) %>% ungroup() %>% distinct(n)
 
 # Next by calculating an example
 id <- unique(cpue_tot$ID)[99]
 
 cpue_tot %>%
   filter(ID == id) %>%
-  dplyr::select(ID, CPUE_kg_hour_tot)
+  dplyr::select(ID, CPUE_kg_hour_haul)
 
-sum(filter(cpue, ID == id)$CPUE_weight_per_hour)
+sum(filter(cpue, ID == id)$CPUE_kg_per_hour)
 # Correct! The data subset yields the same 
 
-#-- Testing if we can calculate area swept and by that remove the time dimension and 
-# go from catch per effort to biomasss per area
-# ** Looks like we can't to many rows missing door spread and distance trawled values
-# Now we need to join the haul-level data so that we can convert from cpue_kg/h to 
-# # kg/km^2
-# bits_hh <- read.csv("data/DATRAS_exchange/bits_hh.csv") %>%
-#   mutate(ID = paste(Year, Quarter, Ship, Gear, HaulNo, ShootLat, ShootLong, sep = ".")) %>% 
-#   filter(HaulVal == "V") # Filter valid hauls
-# 
-# # Filter the ID's that are already in the cpue data (see hashtagged code above)
-# bits_hh <- bits_hh %>% 
-#   filter(ID %in% cpue_tot$ID) %>% 
-#   arrange(ID)
-#   
-# # bits_hh2 %>% group_by(ID) %>% mutate(n = n()) %>% ungroup() %>% distinct(n)
-# # length(unique(bits_hh2$ID))
-# # length(unique(cpue_tot$ID))
-# 
-# bits_hh %>% filter(Distance > 0 & DoorSpread > 0)
-# # Ok, some rows without a distance measurement (57%!). Need to calculate distance for these
-# # rowwise based on the shoot and haul coordinates
-# 
-# # Short test
-# # df <- data.frame(long = 17.9483, lat = 57.0632)
-# # my_long <- 17.9385
-# # my_lat <- 57.0133
-# # df %>%
-# #   rowwise() %>%
-# #   mutate(dist = distm(c(my_long, my_lat), c(long, lat), fun=distHaversine))
-# # head(bits_hh2, 1)
-# 
-# # Calculate distance based on coordinates
-# distances <- bits_hh %>%
-#   rowwise() %>%
-#   mutate(dist_calculated = distm(c(ShootLong, ShootLat), c(HaulLong, HaulLat), fun = distHaversine)) %>% 
-#   mutate(dist_calculated = as.integer(dist_calculated)) %>% 
-#   dplyr::select(dist_calculated)
-# 
-# # I do not really trust the Distance column in the data set and will therefore use the
-# # calculated distance based on coordinates, so that it's the same for all rows and because
-# # I know there aren't any missing coordinates since then I can even calculate the ID properly
-# # The above plot shows it's OK though (roughly similar distances)
-# # Some rows have extremely small distance even when the coordinates clearly differ, check
-# # e.g. here: https://gps-coordinates.org/distance-between-coordinates.php
-# 
-# bits_hh$dist_calculated <- distances$dist_calculated
-# 
-# str(bits_hh)
-# 
-# # Plot and compare distances from the two sources
-# bits_hh %>% 
-#   filter(Distance > 0 & dist_calculated > 0) %>% 
-#   ggplot(., aes(Distance, dist_calculated)) + geom_point()
-# 
-# bits_hh %>% 
-#   filter(Distance > 0 & dist_calculated > 0) %>% 
-#   dplyr::select(Distance, dist_calculated)
-# 
-# bits_hh %>% 
-#   filter(Distance > 0 & dist_calculated > 0 & dist_calculated < 15000) %>% 
-#   ggplot(., aes(Distance, dist_calculated)) + geom_point()
-# 
-# # The reason the calculated distance is blowing up is because some HAUL coordinates are NA
-# bits_hh %>% 
-#   filter(dist_calculated > 15000)
-# 
-# # To deal with that, I will assign the distance based on the original distance column
-# bits_hh <- bits_hh %>% mutate(dist2 = ifelse(dist_calculated > 10000, Distance, dist_calculated))
-# 
-# ggplot(bits_hh, aes(Distance, dist2)) + geom_point()
-# 
-# ggplot(bits_hh, aes(dist2)) + geom_histogram()
-# 
-# # Ok, now that I have distance 
-# test <- bits_hh %>% filter(dist2 > 0)
-# 
-# # Do I have a do
-# test2 <- test %>% filter(DoorSpread > 0)
-# 
-# # Meh, if wewant data with a door spread estimate we omit 50% of rows!!! Cannot accept that
-#-- End test
+# Now quickly check mean CPUE by haul
+cpue_tot %>%
+  group_by(Year) %>%
+  summarise(mean_cpue = mean(CPUE_kg_hour_haul)) %>% 
+  ggplot(., aes(Year, mean_cpue)) + geom_point() + geom_hline(yintercept = 50)
 
-# Inspect
-# length(unique(t$ID))
-
+# Rename things
 dat <- cpue_tot %>%
-  rename("cpue" = "CPUE_kg_hour_tot",
+  rename("cpue" = "CPUE_kg_hour_haul",
          "year" = "Year",
          "lat" = "ShootLat",
          "lon" = "ShootLong",
          "quarter" = "Quarter",
-         "depth" = "Depth") %>% 
-  dplyr::select(cpue, year, lat, lon, quarter, depth)
+         "depth" = "Depth",
+         "gear" = "Gear") %>% 
+  dplyr::select(cpue, year, lat, lon, X, Y, quarter, depth, gear)
 
 
-# C. READ AND JOIN OCEANOGRAPHIC DATA ==============================================
+# D. READ AND JOIN OCEANOGRAPHIC DATA ==============================================
 # ** Depth =========================================================================
 west <- raster("data/depth_geo_tif/D5_2018_rgb-1.tif")
 #plot(west)
@@ -311,15 +234,6 @@ ggplot(dat, aes(depth_rast)) + geom_histogram()
 ggplot(dat, aes(depth, depth_rast)) + 
   geom_point() +
   geom_abline(color = "red")
-
-dat %>% 
-  filter(depth_rast < 0) %>% 
-  ggplot(., aes(lon, lat, color = depth_rast)) + 
-  scale_color_viridis() +
-  geom_sf(data = world, inherit.aes = F, size = 0.2, fill = NA) +
-  geom_point(size = 1) + 
-  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
-  NULL
 
 
 # ** Oxygen ========================================================================
@@ -823,36 +737,71 @@ colnames(dat)
 dat <- dat %>% dplyr::select(-id_temp, -id_oxy)
 
 
-# D. Add ICES areas ================================================================
-func <- 
-  getURL("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/R/functions/get_subdiv.R", 
-         ssl.verifypeer = FALSE)
-
-eval(parse(text = func))
-
-dat <- get_sub_div(dat = dat, lat = dat$lat, lon = dat$lon)
-
-# Filter sub divisions used for analysis
-dat <- dat %>%
-  drop_na(SubDiv) %>% 
-  filter(!SubDiv %in% c("22", "23"))
-
-ggplot(dat, aes(lon, lat, color = SubDiv)) +
-  geom_point() + 
-  facet_wrap(~ year) +
-  theme_classic(base_size = 12) + 
-  scale_color_brewer(palette = "Dark2", name = "Sub Division")
-
-ggsave("figures/supp/cpue_data_hauls.png", width = 6.5, height = 6.5, dpi = 600)
-
-
 # E. SAVE DATA =====================================================================
 head(dat)
 
 # Keep only the raster depth 
 dat <- dat %>% dplyr::select(-depth) %>% rename("depth" = "depth_rast")
 
-unique(dat$quarter)
-
 # Save data
 write.csv(dat, file = "data/for_analysis/mdat_cpue.csv", row.names = FALSE)
+
+
+# F. Filtering large cod for comparison with Orio et al 2017 =======================
+# Here I'm turning off cpue if cod are smaller than 30 cm. I do this instead of filtering
+# because if I filter, I remove 0 catches. Here, since I sum all catch-by-length wihin an ID,
+# I shouldn't have this problem
+large_cod <- cpue %>% 
+  ungroup() %>% 
+  mutate(CPUE_kg_per_hour = ifelse(length_cm < 30, 0, CPUE_kg_per_hour)) %>%  
+  group_by(ID) %>% 
+  mutate(CPUE_kg_hour_haul = sum(CPUE_kg_per_hour)) %>% 
+  ungroup() %>% 
+  distinct(ID, .keep_all = TRUE)
+
+cod <- bind_rows(mutate(large_cod, size = "Large"), mutate(cpue_tot, size = "All"))
+
+# Plot comparison with cpue of all sizes
+cod %>%
+  group_by(Year, size) %>% 
+  summarise(mean_cpue = mean(CPUE_kg_hour_haul)) %>% 
+  ggplot(., aes(Year, mean_cpue, color = size)) +
+  geom_point() +
+  geom_line() +
+  geom_hline(yintercept = 50)
+
+# Checking it works
+id <- unique(large_cod$ID)[99]
+
+large_cod %>%
+  data.frame() %>%
+  filter(ID == id) %>%
+  dplyr::select(ID, CPUE_kg_hour_haul)
+
+dd <- filter(cpue, ID == id & length_cm > 29)
+sum(dd$CPUE_kg_per_hour)
+
+# Filter sub divisions used for analysis
+large_cod <- large_cod %>%
+  drop_na(SubDiv) %>% 
+  filter(!SubDiv %in% c("22", "23"))
+
+utm_coords <- LongLatToUTM(large_cod$ShootLong, large_cod$ShootLat, zone = 33)
+large_cod$X <- utm_coords$X/1000 # for computational reasons
+large_cod$Y <- utm_coords$Y/1000 # for computational reasons
+
+# Clean and save
+large_cod <- large_cod %>%
+  rename("cpue" = "CPUE_kg_hour_haul",
+         "year" = "Year",
+         "lat" = "ShootLat",
+         "lon" = "ShootLong",
+         "quarter" = "Quarter",
+         "depth" = "Depth",
+         "gear" = "Gear") %>% 
+  dplyr::select(cpue, year, lat, lon, quarter, depth, gear, X, Y, SubDiv)
+
+head(large_cod)
+
+# Save data
+write.csv(large_cod, file = "data/for_analysis/mdat_cpue_large.csv", row.names = FALSE)

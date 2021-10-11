@@ -1,0 +1,1248 @@
+---
+title: "Collate condition data"
+author: "Max Lindmark"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+  df_print: paged
+pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+  
+```{r setup, include = FALSE, cache=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 12,
+  fig.asp = 0.618,
+  fig.align ='center'
+)
+```
+
+# Intro
+In this script, I load exchange data from datras and extract CA data (i.e. biological data), which is used for the condition model. In theory I could have joined the CPUE data to the CA data and get all important covariates and variables (oxygen, depth, ices information, densities of cod and flounder). However, the CPUE data has been standardized with respect to trawl speed, gear dimension, sweep length and trawl duration. Because many haul id's did not have this information, the CPUE data has fewer id's. In order to not lose condition data because I don't have haul-level CPUE of cod and flounder, I will instead repeat the data cleaning process here, fit models to cod and flounder CPUE and predict at the location of the condition data.
+
+## Load libraries
+```{r, message=FALSE}
+rm(list = ls())
+
+library(tidyverse); theme_set(theme_light(base_size = 12))
+library(readxl)
+library(tidylog)
+library(RCurl)
+library(viridis)
+library(RColorBrewer)
+library(patchwork)
+library(janitor)
+library(icesDatras)
+library(mapdata)
+library(patchwork)
+library(rgdal)
+library(raster)
+library(sf)
+library(rgeos)
+library(chron)
+library(lattice)
+library(ncdf4)
+remotes::install_github("pbs-assess/sdmTMB"); library(sdmTMB)
+library(marmap)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(mapplots)
+library(geosphere)
+
+world <- ne_countries(scale = "medium", returnclass = "sf")
+```
+
+## Read data
+
+```{r, message=FALSE}
+# Read HH data
+# bits_hh <- getDATRAS(record = "HH", survey = "BITS", years = 1991:2020, quarters = 4)
+# write.csv(bits_hh, "data/DATRAS_exchange/bits_hh.csv")
+bits_hh <- read.csv("data/DATRAS_exchange/bits_hh.csv")
+
+# Read CA data
+# bits_ca <- getDATRAS(record = "CA", survey = "BITS", years = 1991:2020, quarters = 4)
+# write.csv(bits_ca, "data/DATRAS_exchange/bits_ca.csv")
+bits_ca <- read.csv("data/DATRAS_exchange/bits_ca.csv")
+```
+
+## Standardize catch data
+### Standardize ships
+
+```{r, message=FALSE}
+# Before creating a a new ID, make sure that countries and ships names use the same format
+sort(unique(bits_hh$Ship))
+
+# Change back to the old Ship name standard...
+# https://vocab.ices.dk/?ref=315
+# https://vocab.ices.dk/?ref=315
+# Assumptions:
+# SOL is Solea on ICES links above, and SOL1 is the older one of the two SOLs (1 and 2)
+# DAN is Dana
+# sweep %>% filter(Ship == "DANS") %>% distinct(Year, Country)
+# sweep %>% filter(Ship == "DAN2") %>% distinct(Year)
+# bits_hh %>% filter(Ship == "67BC") %>% distinct(Year, Country)
+# sweep %>% filter(Ship == "DAN2") %>% distinct(Year)
+# bits_hh %>% filter(Ship == "26D4") %>% distinct(Year) # Strange that 26DF doesn't extend far back. Which ship did the Danes use? Ok, I have no Danish data that old.
+# bits_hh %>% filter(Country == "DK") %>% distinct(Year)
+
+bits_hh <- bits_hh %>%
+  mutate(Ship2 = fct_recode(Ship,
+                            "SOL" = "06S1", 
+                            "SOL2" = "06SL",
+                            "DAN2" = "26D4",
+                            "HAF" = "26HF",
+                            "HAF" = "26HI",
+                            "HAF" = "67BC",
+                            "BAL" = "67BC",
+                            "ARG" = "77AR",
+                            "77SE" = "77SE",
+                            "AA36" = "AA36",
+                            "KOOT" = "ESLF",
+                            "KOH" = "ESTM",
+                            "DAR" = "LTDA",
+                            "ATLD" = "RUJB",
+                            "ATL" = "RUNT"), 
+         Ship2 = as.character(Ship2)) %>% 
+  mutate(Ship3 = ifelse(Country == "LV" & Ship2 == "BAL", "BALL", Ship2))
+
+bits_ca <- bits_ca %>%
+  mutate(Ship2 = fct_recode(Ship,
+                            "SOL" = "06S1", 
+                            "SOL2" = "06SL",
+                            "DAN2" = "26D4",
+                            "HAF" = "26HF",
+                            "HAF" = "26HI",
+                            "HAF" = "67BC",
+                            "BAL" = "67BC",
+                            "ARG" = "77AR",
+                            "77SE" = "77SE",
+                            "AA36" = "AA36",
+                            "KOOT" = "ESLF",
+                            "KOH" = "ESTM",
+                            "DAR" = "LTDA",
+                            "ATLD" = "RUJB",
+                            "ATL" = "RUNT"), 
+         Ship2 = as.character(Ship2)) %>% 
+  mutate(Ship3 = ifelse(Country == "LV" & Ship2 == "BAL", "BALL", Ship2))
+```
+
+### Standardize countries
+
+```{r, message=FALSE}
+# Now check which country codes are used
+sort(unique(bits_hh$Country))
+
+# https://www.nationsonline.org/oneworld/country_code_list.htm#E
+bits_hh <- bits_hh %>%
+  mutate(Country = fct_recode(Country,
+                              "DEN" = "DK",
+                              "EST" = "EE",
+                              "GFR" = "DE",
+                              "LAT" = "LV",
+                              "LTU" = "LT",
+                              "POL" = "PL",
+                              "RUS" = "RU",
+                              "SWE" = "SE"),
+         Country = as.character(Country))
+
+bits_ca <- bits_ca %>%
+  mutate(Country = fct_recode(Country,
+                              "DEN" = "DK",
+                              "EST" = "EE",
+                              "GFR" = "DE",
+                              "LAT" = "LV",
+                              "LTU" = "LT",
+                              "POL" = "PL",
+                              "RUS" = "RU",
+                              "SWE" = "SE"),
+         Country = as.character(Country))
+
+# Gear? Are they the same?
+sort(unique(bits_hh$Gear))
+```
+
+### Create a simple ID that works across all exchange data
+
+```{r, message=FALSE}
+# Create ID column
+bits_ca <- bits_ca %>% 
+  mutate(IDx = paste(Year, Quarter, Country, Ship, Gear, StNo, HaulNo, sep = "."))
+
+bits_hh <- bits_hh %>% 
+  mutate(IDx = paste(Year, Quarter, Country, Ship, Gear, StNo, HaulNo, sep = "."))
+
+# Works like a haul-id
+# bits_hh %>% group_by(IDx) %>% mutate(n = n()) %>% ungroup() %>% distinct(n)
+```
+
+### Create the same unique haul-ID in the cpue data that I have in the sweep-file
+
+```{r, message=FALSE}
+bits_hh <- bits_hh %>% 
+  mutate(haul.id = paste(Year, Quarter, Country, Ship3, Gear, StNo, HaulNo, sep = ":")) 
+```
+
+### Clean DATRAS EXCHANGE data
+
+```{r, message=FALSE}
+# Select just valid, additional and no oxygen hauls
+bits_hh <- bits_hh %>%
+  filter(HaulVal %in% c("A","N","V"))
+
+# Add ICES rectangle
+bits_hh$Rect <- mapplots::ices.rect2(lon = bits_hh$ShootLong, lat = bits_hh$ShootLat)
+
+# Add ICES subdivisions
+shape <- shapefile("data/ICES_StatRec_mapto_ICES_Areas/StatRec_map_Areas_Full_20170124.shp")
+
+pts <- SpatialPoints(cbind(bits_hh$ShootLong, bits_hh$ShootLat), 
+                     proj4string = CRS(proj4string(shape)))
+
+bits_hh$SD <- over(pts, shape)$Area_27
+
+# Rename subdivisions to the more common names and do some more filtering (by sub div and area)
+sort(unique(bits_hh$SD))
+
+bits_hh <- bits_hh %>% 
+  mutate(SD = factor(SD),
+         SD = fct_recode(SD,
+                         "20" = "3.a.20",
+                         "21" = "3.a.21",
+                         "22" = "3.c.22",
+                         "23" = "3.b.23",
+                         "24" = "3.d.24",
+                         "25" = "3.d.25",
+                         "26" = "3.d.26",
+                         "27" = "3.d.27",
+                         "28" = "3.d.28.1",
+                         "28" = "3.d.28.2",
+                         "29" = "3.d.29",
+                         "30" = "3.d.30"),
+         SD = as.character(SD)) 
+
+# Match columns from the HH data to the HL and CA data
+sort(unique(bits_hh$SD))
+sort(colnames(bits_hh))
+bits_hh_merge <- bits_hh %>% 
+                       dplyr::select(SD, Rect, HaulVal, StdSpecRecCode, BySpecRecCode,
+                                     IDx, ShootLat, ShootLong)
+
+bits_ca <- left_join(bits_ca, bits_hh_merge, by = "IDx")
+
+# Now filter the subdivisions I want from all data sets
+bits_hh <- bits_hh %>% filter(SD %in% c(24, 25, 26, 27, 28))
+bits_ca <- bits_ca %>% filter(SD %in% c(24, 25, 26, 27, 28))
+```
+
+### Now clean the CA data and go to 1 row 1 observation
+
+```{r, message=FALSE}
+bits_ca <- bits_ca %>% 
+  filter(SpecCode %in% c("164712", "126436") & Year < 2020) %>% 
+  mutate(Species = "Cod")
+
+# Now I need to copy rows with NoAtLngt > 1 so that 1 row = 1 ind
+# First make a small test
+# nrow(bits_ca)
+# test_id <- head(filter(bits_ca, CANoAtLngt == 5))$ID[1]
+# filter(bits_ca, ID == test_id & CANoAtLngt == 5)
+
+bits_ca <- bits_ca %>% map_df(., rep, .$CANoAtLngt)
+
+# head(data.frame(filter(bits_ca, ID == test_id & CANoAtLngt == 5)), 20)
+# nrow(bits_ca)
+# Looks ok!
+
+# Standardize length and drop NA weights (need that for condition)
+bits_ca <- bits_ca %>% 
+  drop_na(IndWgt) %>% 
+  drop_na(LngtClass) %>% 
+  filter(IndWgt > 0 & LngtClass > 0) %>%  # Filter positive length and weight
+  mutate(weight_g = IndWgt) %>% 
+  mutate(length_cm = ifelse(LngtCode == ".", 
+                            LngtClass/10,
+                            LngtClass)) # Standardize length (https://vocab.ices.dk/?ref=18)
+
+# Plot
+ggplot(bits_ca, aes(IndWgt, length_cm)) +
+  geom_point() + 
+  facet_wrap(~Year)
+
+# Remove apparent outlier
+bits_ca <- bits_ca %>%
+  mutate(keep = ifelse(Year == 2010 & IndWgt > 12500, "N", "Y")) %>% 
+  filter(keep == "Y") %>% dplyr::select(-keep)
+
+ggplot(bits_ca, aes(IndWgt, length_cm)) +
+  geom_point() + 
+  facet_wrap(~Year)
+
+# Rename things and select specific columns
+dat <- bits_ca %>% rename("year" = "Year",
+                          "lat" = "ShootLat",
+                          "lon" = "ShootLong",
+                          "quarter" = "Quarter",
+                          "ices_rect" = "Rect") %>% 
+  dplyr::select(weight_g, length_cm, year, lat, lon, quarter, IDx, ices_rect, SD)
+
+# > nrow(dat)
+# [1] 98863
+```
+
+## Add in the environmental variables
+### Depth
+
+```{r}
+# Read the tifs
+west <- raster("data/depth_geo_tif/D5_2018_rgb-1.tif")
+#plot(west)
+
+east <- raster("data/depth_geo_tif/D6_2018_rgb-1.tif")
+# plot(east)
+
+dep_rast <- raster::merge(west, east)
+
+dat$depth <- extract(dep_rast, dat[, 5:4])
+
+# Convert to depth (instead of elevation)
+ggplot(dat, aes(depth)) + geom_histogram()
+dat$depth <- (dat$depth - max(drop_na(dat)$depth)) *-1
+ggplot(dat, aes(depth)) + geom_histogram()
+```
+
+### Oxygen
+
+```{r}
+# Downloaded from here: https://resources.marine.copernicus.eu/?option=com_csw&view=details&product_id=BALTICSEA_REANALYSIS_BIO_003_012
+# Extract raster points: https://gisday.wordpress.com/2014/03/24/extract-raster-values-from-points-using-r/comment-page-1/
+# https://rpubs.com/boyerag/297592
+# https://pjbartlein.github.io/REarthSysSci/netCDF.html#get-a-variable
+# Open the netCDF file
+ncin <- nc_open("data/NEMO_Nordic_SCOBI/dataset-reanalysis-scobi-monthlymeans_1610091357600.nc")
+
+print(ncin)
+
+# Get longitude and latitude
+lon <- ncvar_get(ncin,"longitude")
+nlon <- dim(lon)
+head(lon)
+
+lat <- ncvar_get(ncin,"latitude")
+nlat <- dim(lat)
+head(lat)
+
+# Get time
+time <- ncvar_get(ncin,"time")
+time
+
+tunits <- ncatt_get(ncin,"time","units")
+nt <- dim(time)
+nt
+tunits
+
+# Get oxygen
+dname <- "o2b"
+
+oxy_array <- ncvar_get(ncin,dname)
+dlname <- ncatt_get(ncin,dname,"long_name")
+dunits <- ncatt_get(ncin,dname,"units")
+fillvalue <- ncatt_get(ncin,dname,"_FillValue")
+dim(oxy_array)
+
+# Get global attributes
+title <- ncatt_get(ncin,0,"title")
+institution <- ncatt_get(ncin,0,"institution")
+datasource <- ncatt_get(ncin,0,"source")
+references <- ncatt_get(ncin,0,"references")
+history <- ncatt_get(ncin,0,"history")
+Conventions <- ncatt_get(ncin,0,"Conventions")
+
+# Convert time: split the time units string into fields
+tustr <- strsplit(tunits$value, " ")
+tdstr <- strsplit(unlist(tustr)[3], "-")
+tmonth <- as.integer(unlist(tdstr)[2])
+tday <- as.integer(unlist(tdstr)[3])
+tyear <- as.integer(unlist(tdstr)[1])
+
+# Here I deviate from the guide a little bit. Save this info:
+dates <- chron(time, origin = c(tmonth, tday, tyear))
+
+# Crop the date variable
+months <- as.numeric(substr(dates, 2, 3))
+years <- as.numeric(substr(dates, 8, 9))
+years <- ifelse(years > 90, 1900 + years, 2000 + years)
+
+# Replace netCDF fill values with NA's
+oxy_array[oxy_array == fillvalue$value] <- NA
+
+# We only use Quarter 4 in this analysis, so now we want to loop through each time step,
+# and if it is a good month save it as a raster.
+# First get the index of months that correspond to Q4
+months
+
+index_keep <- which(months > 9)
+
+oxy_q4 <- oxy_array[, , index_keep]
+
+months_keep <- months[index_keep]
+
+years_keep <- years[index_keep]
+
+# Now we have an array with only Q4 data...
+# We need to now calculate the average within a year.
+# Get a sequence that takes every third value between 1: number of months (length)
+loop_seq <- seq(1, dim(oxy_q4)[3], by = 3)
+
+# Create objects that will hold data
+dlist <- list()
+oxy_10 <- c()
+oxy_11 <- c()
+oxy_12 <- c()
+oxy_ave <- c()
+
+# Loop through the vector sequence with every third value, then take the average of
+# three consecutive months (i.e. q4)
+for(i in loop_seq) {
+  
+  oxy_10 <- oxy_q4[, , (i)]
+  oxy_11 <- oxy_q4[, , (i + 1)]
+  oxy_12 <- oxy_q4[, , (i + 2)]
+  
+  oxy_ave <- (oxy_10 + oxy_11 + oxy_12) / 3
+  
+  list_pos <- ((i/3) - (1/3)) + 1 # to get index 1:n(years)
+  
+  dlist[[list_pos]] <- oxy_ave
+  
+}
+
+# Now name the lists with the year:
+names(dlist) <- unique(years_keep)
+
+# Now I need to make a loop where I extract the raster value for each year...
+# The cpue data is called dat so far in this script
+
+# Filter years in the cpue data frame to only have the years I have oxygen for
+d_sub_oxy <- dat %>% filter(year %in% names(dlist)) %>% droplevels()
+
+# Create data holding object
+data_list <- list()
+
+# ... And for the oxygen raster
+raster_list <- list()
+
+# Create factor year for indexing the list in the loop
+d_sub_oxy$year_f <- as.factor(d_sub_oxy$year)
+
+# Loop through each year and extract raster values for the cpue data points
+for(i in unique(d_sub_oxy$year_f)) {
+  
+  # Set plot limits
+  ymin = 54; ymax = 58; xmin = 12; xmax = 22
+
+  # Subset a year
+  oxy_slice <- dlist[[i]]
+  
+  # Create raster for that year (i)
+  r <- raster(t(oxy_slice), xmn = min(lon), xmx = max(lon), ymn = min(lat), ymx = max(lat),
+              crs = CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs+ towgs84=0,0,0"))
+  
+  # Flip...
+  r <- flip(r, direction = 'y')
+  
+  #plot(r, main = i)
+  
+  # Filter the same year (i) in the cpue data and select only coordinates
+  d_slice <- d_sub_oxy %>% filter(year_f == i) %>% dplyr::select(lon, lat)
+  
+  # Make into a SpatialPoints object
+  data_sp <- SpatialPoints(d_slice)
+  
+  # Extract raster value (oxygen)
+  rasValue <- raster::extract(r, data_sp)
+  
+  # Now we want to plot the results of the raster extractions by plotting the cpue
+  # data points over a raster and saving it for each year.
+  # Make the SpatialPoints object into a raster again (for pl)
+  df <- as.data.frame(data_sp)
+  
+  # Add in the raster value in the df holding the coordinates for the cpue data
+  d_slice$oxy <- rasValue
+  
+  # Add in which year
+  d_slice$year <- i
+  
+  # Create a index for the data last where we store all years (because our loop index
+  # i is not continuous, we can't use it directly)
+  index <- as.numeric(d_slice$year)[1] - 1992
+  
+  # Add each years' data in the list
+  data_list[[index]] <- d_slice
+  
+  # Save to check each year is ok! First convert the raster to points for plotting
+  # (so that we can use ggplot)
+  map.p <- rasterToPoints(r)
+  
+  # Make the points a dataframe for ggplot
+  df_rast <- data.frame(map.p)
+  
+  # Rename y-variable and add year
+  df_rast <- df_rast %>% rename("oxy" = "layer") %>% mutate(year = i)
+  
+  # Add each years' raster data frame in the list
+  raster_list[[index]] <- df_rast
+  
+  # Make appropriate column headings
+  colnames(df_rast) <- c("Longitude", "Latitude", "oxy")
+  
+  # Now make the map
+  ggplot(data = df_rast, aes(y = Latitude, x = Longitude)) +
+    geom_raster(aes(fill = oxy)) +
+    geom_point(data = d_slice, aes(x = lon, y = lat, fill = oxy),
+               color = "black", size = 5, shape = 21) +
+    theme_bw() +
+    geom_sf(data = world, inherit.aes = F, size = 0.2) +
+    coord_sf(xlim = c(xmin, xmax),
+             ylim = c(ymin, ymax)) +
+    scale_colour_gradientn(colours = rev(terrain.colors(10)),
+                           limits = c(-200, 400)) +
+    scale_fill_gradientn(colours = rev(terrain.colors(10)),
+                         limits = c(-200, 400)) +
+    NULL
+  
+  ggsave(paste("figures/supp/cpue_oxygen_rasters/", i,".png", sep = ""),
+         width = 6.5, height = 6.5, dpi = 600)
+  
+}
+
+# Now create a data frame from the list of all annual values
+big_dat_oxy <- dplyr::bind_rows(data_list)
+big_raster_dat_oxy <- dplyr::bind_rows(raster_list)
+
+# Plot data, looks like there's big inter-annual variation but a negative trend over time
+big_raster_dat_oxy %>%
+  group_by(year) %>%
+  drop_na(oxy) %>%
+  summarise(mean_oxy = mean(oxy)) %>%
+  mutate(year_num = as.numeric(year)) %>%
+  ggplot(., aes(year_num, mean_oxy)) +
+  geom_point(size = 2) +
+  stat_smooth(method = "lm") +
+  NULL
+
+big_raster_dat_oxy %>%
+  group_by(year) %>%
+  drop_na(oxy) %>%
+  mutate(dead = ifelse(oxy < 0, "Y", "N")) %>%
+  filter(dead == "Y") %>%
+  mutate(n = n(),
+         year_num = as.numeric(year)) %>%
+  ggplot(., aes(year_num, n)) +
+  geom_point(size = 2) +
+  stat_smooth(method = "lm") +
+  NULL
+
+# Now add in the new oxygen column in the original data:
+str(d_sub_oxy)
+str(big_dat_oxy)
+
+# Create an ID for matching the oxygen data with the cpue data
+dat$id_oxy <- paste(dat$year, dat$lon, dat$lat, sep = "_")
+big_dat_oxy$id_oxy <- paste(big_dat_oxy$year, big_dat_oxy$lon, big_dat_oxy$lat, sep = "_")
+
+# Which id's are not in the cpue data (dat)?
+ids <- dat$id_oxy[!dat$id_oxy %in% c(big_dat_oxy$id_oxy)]
+
+unique(ids)
+
+# Select only the columns we want to merge
+big_dat_sub_oxy <- big_dat_oxy %>% dplyr::select(id_oxy, oxy)
+
+# Remove duplicate ID (one oxy value per id)
+big_dat_sub_oxy2 <- big_dat_sub_oxy %>% distinct(id_oxy, .keep_all = TRUE)
+# big_dat_sub_oxy %>% group_by(id_oxy) %>% mutate(n = n()) %>% arrange(desc(n))
+
+# Join the data with raster-derived oxygen with the full cpue data
+dat <- left_join(dat, big_dat_sub_oxy2, by = "id_oxy")
+
+# Now the unit of oxygen is mmol/m3. I want it to be ml/L. The original model is in unit ml/L
+# and it's been converted by the data host. Since it was converted without accounting for
+# pressure or temperature, I can simply use the following conversion factor:
+# 1 ml/l = 103/22.391 = 44.661 μmol/l -> 1 ml/l = 0.044661 mmol/l = 44.661 mmol/m^3 -> 0.0223909 ml/l = 1mmol/m^3
+# https://ocean.ices.dk/tools/unitconversion.aspx
+
+dat$oxy <- dat$oxy * 0.0223909
+
+# Drop NA oxygen
+dat <- dat %>% drop_na(oxy)
+```
+
+### Temperature
+
+```{r}
+# Open the netCDF file
+ncin <- nc_open("data/NEMO_Nordic_SCOBI/dataset-reanalysis-nemo-monthlymeans_1608127623694.nc")
+
+print(ncin)
+
+# Get longitude and latitude
+lon <- ncvar_get(ncin,"longitude")
+nlon <- dim(lon)
+head(lon)
+
+lat <- ncvar_get(ncin,"latitude")
+nlat <- dim(lat)
+head(lat)
+
+# Get time
+time <- ncvar_get(ncin,"time")
+time
+
+tunits <- ncatt_get(ncin,"time","units")
+nt <- dim(time)
+nt
+tunits
+
+# Get temperature
+dname <- "bottomT"
+
+temp_array <- ncvar_get(ncin,dname)
+dlname <- ncatt_get(ncin,dname,"long_name")
+dunits <- ncatt_get(ncin,dname,"units")
+fillvalue <- ncatt_get(ncin,dname,"_FillValue")
+dim(temp_array)
+
+# Get global attributes
+title <- ncatt_get(ncin,0,"title")
+institution <- ncatt_get(ncin,0,"institution")
+datasource <- ncatt_get(ncin,0,"source")
+references <- ncatt_get(ncin,0,"references")
+history <- ncatt_get(ncin,0,"history")
+Conventions <- ncatt_get(ncin,0,"Conventions")
+
+# Convert time: split the time units string into fields
+tustr <- strsplit(tunits$value, " ")
+tdstr <- strsplit(unlist(tustr)[3], "-")
+tmonth <- as.integer(unlist(tdstr)[2])
+tday <- as.integer(unlist(tdstr)[3])
+tyear <- as.integer(unlist(tdstr)[1])
+
+# Here I deviate from the guide a little bit. Save this info:
+dates <- chron(time, origin = c(tmonth, tday, tyear))
+
+# Crop the date variable
+months <- as.numeric(substr(dates, 2, 3))
+years <- as.numeric(substr(dates, 8, 9))
+years <- ifelse(years > 90, 1900 + years, 2000 + years)
+
+# Replace netCDF fill values with NA's
+temp_array[temp_array == fillvalue$value] <- NA
+
+# We only use Quarter 4 in this analysis, so now we want to loop through each time step,
+# and if it is a good month save it as a raster.
+# First get the index of months that correspond to Q4
+months
+
+index_keep <- which(months > 9)
+
+# Quarter 4 by keeping months in index_keep
+temp_q4 <- temp_array[, , index_keep]
+
+months_keep <- months[index_keep]
+
+years_keep <- years[index_keep]
+
+# Now we have an array with only Q4 data...
+# We need to now calculate the average within a year.
+# Get a sequence that takes every third value between 1: number of months (length)
+loop_seq <- seq(1, dim(temp_q4)[3], by = 3)
+
+# Create objects that will hold data
+dlist <- list()
+temp_10 <- c()
+temp_11 <- c()
+temp_12 <- c()
+temp_ave <- c()
+
+# Loop through the vector sequence with every third value, then take the average of
+# three consecutive months (i.e. q4)
+for(i in loop_seq) {
+  
+  temp_10 <- temp_q4[, , (i)]
+  temp_11 <- temp_q4[, , (i + 1)]
+  temp_12 <- temp_q4[, , (i + 2)]
+  
+  temp_ave <- (temp_10 + temp_11 + temp_12) / 3
+  
+  list_pos <- ((i/3) - (1/3)) + 1 # to get index 1:n(years)
+  
+  dlist[[list_pos]] <- temp_ave
+  
+}
+
+# Now name the lists with the year:
+names(dlist) <- unique(years_keep)
+
+# Now I need to make a loop where I extract the raster value for each year...
+# The cpue data is called dat so far in this script
+
+# Filter years in the cpue data frame to only have the years I have temperature for
+d_sub_temp <- dat %>% filter(year %in% names(dlist)) %>% droplevels()
+
+# Create data holding object
+data_list <- list()
+
+# ... And for the temperature raster
+raster_list <- list()
+
+# Create factor year for indexing the list in the loop
+d_sub_temp$year_f <- as.factor(d_sub_temp$year)
+
+# Loop through each year and extract raster values for the cpue data points
+for(i in unique(d_sub_temp$year_f)) {
+  
+  # Subset a year
+  temp_slice <- dlist[[i]]
+  
+  # Create raster for that year (i)
+  r <- raster(t(temp_slice), xmn = min(lon), xmx = max(lon), ymn = min(lat), ymx = max(lat),
+              crs = CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs+ towgs84=0,0,0"))
+  
+  # Flip...
+  r <- flip(r, direction = 'y')
+  
+  #plot(r, main = i)
+  
+  # Filter the same year (i) in the cpue data and select only coordinates
+  d_slice <- d_sub_temp %>% filter(year_f == i) %>% dplyr::select(lon, lat)
+  
+  # Make into a SpatialPoints object
+  data_sp <- SpatialPoints(d_slice)
+  
+  # Extract raster value (temperature)
+  rasValue <- raster::extract(r, data_sp)
+  
+  # Now we want to plot the results of the raster extractions by plotting the cpue
+  # data points over a raster and saving it for each year.
+  # Make the SpatialPoints object into a raster again (for pl)
+  df <- as.data.frame(data_sp)
+  
+  # Add in the raster value in the df holding the coordinates for the cpue data
+  d_slice$temp <- rasValue
+  
+  # Add in which year
+  d_slice$year <- i
+  
+  # Create a index for the data last where we store all years (because our loop index
+  # i is not continuous, we can't use it directly)
+  index <- as.numeric(d_slice$year)[1] - 1992
+  
+  # Add each years' data in the list
+  data_list[[index]] <- d_slice
+  
+  # Save to check each year is ok! First convert the raster to points for plotting
+  # (so that we can use ggplot)
+  map.p <- rasterToPoints(r)
+  
+  # Make the points a dataframe for ggplot
+  df_rast <- data.frame(map.p)
+  
+  # Rename y-variable and add year
+  df_rast <- df_rast %>% rename("temp" = "layer") %>% mutate(year = i)
+  
+  # Add each years' raster data frame in the list
+  raster_list[[index]] <- df_rast
+  
+  # Make appropriate column headings
+  colnames(df_rast) <- c("Longitude", "Latitude", "temp")
+  
+  # Now make the map
+  ggplot(data = df_rast, aes(y = Latitude, x = Longitude)) +
+    geom_raster(aes(fill = temp)) +
+    geom_point(data = d_slice, aes(x = lon, y = lat, fill = temp),
+               color = "black", size = 5, shape = 21) +
+    theme_bw() +
+    geom_sf(data = world, inherit.aes = F, size = 0.2) +
+    coord_sf(xlim = c(min(dat$lon), max(dat$lon)),
+             ylim = c(min(dat$lat), max(dat$lat))) +
+    scale_colour_gradientn(colours = rev(terrain.colors(10)),
+                           limits = c(2, 17)) +
+    scale_fill_gradientn(colours = rev(terrain.colors(10)),
+                         limits = c(2, 17)) +
+    NULL
+  
+  ggsave(paste("figures/supp/cpue_temp_rasters/", i,".png", sep = ""),
+         width = 6.5, height = 6.5, dpi = 600)
+  
+}
+
+# Now create a data frame from the list of all annual values
+big_dat_temp <- dplyr::bind_rows(data_list)
+big_raster_dat_temp <- dplyr::bind_rows(raster_list)
+
+big_dat_temp %>% drop_na(temp) %>% summarise(max = max(temp))
+big_dat_temp %>% drop_na(temp) %>% summarise(min = min(temp))
+
+# Plot data, looks like there's big inter-annual variation but a positive trend
+big_raster_dat_temp %>%
+  group_by(year) %>%
+  drop_na(temp) %>%
+  summarise(mean_temp = mean(temp)) %>%
+  mutate(year_num = as.numeric(year)) %>%
+  ggplot(., aes(year_num, mean_temp)) +
+  geom_point(size = 2) +
+  stat_smooth(method = "lm") +
+  NULL
+
+# Now add in the new temperature column in the original data:
+str(d_sub_temp)
+str(big_dat_temp)
+
+# Create an ID for matching the temperature data with the cpue data
+dat$id_temp <- paste(dat$year, dat$lon, dat$lat, sep = "_")
+big_dat_temp$id_temp <- paste(big_dat_temp$year, big_dat_temp$lon, big_dat_temp$lat, sep = "_")
+
+# Which id's are not in the cpue data (dat)? (It's because I don't have those years, not about the location)
+ids <- dat$id_temp[!dat$id_temp %in% c(big_dat_temp$id_temp)]
+
+unique(ids)
+
+# Select only the columns we want to merge
+big_dat_sub_temp <- big_dat_temp %>% dplyr::select(id_temp, temp)
+
+# Remove duplicate ID (one temp value per id)
+big_dat_sub_temp2 <- big_dat_sub_temp %>% distinct(id_temp, .keep_all = TRUE)
+
+# Join the data with raster-derived oxygen with the full cpue data
+dat <- left_join(dat, big_dat_sub_temp2, by = "id_temp")
+
+colnames(dat)
+
+dat <- dat %>% dplyr::select(-id_temp, -id_oxy)
+
+# Drop NA temp
+dat <- dat %>% drop_na(temp)
+```
+
+## Add UTM coords
+
+```{r}
+# First add UTM coords
+# Add UTM coords
+# Function
+LongLatToUTM <- function(x, y, zone){
+  xy <- data.frame(ID = 1:length(x), X = x, Y = y)
+  coordinates(xy) <- c("X", "Y")
+  proj4string(xy) <- CRS("+proj=longlat +datum=WGS84")  ## for example
+  res <- spTransform(xy, CRS(paste("+proj=utm +zone=",zone," ellps=WGS84",sep='')))
+  return(as.data.frame(res))
+}
+
+utm_coords <- LongLatToUTM(dat$lon, dat$lat, zone = 33)
+dat$X <- utm_coords$X/1000 # for computational reasons
+dat$Y <- utm_coords$Y/1000 # for computational reasons
+```
+
+## Add cod and flounder density covariates
+### First by fitting models and then predicting to `dat`
+```{r, message=FALSE, cache=TRUE}
+d <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cpue.csv")
+
+# Calculate standardized variables
+d <- d %>% 
+  mutate(oxy_sc = oxy,
+         temp_sc = temp,
+         depth_sc = depth,
+         ) %>%
+  mutate_at(c("oxy_sc", "temp_sc", "depth_sc"),
+            ~(scale(.) %>% as.vector)) %>% 
+  mutate(year = as.integer(year)) %>% 
+  drop_na(oxy, depth, temp) %>% 
+  rename("density_cod" = "density") # to fit better with how flounder is named
+
+# Also for the condition data which we predict on
+dat <- dat %>% 
+  mutate(oxy_sc = (oxy - mean(d$oxy))/sd(d$oxy),
+         temp_sc = (temp - mean(d$temp))/sd(d$temp),
+         depth_sc = (depth - mean(d$depth))/sd(d$depth)) %>%
+  mutate(year = as.integer(year))
+
+hist(dat$oxy_sc)
+hist(dat$temp_sc)
+hist(dat$depth_sc)
+
+# Explore data a bit
+ggplot(d) + 
+  geom_point(aes(year, density_cod, color = factor(SD))) + 
+  facet_wrap(~SD)
+
+# Explore data a bit
+ggplot(d) + 
+  geom_point(aes(year, density_fle, color = factor(SD))) + 
+  facet_wrap(~SD)
+
+# Make mesh:
+spde <- make_mesh(d, xy_cols = c("X", "Y"),
+                  n_knots = 200, 
+                  type = "kmeans", seed = 42)
+
+plot(spde)
+
+# Depth spline + oxy spline
+# Cod model
+mcod <- sdmTMB(density_cod ~ 0 + as.factor(year) + s(depth_sc, k = 3) + s(oxy_sc, k = 3) + s(temp_sc, k = 3),
+               data = d, spde = spde, family = tweedie(link = "log"),
+               fields = "AR1", include_spatial = TRUE, time = "year",
+               spatial_only = FALSE, reml = FALSE,
+               control = sdmTMBcontrol(newton_steps = 1))
+
+tidy(mcod, conf.int = TRUE)
+
+# Check residuals of models
+d$residualsmcod <- residuals(mcod)
+qqnorm(d$residualsmcod); abline(a = 0, b = 1)
+
+mfle <- sdmTMB(density_fle ~ 0 + as.factor(year) + s(depth_sc, k = 3) + s(oxy_sc, k = 3) + s(temp_sc, k = 3),
+               data = d, spde = spde, family = tweedie(link = "log"),
+               fields = "AR1", include_spatial = TRUE, time = "year",
+               spatial_only = FALSE, reml = FALSE,
+               control = sdmTMBcontrol(newton_steps = 1))
+
+tidy(mfle, conf.int = TRUE)
+
+# Check residuals of models
+d$residualsmfle <- residuals(mfle)
+qqnorm(d$residualsmfle); abline(a = 0, b = 1)
+```
+
+#### I want to explore the flounder model a little bit more before I trust it, because in contrast to cod, I haven't done so yet
+
+```{r, cache=TRUE}
+# Read in pred_grid2 which has oxygen values at location and time and depth:
+pred_grid2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid2.csv")
+
+# Standardize data with respect to prediction grid:
+pred_grid2 <- pred_grid2 %>%
+  mutate(year = as.integer(year)) %>% 
+  filter(year %in% c(unique(d$year))) %>% 
+  mutate(depth_sc = (depth - mean(d$depth))/sd(d$depth),
+         temp_sc = (temp - mean(d$temp))/sd(d$temp),
+         oxy_sc = (oxy - mean(d$oxy))/sd(d$oxy)) %>% # Need to scale these to the mean and sd in the data!
+  drop_na(oxy, depth, temp)
+
+# Specify map ranges
+ymin = 54; ymax = 58; xmin = 12; xmax = 22
+
+map_data <- rnaturalearth::ne_countries(
+  scale = "medium",
+  returnclass = "sf", continent = "europe")
+
+# Crop the polygon for plotting and efficiency:
+# st_bbox(map_data) # find the rough coordinates
+swe_coast <- suppressWarnings(suppressMessages(
+  st_crop(map_data,
+          c(xmin = xmin, ymin = ymin, xmax = xmax, ymax = ymax))))
+
+# Transform our map into UTM 33 coordinates, which is the equal-area projection we fit in:
+utm_zone33 <- 32633
+swe_coast_proj <- sf::st_transform(swe_coast, crs = utm_zone33)
+
+# Predict on the pred grid, calculate index
+preds_fle <- predict(mfle, newdata = pred_grid2, return_tmb_object = TRUE, area = 2*2)
+index <- get_index(preds_fle, bias_correct = FALSE)
+index <- index %>% mutate(est_t = est/1000, lwr_t = lwr/1000, upr_t = upr/1000)
+
+# Plot index
+ggplot() +
+  geom_line(data = index, aes(year, est_t, color = "blue")) +
+  geom_ribbon(data = index, aes(year, ymin = lwr_t, ymax = upr_t, fill = "blue"), alpha = 0.4) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 20)) +
+  scale_color_brewer(palette = "Dark2") +
+  scale_fill_brewer(palette = "Dark2") +
+  guides(color = FALSE) + 
+  labs(x = "Year", y = "Tonnes", fill = "Sub Divisions", label = "") +
+  theme_light(base_size = 11) +
+  theme(axis.text.x = element_text(angle = 30),
+        legend.position = c(0.8, 0.8),
+        legend.background = element_blank()) +
+  NULL
+
+# Calculate an index that corresponds to the average so that I can compare it to the data
+ncells <- filter(pred_grid2, year == max(pred_grid2$year)) %>% nrow()
+preds_fle_ave <- predict(mfle, newdata = pred_grid2, return_tmb_object = TRUE, area = 1/ncells)
+index_ave <- get_index(preds_fle_ave, bias_correct = FALSE)
+
+d_sum <- d %>%
+  ungroup() %>%
+  group_by(year) %>%
+  summarise(mean_density_fle = mean(density_fle))
+
+ggplot(index_ave, aes(year, est, color = "prediction")) +
+  geom_line() +
+  geom_ribbon(aes(ymin = lwr, ymax = upr, fill = "prediction"), alpha = 0.1) +
+  geom_point(data = d_sum, aes(year, mean_density_fle, color = "data", size = 1.1)) +
+  geom_line(data = d_sum, aes(year, mean_density_fle, color = "data"), linetype = 2) +
+  scale_color_brewer(palette = "Dark2") +
+  scale_fill_brewer(palette = "Dark2") +
+  guides(fill = FALSE) +
+  labs(x = "Year", y = expression(paste("Density [kg/", km^2, "]", sep = ""))) +
+  NULL
+
+# Plot predictions on map
+ggplot(swe_coast_proj) +
+  geom_raster(data = preds_fle$data, aes(x = X * 1000, y = Y * 1000, fill = exp(est))) +
+  geom_sf(size = 0.3) +
+  scale_fill_viridis_c(trans = "sqrt") +
+  facet_wrap(~ year, ncol = 5) +
+  labs(x = "Longitude", y = "Latitude", fill = expression(kg/km^2)) +
+  ggtitle("Predicted density (fixed + random)")
+
+## Interesting! Now predict these model on dat - i.e. the condition data so that I can use those as covariates
+```
+
+#### Now make the predictions from the cpue models to the condition data
+
+```{r, message=FALSE}
+predict_mcod <- predict(mcod, newdata = dat)
+predict_mfle <- predict(mfle, newdata = dat)
+
+# Add to data
+dat$density_cod <- exp(predict_mcod$est)
+dat$density_fle <- exp(predict_mfle$est)
+
+# Test to plot the relationships between a simple condition index and these variables
+dat <- dat %>% 
+  mutate(cond = weight_g / (0.01*length_cm^3))
+
+# Remove apparent errors!
+dat %>% arrange(desc(cond)) %>% data.frame() %>% head(20)
+
+dat <- dat %>% filter(cond < 5)
+
+ggplot(dat) +
+  geom_point(aes(density_cod, cond), alpha = 0.2) + ggtitle("cod")
+
+ggplot(dat) +
+  geom_point(aes(density_fle, cond), alpha = 0.2) + ggtitle("fle")
+
+# Now remove the standardized variables, because when I fit the real model, I want to
+# standardize them to the prediction grid, not the CPUE data, and I would forget that
+# if I don't remove them now
+dat <- dat %>% dplyr::select(-oxy_sc, temp_sc, depth_sc)
+```
+
+### ... And secondly by doing a `left_join` from the CPUE data using `haul.id` 
+```{r, message=FALSE}
+d_cod_select <- d %>% dplyr::select(density_cod, IDx) %>% rename("density_cod_data" = "density_cod")
+d_fle_select <- d %>% dplyr::select(density_fle, IDx) %>% rename("density_fle_data" = "density_fle")
+
+dat <- left_join(dat, d_cod_select)
+dat <- left_join(dat, d_fle_select)
+
+# Check how well they correspond
+ggplot(dat, aes(density_cod_data, density_fle)) + geom_point() + geom_abline(color = "red")
+ggplot(dat, aes(density_fle_data, density_fle)) + geom_point() + geom_abline(color = "red")
+```
+
+## Add pelagic covariates
+
+```{r, message=FALSE}
+# Read data
+spr <- read_xlsx("data/BIAS/abundances_rectangles_1991-2019.xlsx",
+                 sheet = 1) %>%
+  rename("StatRec" = "Rec") %>%
+  mutate(StatRec = as.factor(StatRec),
+         Species = "Sprat",
+         abun_spr = `Age 1`+`Age 2`+`Age 3`+`Age 4`+`Age 5`+`Age 6`+`Age 7`+`Age 8+`, # omitting `0+` here
+         IDr = paste(StatRec, Year, sep = ".")) # Make new ID)
+  
+her <- read_xlsx("data/BIAS/abundances_rectangles_1991-2019.xlsx",
+                 sheet = 2) %>%
+  as.data.frame() %>%
+  rename("StatRec" = "Rect2") %>% # This is not called Rec in the data for some reason
+  mutate(StatRec = as.factor(StatRec),
+         Species = "Herring",
+         abun_her = `Age 1`+`Age 2`+`Age 3`+`Age 4`+`Age 5`+`Age 6`+`Age 7`+`Age 8+`, # omitting `1+` here
+         IDr = paste(StatRec, Year, sep = ".")) # Make new ID
+
+# Plot distribution over time in the whole area
+spr %>%
+  mutate(lon = ices.rect(spr$StatRec)$lon) %>%
+  mutate(lat = ices.rect(spr$StatRec)$lat) %>%
+  filter(!StatRec %in% c("41G0", "41G1", "41G2", "42G1", "42G2", "43G1", "43G2", "44G0", "44G1")) %>%
+  ggplot(., aes(lon, lat, fill = log(abun_spr))) +
+  geom_raster() +
+  scale_fill_viridis() +
+  facet_wrap(~ Year, ncol = 5) +
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  labs(x = "lon", y = "lat") +
+  NULL
+
+ggsave("figures/supp/spr_distribution.png", width = 10, height = 10, dpi = 600)
+
+her %>%
+  mutate(lon = ices.rect(her$StatRec)$lon) %>%
+  mutate(lat = ices.rect(her$StatRec)$lat) %>%
+  filter(! StatRec %in% c("41G0", "41G1", "41G2", "42G1", "42G2", "43G1", "43G2", "44G0", "44G1")) %>%
+  ggplot(., aes(lon, lat, fill = log(abun_her))) +
+  geom_raster() +
+  scale_fill_viridis() +
+  facet_wrap(~ Year, ncol = 5) +
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  labs(x = "lon", y = "lat") +
+  NULL
+
+ggsave("figures/supp/her_distribution.png", width = 10, height = 10, dpi = 600)
+
+# As can be seen in the above plots, we don't have data for all rectangles in all years
+# It is important those rectangles are made NA - not 0 - when merging
+
+# Check distribution of data
+# https://www.researchgate.net/publication/47933620_Environmental_factors_and_uncertainty_in_fisheries_management_in_the_northern_Baltic_Sea/figures?lo=1
+sort(unique(spr$SD))
+sort(unique(her$SD))
+
+# How many unique rows per IDr?
+her %>%
+  group_by(IDr) %>% 
+  mutate(n = n()) %>% 
+  ggplot(., aes(factor(n))) + geom_bar()
+
+spr %>%
+  group_by(IDr) %>% 
+  mutate(n = n()) %>% 
+  ggplot(., aes(factor(n))) + geom_bar()
+
+# Ok, some ID's with two rows...
+spr %>%
+  group_by(IDr) %>% 
+  mutate(n = n()) %>% 
+  filter(n == 2) %>% 
+  ungroup() %>% 
+  as.data.frame() %>% 
+  head(20)
+
+# Seems to be due to rectangles somehow being in different sub divisions.
+# I need to group by IDr and summarize
+# First check all rectangles with more than one row have two rows and not more
+nrow(spr)
+nrow(spr %>% group_by(IDr) %>% mutate(n = n()) %>% filter(n == 2))
+nrow(spr %>% group_by(IDr) %>% mutate(n = n()) %>% filter(!n == 1))
+
+spr_sum <- spr %>%
+  group_by(IDr) %>% 
+  summarise(abun_spr = sum(abun_spr)) %>% # Sum abundance within IDr
+  distinct(IDr, .keep_all = TRUE) %>% # Remove duplicate IDr
+  mutate(ID_temp = IDr) %>% # Create temporary IDr that we can use to split in order
+                            # to get Year and StatRect back into the summarized data
+  separate(ID_temp, c("StatRec", "Year"), sep = 4)
+
+nrow(spr_sum) 
+nrow(spr)
+nrow(spr %>% group_by(IDr) %>% mutate(n = n()) %>% filter(n == 2))
+
+filter(spr_sum, IDr == "39G2.1991")
+filter(spr, IDr == "39G2.1991")
+
+# This should equal 1 (new # rows =  old - duplicated IDr)
+nrow(spr_sum) / (nrow(spr) - 0.5*nrow(spr %>% group_by(IDr) %>% mutate(n = n()) %>% filter(n == 2)))
+
+# How many rows per rectangle?
+spr_sum %>%
+  group_by(IDr) %>% 
+  mutate(n = n()) %>% 
+  ungroup() %>% 
+  distinct(n)
+  
+# Now do the same for herring
+nrow(her)
+nrow(her %>% group_by(IDr) %>% mutate(n = n()) %>% filter(n == 2))
+nrow(her %>% group_by(IDr) %>% mutate(n = n()) %>% filter(!n == 1))
+
+her_sum <- her %>%
+  group_by(IDr) %>% 
+  summarise(abun_her = sum(abun_her)) %>% # Sum abundance within IDr
+  distinct(IDr, .keep_all = TRUE) %>% # Remove duplicate IDr
+  mutate(ID_temp = IDr) %>% # Create temporary IDr that we can use to split in order
+  # to get Year and StatRect back into the summarized data
+  separate(ID_temp, c("StatRec", "Year"), sep = 4)
+
+nrow(her_sum) 
+nrow(her)
+nrow(her %>% group_by(IDr) %>% mutate(n = n()) %>% filter(n == 2))
+
+filter(her_sum, IDr == "39G2.1991")
+filter(her, IDr == "39G2.1991")
+
+# This should equal 1 (new # rows =  old - duplicated IDr)
+nrow(her_sum) / (nrow(her) - 0.5*nrow(her %>% group_by(IDr) %>% mutate(n = n()) %>% filter(n == 2)))
+
+# How many rows per rectangle?
+her_sum %>%
+  group_by(IDr) %>% 
+  mutate(n = n()) %>% 
+  ungroup() %>% 
+  distinct(n)
+
+# Now join pelagic covariates
+# Make ices_rect a factor in the main data
+dat <- dat %>% mutate(ices_rect = as.factor(ices_rect))
+
+# Create IDr in main data to match pelagics data
+dat <- dat %>% mutate(IDr = paste(ices_rect, year, sep = "."))
+
+# Are there any StatRec that are in the condition data that are not in the pelagics data?
+dat$ices_rect[!dat$ices_rect %in% her$StatRec]
+dat$ices_rect[!dat$ices_rect %in% spr$StatRec]
+
+# No, but not all IDr's are present
+head(dat$IDr[!dat$IDr %in% her$IDr])
+head(dat$IDr[!dat$IDr %in% spr$IDr])
+
+# Filter columns so that I only use sprat and herring IDr's that are in the condition data (don't need the others!)
+spr_sum <- spr_sum %>% filter(IDr %in% dat$IDr)
+her_sum <- her_sum %>% filter(IDr %in% dat$IDr)
+
+# Select columns from pelagic data to go in dat
+spr_sub <- spr_sum %>% dplyr::select(IDr, abun_spr)
+her_sub <- her_sum %>% dplyr::select(IDr, abun_her)
+
+# Now join dat and sprat data
+dat <- left_join(dat, spr_sub)
+nrow(dat)
+
+# And herring..
+dat <- left_join(dat, her_sub)
+
+# Now deal with the NA's
+unique(is.na(spr_sum$abun_spr))
+unique(is.na(her_sum$abun_her))
+
+unique(is.na(dat$abun_spr))
+unique(is.na(dat$abun_her))
+
+dat %>% drop_na(abun_spr) %>% arrange(abun_spr) %>% dplyr::select(abun_spr)
+dat %>% drop_na(abun_her) %>% arrange(abun_her) %>% dplyr::select(abun_her)
+
+# The NA's I have in the DAT are missing pelagic data, i.e. not 0's! Need to drop them unfortunately,
+# or fit a model to the data. Since it's only 3% of data, I will simply remove them.
+dat <- dat %>% drop_na(abun_spr) %>% drop_na(abun_her)
+```
+
+## Save data
+
+```{r, message=FALSE}
+dat %>% data.frame() %>% head()
+
+# Trim data a little bit to not make it unnecessarily large
+dat <- dat %>% dplyr::select(-IDx, quarter, cond, IDr)
+
+write.csv(dat, file = "data/for_analysis/mdat_cond.csv", row.names = FALSE)
+```
+

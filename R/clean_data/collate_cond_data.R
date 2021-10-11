@@ -3,7 +3,7 @@
 # - Code to clean and merge BITS HH (Record with detailed haul information),
 #   and CA (Sex-maturity-age–length keys (SMALK's) for ICES subdivision) data
 #   directly from DATRAS. We want to end up with a dataset of length-at-weight of cod,
-#   with haul information.
+#   with haul information (e.g. lat and long, which doesn't exist in the CA data)
 # 
 #   Next, we join in CPUE (Catch in numbers per hour of hauling) of flounder and cod
 #   We calculate this for two size classes by species. If the haul is not in the catch
@@ -22,7 +22,7 @@
 rm(list = ls())
 
 # Load libraries, install if needed
-library(tidyverse); theme_set(theme_classic())
+library(tidyverse); theme_set(theme_light(base_size = 12))
 library(readxl)
 library(tidylog)
 library(RCurl)
@@ -55,90 +55,100 @@ library(mapplots)
 # [22] tidyr_1.1.0        tibble_3.0.3       ggplot2_3.3.2      tidyverse_1.3.0 
 
 # For adding maps to plots
+# These are the ranges I'm thinking of using. Convert these to UTM!
+ymin = 54
+ymax = 58
+xmin = 12
+xmax = 22
+
 world <- ne_countries(scale = "medium", returnclass = "sf")
 
-# Specify map ranges
-ymin = 54; ymax = 58; xmin = 9.5; xmax = 22
+map_data <- rnaturalearth::ne_countries(
+  scale = "medium",
+  returnclass = "sf", continent = "europe")
+
+swe_coast <- suppressWarnings(suppressMessages(
+  st_crop(map_data,
+          c(xmin = xmin, ymin = ymin, xmax = xmax, ymax = ymax))))
+
+# Transform our map into UTM 9 coordinates, which is the equal-area projection we fit in:
+utm_zone33 <- 32633
+swe_coast_proj <- sf::st_transform(swe_coast, crs = utm_zone33)
 
 
 # B. READ HAUL DATA ================================================================
 # Load HH data using the DATRAS package to get catches
 # bits_hh <- getDATRAS(record = "HH", survey = "BITS", years = 1991:2020, quarters = 1:4)
-
 # write.csv("data/bits_hh.csv")
-bits_hh <- read.csv("data/DATRAS_exchange/bits_hh.csv")
 
-# Create ID column
+#bits_hh <- read.csv("data/DATRAS_exchange/bits_hh.csv")
+bits_hh <- readr::read_csv("/Users/maxlindmark/Desktop/cod_condition_befoer_CPUE_data_change/data/DATRAS_exchange/bits_hh.csv")
+
+# Create ID column and clean a bit
 bits_hh <- bits_hh %>% 
-  mutate(ID = paste(Year, Quarter, Ship, Gear, HaulNo, StNo, sep = "."))
+  #filter(Quarter == 4 & StNo > -1 & HaulNo > -1 & Year < 2020) %>%
+  filter(Quarter == 4 & Year < 2020) %>% 
+  mutate(StNo = as.numeric(StNo)) %>% 
+  mutate(ID = paste(Year, Quarter, Country, Ship, Gear, StNo, HaulNo, sep = "."), # ID for other exchange data
+         ID2 = paste(Year, Quarter, Ship, Gear, HaulNo, ShootLat, ShootLong, sep = ":")) # ID for CPUE data
 
 # Check that per ID, there's only one row
 bits_hh %>%
   group_by(ID) %>% 
   mutate(n = n()) %>% 
-  filter(n > 1) %>% 
-  arrange(ID) %>% 
-  as.data.frame()
-
-# Check default availability of environmental data
-ggplot(bits_hh, aes(BotSal)) + geom_histogram()
-ggplot(bits_hh, aes(SurSal)) + geom_histogram()
-ggplot(bits_hh, aes(BotTemp)) + geom_histogram()
-
-# Plot haul-duration
-ggplot(bits_hh, aes(HaulDur)) + geom_histogram()
+  ungroup() %>% 
+  distinct(n)
 
 # Select only useful columns, this is the dataframe used in the merge later on
-bits_hh_filter <- bits_hh %>% dplyr::select(ID, ShootLat, ShootLong, StatRec, Depth,
-                                            BotTemp,BotSal, Year, Quarter, HaulDur, 
-                                            DataType, HaulVal)
-
-# Test I only got 1 row per haul
-bits_hh_filter %>% 
-  group_by(ID) %>%
-  mutate(n = n()) %>% 
-  ggplot(., aes(factor(n))) + geom_bar()
+bits_hh_ID <- bits_hh %>%
+  dplyr::select(ID, ShootLat, ShootLong, StatRec, Depth,
+                BotTemp, BotSal, HaulDur, DataType, HaulVal)
 
 
 # C. READ LENGTH-WEIGHT DATA =======================================================
 # Load CA data using the DATRAS package to get catches
 # Note we only want cod data here
 # bits_ca <- getDATRAS(record = "CA", survey = "BITS", years = 1991:2020, quarters = 1:4)
-
 # write.csv("data/bits_ca.csv")
-bits_ca <- read.csv("data/DATRAS_exchange/bits_ca.csv")
 
-# Filter only cod and positive length measurements
-bits_ca <- bits_ca %>% filter(SpecCode %in% c("164712", "126436") & LngtClass > 0)
+#bits_ca <- read.csv("data/DATRAS_exchange/bits_ca.csv")
+bits_ca <- readr::read_csv("/Users/maxlindmark/Desktop/cod_condition_befoer_CPUE_data_change/data/DATRAS_exchange/bits_ca.csv")
+
+# Filter only cod and Quarter 4
+bits_ca <- bits_ca %>%
+  filter(SpecCode %in% c("164712", "126436") & Quarter == 4 & StNo > 0 & HaulNo > 9 & Year < 2020) %>% 
+  mutate(StNo = as.numeric(StNo))
 
 # Add new species-column
 bits_ca$Species <- "Cod"
 
 # Create ID column
 bits_ca <- bits_ca %>% 
-  mutate(ID = paste(Year, Quarter, Ship, Gear, HaulNo, StNo, sep = "."))
+  mutate(ID = paste(Year, Quarter, Country, Ship, Gear, StNo, HaulNo, sep = "."))
 
-# Check # rows per unique ID AND LNGTCLASS (more than one since 1 row = 1 category, and NoAtLngt is the n in the category)
-bits_ca %>% 
-  mutate(TEST = paste(ID, LngtClass)) %>% 
-  group_by(TEST) %>% 
-  mutate(n = n()) %>% 
-  ungroup() %>%
-  ggplot(., aes(factor(n))) + geom_bar()
+# Check # rows per unique ID AND LNGTCLASS
+# I have more than one since 1 row since each length class can have different weights and ages
+filter(bits_ca, ID == bits_ca$ID[19])
+
+# bits_ca %>% 
+#   mutate(TEST = paste(ID, LngtClass, AgeRings, IndWgt, Sex)) %>% 
+#   group_by(TEST) %>% 
+#   mutate(n = n()) %>% 
+#   ungroup() %>%
+#   ggplot(., aes(factor(n))) + geom_bar()
 
 # Now I need to copy rows with NoAtLngt > 1 so that 1 row = 1 ind
 # First make a small test
 nrow(bits_ca)
-head(filter(bits_ca, NoAtLngt == 5))
-head(filter(bits_ca, ID == "1992.1.GFR.SOL.H20.33.42" & NoAtLngt == 5), 20)
+head(filter(bits_ca, CANoAtLngt == 5))
+head(filter(bits_ca, ID == "1992.1.DE.06JR.SON.22.22151" & CANoAtLngt == 5), 20)
 
-bits_ca <- bits_ca %>% map_df(., rep, .$NoAtLngt)
+bits_ca <- bits_ca %>% map_df(., rep, .$CANoAtLngt)
 
-head(data.frame(filter(bits_ca, ID == "1992.1.GFR.SOL.H20.33.42" & NoAtLngt == 5)), 20)
-nrow(bits_ca)
+head(data.frame(filter(bits_ca, ID == "1992.1.DE.06JR.SON.22.22151" & CANoAtLngt == 5)), 20)
 # Looks ok!
 
-# Standardize length
+# Standardize length and drop NA weights (need that for condition)
 bits_ca <- bits_ca %>% 
   drop_na(IndWgt) %>% 
   drop_na(LngtClass) %>% 
@@ -150,215 +160,323 @@ bits_ca <- bits_ca %>%
   
 ggplot(bits_ca, aes(length_cm, fill = LngtCode)) + geom_histogram()
 
+nrow(bits_ca)
+d_old <- readr::read_csv("/Users/maxlindmark/Desktop/cod_condition_befoer_CPUE_data_change/data/for_analysis/mdat_cond.csv")
+dd_old <- d_old %>% drop_na(length_cm)
+dd_old <- d_old %>% drop_na(weight_g)
+
 
 # D. JOIN CONDITION AND HAUL DATA ==================================================
 # Check if any ID is in the CA but not HH data
 # I will need to remove these because they do not have any spatial information
 length(unique(bits_ca$ID))
-length(unique(bits_hh_filter$ID))
+length(unique(bits_hh_ID$ID))
 
-bits_ca$ID[!bits_ca$ID %in% bits_hh_filter$ID]
+dat <- dplyr::left_join(bits_ca, bits_hh_ID) # Good, no condition data that doesn't have spatial info
 
-# And other way around (this is expected since we have hauls without catches or data 
-# on condition)
-bits_hh_filter$ID[!bits_hh_filter$ID %in% bits_ca$ID]
+# Importantly, this also means that we now DON'T get the IDs where no fish were caught!!
+# The CPUE data that we add in later have ID's with zero catches (~10%). 
+# When I join this "catch-only" biological data with the CPUE data, I will get NA for
+# the haul ID's where there are 0 catches. But for these I naturally also have 0 cod
+# for biological data. Hence this CPUE covariate is non-negative. If I had used the
+# predicted density at that location using a CPUE model, it would have been different.
+# But then in theory I'd be able to have a 0 covariate, though it probably wouldn't have
+# been a good prediction since I obviously had cod there that I could measure.
+# This isn't true though for flounder! There I can have cod sampled from a haul, and 
+# still have 0 cpue of flounder. 
 
-dat <- left_join(bits_ca, bits_hh_filter)
+# filter(dat, Year == 1991 & Quarter == 4 & Ship == "77AR" & Gear == "FOT") %>%
+#   distinct(HaulNo, .keep_all = TRUE) %>% arrange(HaulNo) %>% dplyr::select(Year, Quarter, Country, Ship, Gear, StNo, HaulNo)
 
-# Remove the NA latitudes and we remove all the IDs that were in the bits_ca but not 
-# in the haul data
-dat <- dat %>% drop_na(ShootLat)
 
-# Plot spatial distribution of samples
-# dat %>% 
-#   ggplot(., aes(y = ShootLat, x = ShootLong)) +
-#   geom_point(size = 0.3) +
-#   facet_wrap(~ Year) + 
-#   theme_bw() +
-#   geom_sf(data = world, inherit.aes = F, size = 0.2) +
-#   coord_sf(xlim = c(8, 25), ylim = c(54, 60)) +
-#   NULL
+# Add UTM coords
+# Function
+LongLatToUTM <- function(x, y, zone){
+  xy <- data.frame(ID = 1:length(x), X = x, Y = y)
+  coordinates(xy) <- c("X", "Y")
+  proj4string(xy) <- CRS("+proj=longlat +datum=WGS84")  ## for example
+  res <- spTransform(xy, CRS(paste("+proj=utm +zone=",zone," ellps=WGS84",sep='')))
+  return(as.data.frame(res))
+}
 
-# Lastly we can remove hauls from outside the study area (Kattegatt basically)
-# select only quarter 4 and remove non-valid hauls
+utm_coords <- LongLatToUTM(dat$ShootLong, dat$ShootLat, zone = 33)
+dat$X <- utm_coords$X/1000 # for computational reasons
+dat$Y <- utm_coords$Y/1000 # for computational reasons
+
+# Add ICES areas via shapefiles
+# https://stackoverflow.com/questions/34272309/extract-shapefile-value-to-point-with-r
+# https://gis.ices.dk/sf/
+shape <- shapefile("data/ICES_StatRec_mapto_ICES_Areas/StatRec_map_Areas_Full_20170124.shp")
+head(shape)
+
+pts <- SpatialPoints(cbind(dat$ShootLong, dat$ShootLat), 
+                     proj4string = CRS(proj4string(shape)))
+
+dat$subdiv <- over(pts, shape)$Area_27
+dat$subdiv2 <- over(pts, shape)$AreasList
+
+# Rename subdivisions to the more common names and do some more filtering (by sub div and area)
+sort(unique(dat$subdiv))
+
 dat <- dat %>% 
-  filter(ShootLat < 58) %>% 
-  mutate(kattegatt = ifelse(ShootLat > 56 & ShootLong < 14, "Y", "N")) %>% 
-  filter(kattegatt == "N",
-         Quarter == 4,
-         HaulVal == "V") %>% 
-  dplyr::select(-kattegatt)
+  mutate(SubDiv = factor(subdiv),
+         SubDiv = fct_recode(subdiv,
+                             "24" = "3.d.24",
+                             "25" = "3.d.25",
+                             "26" = "3.d.26",
+                             "27" = "3.d.27",
+                             #"28" = "3.d.28.1",
+                             "28" = "3.d.28.2"),
+         SubDiv = as.character(SubDiv)) %>% 
+  filter(SubDiv %in% c("24", "25", "26", "27", "28")) %>% 
+  filter(ShootLat > 54 & ShootLat < 58 & ShootLong < 22)
 
-# Plot again:
-# Plot spatial distribution of samples
-# dat %>% 
-#   ggplot(., aes(y = ShootLat, x = ShootLong)) +
-#   geom_point(size = 0.3) +
-#   facet_wrap(~ Year) + 
-#   theme_bw() +
-#   geom_sf(data = world, inherit.aes = F, size = 0.2) +
-#   coord_sf(xlim = c(8, 25), ylim = c(54, 60)) +
-#   NULL
-
-min(dat$ShootLon)
-
-dat %>% filter(ID == "1991.4.SOL.H20.34.49")
+ggplot(swe_coast_proj) +
+  geom_point(data = dat, aes(x = X*1000, y = Y*1000, color = factor(SubDiv)), alpha = 0.8) +
+  geom_sf() +
+  scale_fill_brewer(palette = "Dark2") + 
+  theme_light(base_size = 12) +
+  labs(x = "Longitude", y = "Latitude")
 
 
 # E. READ AND JOIN THE COD AND FLOUNDER COVARIATES =================================
-cov_dat <- read.csv("data/DATRAS_cpue_length_haul/CPUE per length per haul per hour_2020-09-25 16_15_36.csv")
+#** CPUE data ======================================================================
+cov_dat <- read.csv("data/DATRAS_cpue_length_haul/CPUE per length per haul per hour_2021-09-09 15_00_47.csv")
 
-# Remove hauls from outside the study area and select only quarter 4
-cov_dat <- cov_dat %>% 
-  filter(ShootLat < 58) %>% 
-  mutate(kattegatt = ifelse(ShootLat > 56 & ShootLong < 14, "Y", "N")) %>% 
-  filter(kattegatt == "N") %>% 
-  filter(Quarter == 4) %>% 
-  dplyr::select(-kattegatt)
+# I will treat this as a positive catch data ONLY, because there are some errors (see 
+# data exploration). So basically, I will calculate positive catches here, and add 0
+# catches by joining the unique haul ids from the exchange data (hh)
 
-# I am now going to assume that a haul that is present in the condition data but not
-# in this covariate data means that the catch is 0
-cov_dat %>% arrange(CPUE_number_per_hour)
-cov_dat %>% filter(CPUE_number_per_hour == 0)
-
-# Create a new ID column. Note that I can't define a single ID column that works for
-# all data sets. The ID that I used for the Exchange data cannot be applied here. I
-# need to come up with a new ID here. Run this to see common columns:
-# colnames(dat)[colnames(dat) %in% colnames(cov_dat)]
-# First filter by species and convert length to cm, then add in ID
+# Create a new ID column. I can't use the previous ID because I don't have station number
+# and country in this CPUE data. I do however have coordinates in the condition data now,
+# so first make and ID there. First I make that ID in the cpue data to get haul-level CPUE
 
 cod <- cov_dat %>%
-  filter(Species == "Gadus morhua") %>% 
-  mutate(length_cm = LngtClass/10) %>% 
-  filter(LngtClass > 0) %>% 
-  mutate(ID2 = paste(Year, Quarter, Ship, Gear, HaulNo, Depth, ShootLat, ShootLong, sep = "."))
+  filter(Species == "Gadus morhua") %>%
+  filter(CPUE_number_per_hour > 0) %>%
+  filter(Year < 2020) %>% 
+  mutate(length_cm = LngtClass/10, # All are of the same LngtCode
+         ID2 = paste(Year, Quarter, Ship, Gear, HaulNo, ShootLat, ShootLong, sep = ":"))
 
 fle <- cov_dat %>%
   filter(Species == "Platichthys flesus") %>% 
-  mutate(length_cm = LngtClass/10) %>% 
-  filter(LngtClass > 0) %>% 
-  mutate(ID2 = paste(Year, Quarter, Ship, Gear, HaulNo, Depth, ShootLat, ShootLong, sep = "."))
+  filter(CPUE_number_per_hour > 0) %>%
+  filter(Year < 2020) %>% 
+  mutate(length_cm = LngtClass/10, # All are of the same LngtCode
+         ID2 = paste(Year, Quarter, Ship, Gear, HaulNo, ShootLat, ShootLong, sep = ":"))
 
 # First check if this is unique by haul. Then I should get 1 row per ID and size...
 cod %>%
   group_by(ID2, LngtClass) %>% 
   mutate(n = n()) %>% 
   ungroup() %>% 
-  distinct(n, .keep_all = TRUE) %>% 
-  as.data.frame()
+  distinct(n)
 
 fle %>%
   group_by(ID2, LngtClass) %>% 
   mutate(n = n()) %>% 
   ungroup() %>% 
-  distinct(n, .keep_all = TRUE) %>% 
-  as.data.frame()
+  distinct(n)
 
-# And add also the same ID to dat (condition and haul data).
-# Check if unique!
-# It is with the exception of 8 rows. Not much I can do about that because I don't have
-# any more unique columns I can add to the ID
-test <- read.csv("data/DATRAS_exchange/bits_hh.csv")
-test <- test %>%
-  mutate(ID2 = paste(Year, Quarter, Ship, Gear, HaulNo, Depth, ShootLat, ShootLong, sep = "."))
+#** Exchange data ==================================================================
+# Now add in the trawl ID's and change CPUE from NA to 0
+# First select only the ID column to not add in duplicate info from the matching columns
+# Define columns to bring to the subset (else columns like year etc get NA and that's not good)
+# I could simply not select and just take all... but then it gets so messy...
+cols_to_bring <- colnames(bits_hh)[colnames(bits_hh) %in% colnames(cod)]
+bits_hh_id2 <- bits_hh %>% dplyr::select(cols_to_bring) #%>% dplyr::select(ID2)
 
-test %>%
-  mutate(ID2 = paste(Year, Quarter, Ship, Gear, HaulNo, Depth, ShootLat, ShootLong, sep = ".")) %>%
-  group_by(ID2) %>%
-  mutate(n = n()) %>%
-  ungroup() %>%
-  filter(!n==1) %>%
-  as.data.frame()
+# Are there any IDs that are in the cod and fle data that are not in the bits_hh_id2?
+# Nope!
+unique(cod$ID2)[!unique(cod$ID2) %in% unique(bits_hh_id2$ID2)]
+unique(fle$ID2)[!unique(fle$ID2) %in% unique(bits_hh_id2$ID2)]
 
-# Test if these are in dat:
-test_ids <- unique(test$ID2)
+# Are there any zero catches?
+min(fle$CPUE_number_per_hour)
+min(cod$CPUE_number_per_hour)
 
-# Add in ID2
-dat <- dat %>%
-  mutate(ID2 = paste(Year, Quarter, Ship, Gear, HaulNo, Depth, ShootLat, ShootLong, sep = "."))
+#** Join CPUE and exchange data ====================================================
+# Add in ID2's. As tidylog says, there are NO ID2s that are only in X - they all have a counter in FLE
+cod2 <- full_join(cod, bits_hh_id2)
+fle2 <- full_join(fle, bits_hh_id2)
 
-# No they are not, no need to filter.
-filter(dat, ID2 %in% test_ids)
+# Check what happened to an ID2 that wasn't in the cod data
+test_id <- unique(bits_hh_id2$ID2)[!unique(bits_hh_id2$ID2) %in% unique(cod$ID2)][5]
+filter(cod, ID2 == test_id)
+filter(bits_hh_id2, ID2 == test_id)
+filter(cod2, ID2 == test_id)
 
-# Are there any ID's that are IN the covariate data that are not in the test
-# (raw haul data) data?
-cod$ID2[!cod$ID2 %in% test$ID2]
-fle$ID2[!fle$ID2 %in% test$ID2]
+# Looks perfect. Now replace the NA CPUE with 0, NA Species with with the correct name and length_cm to 0
+cod2$CPUE_number_per_hour[is.na(cod2$CPUE_number_per_hour)] <- 0
+cod2$Species[is.na(cod2$Species)] <- "Gadus morhua"
+cod2$length_cm[is.na(cod2$length_cm)] <- 0
 
-filter(fle, ID2 %in% unique(test$ID2)) 
-# Nope! All good.
+fle2$CPUE_number_per_hour[is.na(fle2$CPUE_number_per_hour)] <- 0
+fle2$Species[is.na(fle2$Species)] <- "Platichthys flesus"
+fle2$length_cm[is.na(fle2$length_cm)] <- 0
 
-# Now calculate the mean CPUE per haul and size group per species. For cod we use 30
-# cm and for flounder 20 cm. This is because Neuenfeldt et al (2019) found that cod
-# below 30cm are in a growth-bottleneck, and because Haase et al (2020) found that 
-# flounder above 20cm start feeding a lot of saduria, which has been speculated to
-# decline in cod stomachs due to interspecific competition and increased spatial
-# overlap with flounder.
-cod_above_30cm <- cod %>% 
-  filter(length_cm >= 30) %>% 
+# Check now that if CPUE is 0, I should only have 1 row per id, else 1 row per caught length class
+cod2 %>% filter(CPUE_number_per_hour == 0) %>% group_by(ID2) %>% summarise(n = n()) %>% distinct(n)
+fle2 %>% filter(CPUE_number_per_hour == 0) %>% group_by(ID2) %>% summarise(n = n()) %>% distinct(n)
+
+# Now by ID and 
+cod2 %>% group_by(ID2) %>% summarise(n = n()) %>% distinct(n) %>% arrange(n)
+fle2 %>% group_by(ID2) %>% summarise(n = n()) %>% distinct(n) %>% arrange(n)
+
+# Now by ID and length class
+cod2 %>% group_by(ID2, length_cm) %>% summarise(n = n()) %>% ungroup() %>% distinct(n)
+fle2 %>% group_by(ID2, length_cm) %>% summarise(n = n()) %>% ungroup() %>% distinct(n)
+
+# What is the average CPUE and the proportion of 0 catch hauls?
+haul_cod <- cod2 %>% 
   group_by(ID2) %>% 
-  summarise(cpue_cod_above_30cm = sum(CPUE_number_per_hour)) %>% 
+  mutate(haul_cpue_cod = sum(CPUE_number_per_hour)) %>% 
   ungroup()
 
-cod_below_30cm <- cod %>% 
-  filter(length_cm < 30) %>% 
+length(unique(filter(haul_cod, haul_cpue_cod == 0)$ID2)) / length(unique(haul_cod$ID2))
+
+# This is higher than the 12 % I get when not importing all the haul IDs from the exchange 
+# data and instead assuming zero catches are included in the cpue data
+  
+# Convert to biomass also
+cod2 %>% 
+  mutate(kg = (0.01*length_cm^3)/1000) %>% 
+  mutate(CPUE_kg_per_hour = CPUE_number_per_hour * kg) %>% 
   group_by(ID2) %>% 
-  summarise(cpue_cod_below_30cm = sum(CPUE_number_per_hour)) %>% 
+  mutate(haul_cpue_cod_kg_h = sum(CPUE_kg_per_hour)) %>% 
+  ungroup() %>% 
+  group_by(Year) %>% 
+  summarise(mean_cpue_kg_h = mean(haul_cpue_cod_kg_h)) %>% 
+  ggplot(., aes(Year, mean_cpue_kg_h)) + geom_line()
+
+# Now calculate the TOTAL CPUE per haul across size groups per species.
+# For cod we use total, and above or below 30 cm
+# For flounder we use total, below and above 20 cm.
+# This is because Neuenfeldt et al (2019) found that cod below 30 cm
+# are in a growth-bottleneck, and because Haase et al (2020) found that
+# flounder above 20 cm start feeding a lot of saduria, which has been 
+# speculated to decline in cod stomachs due to interspecific competition
+# and increased spatial overlap with flounder.
+
+cod_all <- cod2 %>% 
+  group_by(ID2) %>% 
+  summarise(haul_cpue_cod = sum(CPUE_number_per_hour)) %>% 
+  ungroup() 
+# How many zero-catch hauls?
+# length(unique(filter(cod_all, haul_cpue_cod == 0)$ID2)) /  length(unique(cod_all$ID2))
+# Makes sense
+
+cod_above_30cm <- cod2 %>% 
+  mutate(CPUE_number_per_hour = ifelse(length_cm < 30, 0, CPUE_number_per_hour)) %>% 
+  group_by(ID2) %>% 
+  summarise(haul_cpue_cod_above_30cm = sum(CPUE_number_per_hour)) %>% 
   ungroup()
 
-fle_above_20cm <- fle %>% 
-  filter(length_cm >= 20) %>% 
+cod_below_30cm <- cod2 %>% 
+  mutate(CPUE_number_per_hour = ifelse(length_cm > 29, 0, CPUE_number_per_hour)) %>% 
   group_by(ID2) %>% 
-  summarise(cpue_fle_above_20cm = sum(CPUE_number_per_hour)) %>% 
+  summarise(haul_cpue_cod_below_30cm = sum(CPUE_number_per_hour)) %>% 
   ungroup()
 
-fle_below_20cm <- fle %>% 
-  filter(length_cm < 20) %>% 
+fle_all <- fle2 %>% 
   group_by(ID2) %>% 
-  summarise(cpue_fle_below_20cm = sum(CPUE_number_per_hour)) %>% 
+  summarise(haul_cpue_fle = sum(CPUE_number_per_hour)) %>% 
   ungroup()
 
-# Test it worked, first by plotting n rows per ID
-cod_above_30cm %>% group_by(ID2) %>% mutate(n = n()) %>% 
-  ggplot(., aes(factor(n))) + geom_bar()
+fle_above_20cm <- fle2 %>% 
+  mutate(CPUE_number_per_hour = ifelse(length_cm < 20, 0, CPUE_number_per_hour)) %>% 
+  group_by(ID2) %>% 
+  summarise(haul_cpue_fle_above_20cm = sum(CPUE_number_per_hour)) %>% 
+  ungroup()
+
+fle_below_20cm <- fle2 %>% 
+  mutate(CPUE_number_per_hour = ifelse(length_cm > 19, 0, CPUE_number_per_hour)) %>% 
+  group_by(ID2) %>% 
+  summarise(haul_cpue_fle_below_20cm = sum(CPUE_number_per_hour)) %>% 
+  ungroup()
 
 # Next by calculating an example
-unique(cod_above_30cm$ID2)
-
-cod_above_30cm %>% filter(ID2 == "2003.4.DAN2.TVL.13.66.55.3736.16.9982")
-sum(filter(cod, ID2 == "2003.4.DAN2.TVL.13.66.55.3736.16.9982" &
-             length_cm >= 30)$CPUE_number_per_hour)
+cod_above_30cm %>% filter(ID2 == unique(cod_above_30cm$ID2)[5])
+sum(filter(cod2, ID2 == unique(cod_above_30cm$ID2)[5] & length_cm >= 30)$CPUE_number_per_hour)
 
 # Correct! The data subset yields the same 
 
+
+#** Join the joined data with the condition data ===================================
+# Now add the same ID to dat (condition and haul data).
+sort(colnames(dat))
+dat <- dat %>% 
+  mutate(ID2 = paste(Year, Quarter, Ship, Gear, HaulNo, ShootLat, ShootLong, sep = ":"))
+
+# Check if unique! (note that we need to account for all the fish level stuff (1 row 1 fish)
+# (FishID contains missing values, hence I need all those other columns as well)
+dat %>% 
+  group_by(ID2, length_cm, Sex, IndWgt, AgeRings, Maturity, FishID) %>% 
+  mutate(n = n()) %>% 
+  ungroup() %>% 
+  filter(n > 1) %>% 
+  mutate(test = n - CANoAtLngt) %>% 
+  filter(!test == 0)
+
 # Join covariates
+cod_all
 cod_above_30cm
 cod_below_30cm
+fle_all
 fle_above_20cm
 fle_below_20cm
 
-# Some rows are not present in the condition data (dat) but are in the CPUE data.
-# As I showed above, all ID2's in the CPUE data are in the raw haul data, so if they 
-# aren't with us anymore that means they have been filtered away along the road.
-# I don't need to remove those ID2's though because when using left_join I keep only
-# rows in x!
-# cod_above_30cm$ID2[!cod_above_30cm$ID2 %in% test$ID2]
+# Left join dat and cod cpue data
+dat2 <- left_join(dat, cod_all) 
 
 # Left join dat and cpue data (cod_above_30cm)
-dat <- left_join(dat, cod_above_30cm) 
+dat2 <- left_join(dat2, cod_above_30cm) 
 
 # Left join dat and cpue data (cod_below_30cm)
-dat <- left_join(dat, cod_below_30cm) 
+dat2 <- left_join(dat2, cod_below_30cm) 
 
 # Left join dat and cpue data (fle_above_20cm)
-dat <- left_join(dat, fle_above_20cm) 
+dat2 <- left_join(dat2, fle_above_20cm) 
 
 # Left join dat and cpue data (fle_below_20cm)
-dat <- left_join(dat, fle_below_20cm) 
+dat2 <- left_join(dat2, fle_below_20cm) 
 
-head(dat)
 
-dat
+# CONTINUE HERE!!! 
+# DO I HAVE ANY ZEROES OF FLE?
+colnames(dat)
+
+# HOW can I have zero catch of cod here...  If I didn't catch any cod how can I have sampled one?
+min(dat$haul_cpue_cod)
+min(cod_all$haul_cpue_cod)
+tt <- filter(dat, haul_cpue_cod == 0)
+id2 <- sort(unique(tt$ID2))#[13]
+filter(dat, ID2 == id2)
+filter(cod2, ID2 == id2) # This is the data with also 0 catches
+
+
+
+# The raw cpue data does not correctly include all the hauls, hence it cannot correctly include 0 catches
+# The CA data here contains HaulNo 24, but the CPUE data does not. 
+# That's why I add in all the unique hauls from exchange. If the haul ID does not exist in the 
+# cpue data, it will get an NA, and then I convert it to a 0. 
+# But how can hauls that are in the CA data not exist in the CPUE data (and hence get a 0 catch?)
+
+filter(cov_dat, Year == 1991 & Quarter == 4 & Ship == "77AR" & Gear == "FOT") # This is the raw cpue data. It does not contain the HaulNo in the id2
+# Therefore it doesn't exist in the CPUE data. But it exists in the CA data
+filter(dat, Year == 1991 & Quarter == 4 & Ship == "77AR" & Gear == "FOT") %>% distinct(HaulNo) %>% arrange(HaulNo) # This is the raw cpue data
+# And when we add in ALL the haul ID's into the CPUE data, those IDs that are not in the CPUE but are in the CA data get 0. Which means there's
+# a zero catch even though we have condition data. That does not make sense. 
+
+filter(cod, ID2 == id2) # This data only has positive catches
+filter(cod, Year == 1991 & Quarter == 4) %>% distinct(Ship) # This data only has positive catches and does not therefore include the ID
+
+# So, the IDs in dat with 0 catches of cod even though we have sampled cod come from 
+# the full CPUE data that also includes 0 catches using exchange IDs. These IDs do not
+# exist in the cpue data that is filtered by cod... 
+
+
+
 
 # Again, I'm assuming here that NA means 0 catch, because there were no catches by that 
 # haul in the CPUE data. Testing a random ID2 that the covariate is repeated within haul
@@ -1375,7 +1493,9 @@ d <- dat %>%
          "lon" = "ShootLong",
          "year" = "Year",
          "sex" = "Sex",
-         "depth" = "depth_rast") %>% 
+         "depth" = "depth_rast",
+         "abun_spr_rec" = "abun_spr",
+         "abun_her_rec" = "abun_her") %>% 
   mutate(Fulton_K = weight_g/(0.01*length_cm^3), # not cod-specific
          sex = ifelse(sex == -9, "U", sex),
          sex = as.factor(sex),
@@ -1408,11 +1528,25 @@ d <- d %>%
 #   coord_sf(xlim = c(8, 25), ylim = c(54, 60)) +
 #   NULL
 
+# Add UTM coords
+# Function
+LongLatToUTM <- function(x, y, zone){
+  xy <- data.frame(ID = 1:length(x), X = x, Y = y)
+  coordinates(xy) <- c("X", "Y")
+  proj4string(xy) <- CRS("+proj=longlat +datum=WGS84")  ## for example
+  res <- spTransform(xy, CRS(paste("+proj=utm +zone=",zone," ellps=WGS84",sep='')))
+  return(as.data.frame(res))
+}
+
+utm_coords <- LongLatToUTM(d$lon, d$lat, zone = 33)
+d$X <- utm_coords$X/1000 # for computational reasons
+d$Y <- utm_coords$Y/1000 # for computational reasons
+
 # Finally, select only the main variables to make the data file smaller (for GitHub)
-d_analysis <- d %>% dplyr::select(year, depth, lat, lon, length_cm, weight_g, Fulton_K,
+d_analysis <- d %>% dplyr::select(year, depth, lat, lon, X, Y, length_cm, weight_g, Fulton_K,
                                   cpue_cod, cpue_cod_rec, cpue_fle, cpue_fle_rec,
                                   oxy, oxy_rec, temp, temp_rec, 
-                                  abun_spr, abun_spr_sd, abun_her, abun_her_sdm)
+                                  abun_spr_rec, abun_spr_sd, abun_her_rec, abun_her_sd)
 
 # sort(unique(d_analysis$year))
 
