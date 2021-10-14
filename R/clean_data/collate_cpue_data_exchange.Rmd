@@ -23,7 +23,8 @@ knitr::opts_chunk$set(
 # Intro
 In this script, I load exchange data from datras and calculate catch of cod and flounder in unit kg/km^2 (with TVL gear), by correcting for gear dimensions, sweeplength and trawl speed, following Orio et al 2017. I also add oxygen, temperature and depth covariates, which I use for modelling this biomass index. 
 
-# Load libraries
+## Load libraries
+
 ```{r, message=FALSE}
 rm(list = ls())
 
@@ -45,17 +46,43 @@ library(rgeos)
 library(chron)
 library(lattice)
 library(ncdf4)
-library(sdmTMB) # remotes::install_github("pbs-assess/sdmTMB")
 library(marmap)
 library(rnaturalearth)
 library(rnaturalearthdata)
 library(mapplots)
 library(geosphere)
+#remotes::install_github("pbs-assess/sdmTMB")
+library(sdmTMB)
+#library(gganimate)
 
 world <- ne_countries(scale = "medium", returnclass = "sf")
 ```
 
-#### Read data
+## For maps
+
+```{r read coastline data, message=FALSE, warning=FALSE}
+# Specify map ranges
+ymin = 54; ymax = 58; xmin = 12; xmax = 22
+
+map_data <- rnaturalearth::ne_countries(
+  scale = "medium",
+  returnclass = "sf", continent = "europe")
+
+# Crop the polygon for plotting and efficiency:
+# st_bbox(map_data) # find the rough coordinates
+swe_coast <- suppressWarnings(suppressMessages(
+  st_crop(map_data,
+          c(xmin = xmin, ymin = ymin, xmax = xmax, ymax = ymax))))
+
+# Transform our map into UTM 33 coordinates, which is the equal-area projection we fit in:
+utm_zone33 <- 32633
+swe_coast_proj <- sf::st_transform(swe_coast, crs = utm_zone33)
+
+#ggplot(swe_coast_proj) + geom_sf() 
+```
+
+## Read data
+
 ```{r, message=FALSE}
 # Read HH data
 # bits_hh <- getDATRAS(record = "HH", survey = "BITS", years = 1991:2020, quarters = 4)
@@ -77,8 +104,8 @@ bits_ca <- read.csv("data/DATRAS_exchange/bits_ca.csv")
 sweep <- read.csv("data/from_ale/sweep_9118_ml.csv", sep = ";", fileEncoding = "latin1")
 ```
 
-# Standardize catch data
-##### Standardize ships
+## Standardize catch data
+### Standardize ships
 ```{r, message=FALSE}
 # Before creating a a new ID, make sure that countries and ships names use the same format
 sort(unique(sweep$Ship))
@@ -165,7 +192,8 @@ unique(sweep$Ship3)[!unique(sweep$Ship3) %in% unique(bits_hh$Ship3)]
 # But all Sweep Ships are in the exchange data
 ```
 
-##### Standardize countries
+### Standardize countries
+
 ```{r, message=FALSE}
 # Now check which country codes are used
 sort(unique(sweep$Country))
@@ -217,7 +245,8 @@ sort(unique(sweep$Gear))
 unique(bits_hl$Gear)[!unique(bits_hl$Gear) %in% unique(sweep$Gear)] 
 ```
 
-#### Create a simple ID that works across all exchange data
+### Create a simple ID that works across all exchange data
+
 ```{r, message=FALSE}
 # Create ID column
 bits_ca <- bits_ca %>% 
@@ -233,7 +262,8 @@ bits_hh <- bits_hh %>%
 # bits_hh %>% group_by(IDx) %>% mutate(n = n()) %>% ungroup() %>% distinct(n)
 ```
 
-#### Create the same unique haul-ID in the cpue data that I have in the sweep-file
+### Create the same unique haul-ID in the cpue data that I have in the sweep-file
+
 ```{r, message=FALSE}
 bits_hl <- bits_hl %>% 
   mutate(haul.id = paste(Year, Quarter, Country, Ship3, Gear, StNo, HaulNo, sep = ":")) 
@@ -242,7 +272,8 @@ bits_hh <- bits_hh %>%
   mutate(haul.id = paste(Year, Quarter, Country, Ship3, Gear, StNo, HaulNo, sep = ":")) 
 ```
 
-#### Clean DATRAS EXCHANGE data
+### Clean DATRAS EXCHANGE data
+
 ```{r, message=FALSE}
 # Select just valid, additional and no oxygen hauls
 bits_hh <- bits_hh %>%
@@ -325,7 +356,8 @@ bits_hl <- bits_hl %>% filter(SD %in% c(24, 25, 26, 27, 28))
 bits_ca <- bits_ca %>% filter(SD %in% c(24, 25, 26, 27, 28))
 ```
 
-#### Filter species
+### Filter species
+
 ```{r, message=FALSE}
 hlcod <- bits_hl %>%
   filter(SpecCode %in% c("126436", "164712")) %>% 
@@ -336,7 +368,8 @@ hlfle <- bits_hl %>%
   mutate(Species = "Platichthys flesus")
 ```
 
-#### Prepare to add 0 catches
+### Prepare to add 0 catches
+
 ```{r, message=FALSE}
 # Find common columns in the HH and HL data (here already subset by species)
 comcol <- intersect(names(hlcod), names(bits_hh))
@@ -388,7 +421,7 @@ hlcod0 %>% distinct(haul.id) %>% nrow()
 hlfle0 %>% distinct(haul.id) %>% nrow()
 ```
 
-#### Create (unstandardized) CPUE for `SpecVal=1`. If `DataType=C` then `CPUEun=HLNoAtLngt`, if `DataType=R` then `CPUEun=HLNoAtLngt/(HaulDur/60)`, if `DataType=S` then `CPUEun=(HLNoAtLngt*SubFactor)/(HaulDur/60)`. If `SpecVal="zeroCatch"` then `CPUEun=0`, if `SpecVal=4` we need to decide (no length measurements, only total catch). Note that here we also add zero CPUE if `SpecVal=="zeroCatch"`.
+### Create (unstandardized) CPUE for `SpecVal=1`. If `DataType=C` then `CPUEun=HLNoAtLngt`, if `DataType=R` then `CPUEun=HLNoAtLngt/(HaulDur/60)`, if `DataType=S` then `CPUEun=(HLNoAtLngt*SubFactor)/(HaulDur/60)`. If `SpecVal="zeroCatch"` then `CPUEun=0`, if `SpecVal=4` we need to decide (no length measurements, only total catch). Note that here we also add zero CPUE if `SpecVal=="zeroCatch"`.
 
 Then I will sum for the same haul the CPUE of the same length classes if they were sampled with different subfactors or with different sexes.
 
@@ -470,7 +503,8 @@ hlfleL <- hlfle0 %>%
   dplyr::select(-X, -id3)
 ```
 
-#### Get and add annual weight-length relationships from the CA data for both cod and flounder so that I can calculate CPUE in biomass rather than numbers further down
+### Get and add annual weight-length relationships from the CA data for both cod and flounder so that I can calculate CPUE in biomass rather than numbers further down
+
 ```{r, message=FALSE}
 # Cod
 bits_ca_cod <- bits_ca %>% 
@@ -572,7 +606,8 @@ fle_slope <- bits_ca_fle %>%
   dplyr::select(Year, b)
 ```
 
-#### Join the annual L-W relationships to the respective catch data to calculate CPUE in biomass not abundance
+### Join the annual L-W relationships to the respective catch data to calculate CPUE in biomass not abundance
+
 ```{r, message=FALSE}
 # These are the haul-data
 # hlcodL
@@ -584,7 +619,8 @@ hlfleL <- left_join(hlfleL, fle_intercept, by = "Year")
 hlfleL <- left_join(hlfleL, fle_slope, by = "Year")
 ```
 
-#### Convert from CPUE in numbers to kg
+### Convert from CPUE in numbers to kg
+
 ```{r, message=FALSE}
 # First standardize length to cm and then check how zero-catches are implemented at this stage
 hlcodL <- hlcodL %>% 
@@ -712,8 +748,9 @@ fle_0plot <- hlfleL %>%
 cod_0plot / fle_0plot
 ```
 
-#### Standardize according to Orio
+### Standardize according to Orio
 To get unit: kg of fish caught by trawling for 1 h a standard bottom swept area of 0.45km2 using a TVL trawl with 75 m sweeps at the standard speed of three knots
+
 ```{r, message=FALSE}
 # Remove hauls done with the TVL gear with a SweepLngt < 50 (these are calibration hauls, pers. com. Anders & Ale)
 # And also hauls without length-information
@@ -992,7 +1029,8 @@ dat <- dat %>% filter(density_fle < 10000)
 ggplot(dat, aes(density, density_fle)) + geom_point()
 ```
 
-#### Compare cod data with Orio et al (2017)
+### Compare cod data with Orio et al (2017)
+
 ```{r, message=FALSE}
 # Read Orio data first for comparison:
 test_cod <- hlcodhaul %>% filter(!Country == "SWE")
@@ -1230,8 +1268,9 @@ test_full %>%
 # Then check lenght-weight relationships again
 ```
 
-# Add in the environmental variables
-#### Depth
+## Add in the environmental variables
+### Depth
+
 ```{r}
 # Read the tifs
 west <- raster("data/depth_geo_tif/D5_2018_rgb-1.tif")
@@ -1250,7 +1289,8 @@ dat$depth <- (dat$depth - max(drop_na(dat)$depth)) *-1
 ggplot(dat, aes(depth)) + geom_histogram()
 ```
 
-#### Oxygen
+### Oxygen
+
 ```{r}
 # Downloaded from here: https://resources.marine.copernicus.eu/?option=com_csw&view=details&product_id=BALTICSEA_REANALYSIS_BIO_003_012
 # Extract raster points: https://gisday.wordpress.com/2014/03/24/extract-raster-values-from-points-using-r/comment-page-1/
@@ -1516,7 +1556,8 @@ dat$oxy <- dat$oxy * 0.0223909
 dat <- dat %>% drop_na(oxy)
 ```
 
-#### Temperature
+### Temperature
+
 ```{r}
 # Open the netCDF file
 ncin <- nc_open("data/NEMO_Nordic_SCOBI/dataset-reanalysis-nemo-monthlymeans_1608127623694.nc")
@@ -1762,7 +1803,8 @@ dat <- dat %>% dplyr::select(-id_temp, -id_oxy)
 dat <- dat %>% drop_na(temp)
 ```
 
-# Add UTM coords
+## Add UTM coords
+
 ```{r}
 # First add UTM coords
 # Add UTM coords
@@ -1780,7 +1822,50 @@ dat$X <- utm_coords$X/1000 # for computational reasons
 dat$Y <- utm_coords$Y/1000 # for computational reasons
 ```
 
-# Save data
+## Make Gifs
+
+```{r make oxygen and temperature gifs, include=FALSE}
+# # Make gif for oxygen
+# oxy_plot <- ggplot(swe_coast_proj) + 
+#   geom_raster(data = dat, aes(x = X * 1000, y = Y * 1000, fill = oxy)) +
+#   geom_sf(size = 0.3) +
+#   scale_fill_viridis() +
+#   labs(x = "Longitude", y = "Latitude", fill = expression(paste("O" [2], " [ml/L]", sep = ""))) +
+#   NULL
+# 
+# # Here comes the gganimate specific bits
+# anim_o <- oxy_plot +
+#   labs(title = 'Year: {frame_time}') +
+#   transition_time(as.integer(year)) +
+#   ease_aes('linear') +
+#   theme_classic(base_size = 20)
+# 
+# gganimate::animate(anim_o, height = 600, width = 600)
+# 
+# anim_save(filename = "/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/cod_condition/output/gif/oxy.gif")
+# 
+# # Make gif for temperature
+# temp_plot <- ggplot(swe_coast_proj) + 
+#   geom_raster(data = filter(preds_cod$data, year == "1999"), aes(x = X * 1000, y = Y * 1000, fill = temp)) +
+#   geom_sf(size = 0.5) +
+#   scale_fill_viridis(option = "inferno", direction = -1) +
+#   labs(x = "Longitude", y = "Latitude", fill = "Temperature [°C]") +
+#   NULL
+# 
+# # Here comes the gganimate specific bits
+# anim_t <- temp_plot +
+#   labs(title = 'Year: {frame_time}') +
+#   transition_time(as.integer(year)) +
+#   ease_aes('linear') +
+#   theme_classic(base_size = 20)
+# 
+# gganimate::animate(anim_t, height = 600, width = 600)
+# 
+# anim_save(filename = "/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/cod_condition/output/gif/temp.gif")
+```
+
+## Save data
+
 ```{r}
 write.csv(dat, file = "data/for_analysis/mdat_cpue.csv", row.names = FALSE)
 ```

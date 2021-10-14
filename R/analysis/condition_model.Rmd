@@ -29,7 +29,6 @@ Fit main model (see exploratory scripts and model comparison), visualize results
 library(tidyverse); theme_set(theme_light(base_size = 12))
 library(tidylog)
 library(viridis)
-library(sdmTMB) 
 library(marmap)
 library(rnaturalearth)
 library(rnaturalearthdata)
@@ -43,7 +42,8 @@ library(png)
 library(RCurl)
 library(wesanderson)
 library(qwraps2) # To load entire cache in interactive r session, do: qwraps2::lazyload_cache_dir(path = "R/analysis/condition_model_cache/html")
-remotes::install_github("pbs-assess/sdmTMB")
+#remotes::install_github("pbs-assess/sdmTMB")
+library(sdmTMB)
 ```
 
 ## For maps
@@ -123,7 +123,6 @@ d <- d %>%
 d <- d %>% 
 #  drop_na(abun_spr_sd, abun_her_sd) %>% 
   mutate(ln_length_cm = log(length_cm),
-         ln_length_cm_ct = ln_length_cm - mean(ln_length_cm),
          ln_weight_g = log(weight_g),
          abun_her_sc = abun_her,
          abun_her_sd_sc = abun_her_sd,
@@ -141,6 +140,9 @@ d <- d %>%
   mutate(year = as.integer(year)) %>% 
   mutate(oxy_sc = (oxy - mean(oxy))/sd(oxy),
          temp_sc = (temp - mean(temp))/sd(temp))
+
+sd(d$oxy)
+sd(d$depth)
 ```
 
 ## Read the prediction grids
@@ -153,7 +155,7 @@ pred_grid2 <- pred_grid2 %>% drop_na(oxy, depth, temp)
 
 # Now standardize the variables in the data and center the variable using the annual means in the data grid
 pred_grid2 <- pred_grid2 %>%
-  mutate(ln_length_cm = mean(d$ln_length_cm)) %>% # For now we'll predict changes in the intercept ("condition factor")
+  mutate(ln_length_cm = 0) %>% # For now we'll predict changes in the intercept ("condition factor"), so ln_length_cm = 0 (log(1))
   mutate(year = as.integer(year)) %>% 
   filter(year %in% c(unique(d$year))) %>% 
   mutate(depth_sc = (depth - mean(d$depth))/sd(d$depth)) %>%
@@ -180,6 +182,30 @@ pred_grid_avg <- pred_grid2 %>%
          temp_sc = 0)
 ```
 
+```{r, include=FALSE}
+# Include some tests for the manuscript
+plot(oxy ~ depth, data = pred_grid2)
+m1 <- lm(oxy ~ depth, data = pred_grid2)
+nd <- data.frame(depth = c(40, 45))
+nd$pred <- predict(m1, newdata = nd)
+nd
+nd$pred[2] - nd$pred[1]
+
+plot(temp ~ depth, data = pred_grid2)
+m1 <- lm(temp ~ depth, data = filter(pred_grid2, depth < 100))
+nd <- data.frame(depth = c(40, 45))
+nd$pred <- predict(m1, newdata = nd)
+nd
+nd$pred[2] - nd$pred[1]
+
+pred_grid2 %>% 
+  group_by(subdiv, year) %>% 
+  summarise(mean_oxy = mean(oxy)) %>% 
+  ungroup() %>% 
+  ggplot(., aes(year, mean_oxy, color = subdiv)) +
+  geom_line()
+```
+
 ## Make spde mesh
 
 ```{r make barrier spde mesh, results='hide', cache=TRUE, message=FALSE}
@@ -187,7 +213,10 @@ spde <- make_mesh(d, xy_cols = c("X", "Y"),
                   n_knots = 200, 
                   type = "kmeans", seed = 42)
 
+# Plot and save spde
+png(file = "figures/supp/condition/spde.png", units = "in", width = 6.5, height = 6.5, res = 300)
 plot(spde)
+dev.off()
 ```
 
 ## Full model
@@ -195,7 +224,7 @@ plot(spde)
 ```{r full model, cache=TRUE}
 ptm <- proc.time()
 
-mfull <- sdmTMB(formula = ln_weight_g ~ ln_length_cm_ct + depth_sc + oxy_sc + temp_sc + 
+mfull <- sdmTMB(formula = ln_weight_g ~ ln_length_cm + depth_sc + oxy_sc + temp_sc + 
                   cpue_fle_sc + cpue_fle_rec_sc + cpue_cod_sc + cpue_cod_rec_sc +
                   abun_spr_sc + abun_spr_sd_sc + abun_her_sc + abun_her_sd_sc + oxy_sc*depth_sc +
                   temp_sc*depth_sc + oxy_sc*temp_sc -1,
@@ -214,7 +243,7 @@ tidy(mfull, conf.int = TRUE)
 ```{r extract residuals}
 d$residuals_mfull <- residuals(mfull)
 
-png(file = "figures/supp/cond_qq.png", units = "in", width = 6.5, height = 6.5, res = 300)
+png(file = "figures/supp/condition/qq.png", units = "in", width = 6.5, height = 6.5, res = 300)
 qqnorm(d$residuals_mfull); abline(a = 0, b = 1)
 dev.off()
 
@@ -229,33 +258,33 @@ ggplot(swe_coast_proj) +
   theme(strip.text = element_text(size = 8, colour = 'black', margin = margin()),
         strip.background = element_rect(fill = "grey90"))
 
-ggsave("figures/supp/cond_spatial_resid.png", width = 6.5, height = 6.5, dpi = 600)
+ggsave("figures/supp/condition/spatial_resid.png", width = 6.5, height = 6.5, dpi = 600)
 
 # Residuals vs length
-ggplot(d, aes(ln_length_cm, residuals_mfull)) +
-  geom_point(alpha = 0.1, color = "grey20") + 
-  geom_abline(color = "red", slope = 0, linetype = 2) +
-  geom_smooth()
-
-ggsave("figures/supp/residuals_vs_length.png", width = 6.5, height = 6.5, dpi = 600)
+# ggplot(d, aes(ln_length_cm, residuals_mfull)) +
+#   geom_point(alpha = 0.1, color = "grey20") + 
+#   geom_abline(color = "red", slope = 0, linetype = 2) +
+#   geom_smooth()
+# 
+# ggsave("figures/supp/condition/residuals_vs_length.png", width = 6.5, height = 6.5, dpi = 600)
 
 # Residuals vs length and year
 ggplot(d, aes(x = ln_length_cm, y = residuals_mfull, color = residuals_mfull)) +
   geom_point(size = 0.1, alpha = 1) + 
   geom_hline(yintercept = 0, size = 0.5, color = "black", linetype = 2, alpha = 0.5) +
-  labs(x = "ln(length)", y = "Residuals", color = "") +
+  labs(x = "log(length)", y = "Residuals", color = "") +
   stat_smooth(color = "black", size = 0.5) +
   facet_wrap(~year, ncol = 5) +
-  scale_color_gradient2() + 
-  theme_classic(base_size = 12)
+  scale_color_gradient2() +
+  theme_facet_map()
 
-ggsave("figures/supp/residuals_vs_length_and_year2.png", width = 6.5, height = 6.5, dpi = 600)
+ggsave("figures/supp/condition/residuals_vs_length_and_year.png", width = 6.5, height = 6.5, dpi = 600)
 
-ggplot(d, aes(year, ln_length_cm, z = residuals_mfull)) +
-  stat_summary_2d(bins = 40) +
-  scale_fill_gradient2()
-
-ggsave("figures/supp/residuals_vs_length_and_year2.png", width = 6.5, height = 6.5, dpi = 600)
+# ggplot(d, aes(year, ln_length_cm, z = residuals_mfull)) +
+#   stat_summary_2d(bins = 40) +
+#   scale_fill_gradient2()
+# 
+# ggsave("figures/supp/condition/residuals_vs_length_and_year2.png", width = 6.5, height = 6.5, dpi = 600)
 ```
 
 ## Calculate the annual condition factor
@@ -307,7 +336,7 @@ cv <- d %>%
   #stat_smooth(method = "gam", formula = y ~ s(x, k = 3), color = "tomato", size = 1.2, alpha = 0.5) +
   stat_smooth(method = "lm", color = "tomato", size = 1.2, alpha = 0.5) + 
   geom_point(size = 3, shape = 21, fill = "black", color = "white") +
-  labs(x = "Year", y = "CV", color = "Quantiles") +
+  labs(x = "Year", y = "CV") +
   theme(plot.margin = unit(c(0.4, 0.4, 0.4, 0), "cm")) +
   NULL
 
@@ -332,7 +361,7 @@ cond_slope_fig <- cond_year_slopes %>%
   #filter(upr_num > 10 & upr_num < 70) %>%
   filter(upr_num > 10 & upr_num < 80) %>% 
   ggplot(., aes(as.factor(upr_num), estimate)) +
-  geom_hline(yintercept = 0, alpha = 0.5, linetype = 2) +
+  geom_hline(yintercept = 0, alpha = 0.5, linetype = 2, color = "red", alpha = 0.5) +
   geom_point(size = 1, position = position_dodge(width = 0.5)) + 
   geom_errorbar(aes(x = as.factor(upr_num),
                     ymax = estimate + 1.96*std.error,
@@ -360,24 +389,25 @@ ggsave("figures/cond_index_sizes_change_cv.png", width = 6.5, height = 6.5, dpi 
 # Plot quantiles...
 d %>% 
   group_by(year) %>% 
-  summarise(q10 = hutils::weighted_quantile(v = le_cren, p = c(0.1)),
-            q50 = hutils::weighted_quantile(v = le_cren, p = c(0.5)),
-            q90 = hutils::weighted_quantile(v = le_cren, p = c(0.9))) %>% 
+  summarise("1st" = hutils::weighted_quantile(v = le_cren, p = c(0.1)),
+            "5th (median)" = hutils::weighted_quantile(v = le_cren, p = c(0.5)),
+            "9th" = hutils::weighted_quantile(v = le_cren, p = c(0.9))) %>% 
   ungroup() %>% 
-  pivot_longer(2:4, names_to = "quantiles", values_to = "le_cren") %>% 
-  group_by(quantiles) %>% 
+  pivot_longer(2:4, names_to = "Deciles", values_to = "le_cren") %>% 
+  group_by(Deciles) %>% 
   #mutate(le_cren_ct = le_cren - mean(le_cren)) %>% 
-  ggplot(., aes(year, le_cren, color = factor(quantiles), fill = factor(quantiles))) +
+  ggplot(., aes(year, le_cren, color = factor(Deciles), fill = factor(Deciles))) +
   stat_smooth() + 
   stat_smooth(se = FALSE) + 
   guides(fill = FALSE) +
-  labs(x = "Year", y = "Le Cren's condition index", color = "Quantiles") +
+  labs(x = "Year", y = "Le Cren's condition index", color = "Deciles") +
   scale_color_brewer(palette = "Dark2") +
   scale_fill_brewer(palette = "Dark2") +
+  guides(color = guide_legend(override.aes = list(fill = NA))) + 
   theme(aspect.ratio = 1, legend.position = c(0.85, 0.85), legend.background = element_blank()) + 
   geom_point() 
 
-ggsave("figures/supp/le_cren_quantiles.png", width = 5, height = 7.5, dpi = 600)
+ggsave("figures/supp/condition/le_cren_quantiles.png", width = 6.5, height = 6.5, dpi = 600)
 ```
 
 ```{r extract coefficients, message=FALSE}
@@ -385,7 +415,7 @@ ggsave("figures/supp/le_cren_quantiles.png", width = 5, height = 7.5, dpi = 600)
 mfull_est <- bind_rows(tidy(mfull, effects = "ran_par", conf.int = TRUE) %>%
                          filter(term %in% c("sigma_O", "sigma_E")),
                        tidy(mfull, effects = "fixed", conf.int = TRUE) %>%
-                         filter(!term %in% c("ln_length_cm_ct"))) %>%
+                         filter(!term %in% c("ln_length_cm"))) %>%
   mutate(term = factor(term)) %>%
   mutate(term = recode(term,
                        "oxy_sc" = "Oxygen",
@@ -461,7 +491,7 @@ ggplot(swe_coast_proj) +
   theme(strip.text = element_text(size = 8, colour = 'black', margin = margin()),
         strip.background = element_rect(fill = "grey90"))
 
-ggsave("figures/supp/allyrs_condition_map.png", width = 6.5, height = 6.5, dpi = 600)
+ggsave("figures/supp/condition/all_years_condition_map.png", width = 6.5, height = 6.5, dpi = 600)
 
 # And a smaller map for selected years
 ggplot(swe_coast_proj) +
@@ -479,24 +509,22 @@ ggsave("figures/condition_map.png", width = 6.5, height = 6.5, dpi = 600)
 ```
 
 ```{r gganimate condition, message=FALSE}
-# p <- ggplot(poxy2, aes(X, Y, fill = est)) +
-#   geom_raster() +
-#   scale_fill_viridis(option = "magma",
-#                      name = "log(condition factor)") +
-#   geom_sf(data = world, inherit.aes = F, size = 0.2) +
-#   coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
-#   labs(x = "lon", y = "lat")
+# p <- 
+#   ggplot(swe_coast_proj) +
+#   geom_raster(data = pred2, aes(x = X*1000, y = Y*1000, fill = est)) +
+#   geom_sf(size = 0.3) +
+#   scale_fill_gradientn(colours = rev(pal), name = "log(condition factor)") + 
+#   labs(x = "Longitude", y = "Latitude")
 # 
 # # Here comes the gganimate specific bits
 # anim <- p +
 #   labs(title = 'Year: {frame_time}') +
 #   transition_time(as.integer(year)) +
-#   ease_aes('linear') +
-#   theme_classic(base_size = 20)
+#   ease_aes('linear')
 # 
 # gganimate::animate(anim, height = 600, width = 600)
 # 
-# anim_save(filename = "/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/cod_condition/R/analysis/condition_model_files/cond_oxy.gif")
+# anim_save(filename = "/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/cod_condition/output/gif/cond_oxy.gif")
 ```
 
 ## Plot spatial and spatiotemporal random effects:
@@ -512,7 +540,7 @@ ggplot(swe_coast_proj) +
   ggtitle("Spatiotemporal random effects") +
   theme_facet_map()
 
-ggsave("figures/supp/cond_epsilon_st_map.png", width = 6.5, height = 6.5, dpi = 600)
+ggsave("figures/supp/condition/epsilon_st_map.png", width = 6.5, height = 6.5, dpi = 600)
 
 # Plot spatial random effect
 ggplot(swe_coast_proj) + 
@@ -524,7 +552,7 @@ ggplot(swe_coast_proj) +
   theme_light(base_size = 10) + 
   ggtitle("Spatial random effects")
 
-ggsave("figures/supp/cond_omega_s_map.png", width = 6.5, height = 6.5, dpi = 600)
+ggsave("figures/supp/condition/omega_s_map.png", width = 6.5, height = 6.5, dpi = 600)
 ```
 
 ## Calculate the "spatial trend" from the estimates:
@@ -532,46 +560,48 @@ ggsave("figures/supp/cond_omega_s_map.png", width = 6.5, height = 6.5, dpi = 600
 ```{r calculate "spatial trend", message=FALSE}
 # Fit a linear model to each prediction grid of the estimate over time
 # https://community.rstudio.com/t/extract-slopes-by-group-broom-dplyr/2751/7
-# time_slopes_by_year <- pred2 %>%
-#   mutate(id = paste(lon, lat, sep = "_")) %>%
-#   split(.$id) %>%
-#   purrr::map(~lm(est ~ year, data = .x)) %>%
-#   purrr::map_df(broom::tidy, .id = 'id') %>%
-#   filter(term == 'year')
-# 
-# # Plot the slopes
-# time_slopes_by_year2 <- time_slopes_by_year %>%
-#   separate(id, c("X", "Y"), sep = "_") %>%
-#   mutate(X = as.numeric(X),
-#          Y = as.numeric(Y))
-# 
-# ggplot(swe_coast_proj) + 
-#   geom_raster(data = time_slopes_by_year2, aes(x = X * 1000, y = Y * 1000, fill = estimate)) +
-#   geom_sf(size = 0.3) +
-#   scale_fill_gradient2(midpoint = 0) +
-#   facet_wrap(~ year, ncol = 5) +
-#   labs(x = "Longitude", y = "Latitude") +
-#   theme_light(base_size = 10) + 
-#   ggtitle("Time slopes by each pred grid")
-# 
-# # Plot the upper CI
-# ggplot(swe_coast_proj) + 
+time_slopes_by_year <- pred2 %>%
+  mutate(id = paste(X, Y, sep = "_")) %>%
+  split(.$id) %>%
+  purrr::map(~lm(est ~ year, data = .x)) %>%
+  purrr::map_df(broom::tidy, .id = 'id') %>%
+  filter(term == 'year')
+
+# Plot the slopes
+time_slopes_by_year2 <- time_slopes_by_year %>%
+  separate(id, c("X", "Y"), sep = "_") %>%
+  mutate(X = as.numeric(X),
+         Y = as.numeric(Y))
+
+ggplot(swe_coast_proj) +
+  geom_raster(data = time_slopes_by_year2, aes(x = X * 1000, y = Y * 1000, fill = estimate)) +
+  geom_sf(size = 0.3) +
+  scale_fill_gradient2(midpoint = 0) +
+  facet_wrap(~ term, ncol = 5) +
+  labs(x = "Longitude", y = "Latitude") +
+  theme_light(base_size = 10) +
+  ggtitle("Time slopes by each pred grid")
+
+ggsave("figures/supp/condition/spatial_trend_condition.png", width = 6.5, height = 6.5, dpi = 600)
+
+# Plot the upper CI
+# ggplot(swe_coast_proj) +
 #   geom_raster(data = time_slopes_by_year2, aes(x = X * 1000, y = Y * 1000, fill = estimate + std.error*1.96)) +
 #   geom_sf(size = 0.3) +
 #   scale_fill_gradient2(midpoint = 0) +
-#   facet_wrap(~ year, ncol = 5) +
+#   facet_wrap(~ term, ncol = 5) +
 #   labs(x = "Longitude", y = "Latitude") +
-#   theme_light(base_size = 10) + 
-#   ggtitle("Upper CI of time slopes by each pred grid") +
+#   theme_light(base_size = 10) +
+#   ggtitle("Upper CI of time slopes by each pred grid")
 # 
 # # Lower CI
-# ggplot(swe_coast_proj) + 
+# ggplot(swe_coast_proj) +
 #   geom_raster(data = time_slopes_by_year2, aes(x = X * 1000, y = Y * 1000, fill = estimate - std.error*1.96)) +
 #   geom_sf(size = 0.3) +
 #   scale_fill_gradient2(midpoint = 0) +
-#   facet_wrap(~ year, ncol = 5) +
+#   facet_wrap(~ term, ncol = 5) +
 #   labs(x = "Longitude", y = "Latitude") +
-#   theme_light(base_size = 10) + 
+#   theme_light(base_size = 10) +
 #   ggtitle("Lower CI of time slopes by each pred grid")
 ``` 
 
@@ -584,7 +614,7 @@ nd_dep <- data.frame(depth_sc = seq(min(d$depth_sc), max(d$depth_sc), length.out
 
 nd_dep <- nd_dep %>%
   mutate(year = 2003L,
-         ln_length_cm_ct = 0,
+         ln_length_cm = 0,
          oxy_sc = 0,
          temp_sc = 0,
          cpue_fle_sc = 0,
@@ -615,7 +645,7 @@ nd_oxy <- data.frame(oxy_sc = seq(min(d$oxy_sc), max(d$oxy_sc), length.out = 100
 
 nd_oxy <- nd_oxy %>%
   mutate(year = 2003L,
-         ln_length_cm_ct = 0,
+         ln_length_cm = 0,
          depth_sc = 0,
          temp_sc = 0,
          cpue_fle_sc = 0,
@@ -649,7 +679,7 @@ nd_tem <- data.frame(temp_sc = seq(min(d$temp_sc), max(d$temp_sc), length.out = 
 
 nd_tem <- nd_tem %>%
   mutate(year = 2003L,
-         ln_length_cm_ct = 0,
+         ln_length_cm = 0,
          oxy_sc = 0,
          depth_sc = 0,
          cpue_fle_sc = 0,
@@ -680,7 +710,7 @@ nd_cod <- data.frame(cpue_cod_sc = seq(min(d$cpue_cod_sc), max(d$cpue_cod_sc), l
 
 nd_cod <- nd_cod %>%
   mutate(year = 2003L,
-         ln_length_cm_ct = 0,
+         ln_length_cm = 0,
          oxy_sc = 0,
          temp_sc = 0,
          cpue_fle_sc = 0,
@@ -711,7 +741,7 @@ nd_spr <- data.frame(abun_spr_sd_sc = seq(min(d$abun_spr_sd_sc), max(d$abun_spr_
 
 nd_spr <- nd_spr %>%
   mutate(year = 2003L,
-         ln_length_cm_ct = 0,
+         ln_length_cm = 0,
          oxy_sc = 0,
          temp_sc = 0,
          cpue_fle_sc = 0,
@@ -739,6 +769,6 @@ mar_spr <- ggplot(p_margin_spr, aes(abun_spr_sd_sc, est, ymin = est - 1.96 * est
 mar_dep + mar_oxy + mar_temp + mar_cod + mar_spr + 
   plot_annotation(tag_levels = 'A') 
 
-ggsave("figures/supp/marginal_effects.png", width = 6.5, height = 6.5, dpi = 600)
+ggsave("figures/supp/condition/marginal_effects.png", width = 6.5, height = 6.5, dpi = 600)
 ```
 

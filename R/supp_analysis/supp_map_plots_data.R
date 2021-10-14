@@ -73,15 +73,15 @@ p1 / p2
 
 ggsave("figures/supp/map_subdiv_areas.png", width = 6.5, height = 6.5, dpi = 600)
 
-ggplot(swe_coast_proj) +
-  geom_point(data = hauls, aes(x = X*1000, y = Y*1000, color = Data), size = 0.2) +
-  geom_sf(size = 0.3) +
-  facet_wrap(~year, ncol = 5) +
-  scale_fill_brewer(palette = "Dark2") + 
-  labs(x = "Longitude", y = "Latitude") + 
-  theme(axis.text.x = element_text(angle = 90),
-        axis.text = element_text(size = 6),
-        strip.text = element_text(size = 8, colour = 'black', margin = margin()),
-        strip.background = element_rect(fill = "grey90"))
-
-ggsave("figures/supp/data_position_year.png", width = 6.5, height = 6.5, dpi = 600)
+# ggplot(swe_coast_proj) +
+#   geom_point(data = hauls, aes(x = X*1000, y = Y*1000, color = Data), size = 0.2) +
+#   geom_sf(size = 0.3) +
+#   facet_wrap(~year, ncol = 5) +
+#   scale_fill_brewer(palette = "Dark2") + 
+#   labs(x = "Longitude", y = "Latitude") + 
+#   theme(axis.text.x = element_text(angle = 90),
+#         axis.text = element_text(size = 6),
+#         strip.text = element_text(size = 8, colour = 'black', margin = margin()),
+#         strip.background = element_rect(fill = "grey90"))
+# 
+# ggsave("figures/supp/data_position_year.png", width = 6.5, height = 6.5, dpi = 600)

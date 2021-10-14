@@ -45,14 +45,38 @@ library(rgeos)
 library(chron)
 library(lattice)
 library(ncdf4)
-remotes::install_github("pbs-assess/sdmTMB"); library(sdmTMB)
 library(marmap)
 library(rnaturalearth)
 library(rnaturalearthdata)
 library(mapplots)
 library(geosphere)
+#remotes::install_github("pbs-assess/sdmTMB")
+library(sdmTMB)
 
 world <- ne_countries(scale = "medium", returnclass = "sf")
+```
+
+## For maps
+
+```{r read coastline data, message=FALSE, warning=FALSE}
+# Specify map ranges
+ymin = 54; ymax = 58; xmin = 12; xmax = 22
+
+map_data <- rnaturalearth::ne_countries(
+  scale = "medium",
+  returnclass = "sf", continent = "europe")
+
+# Crop the polygon for plotting and efficiency:
+# st_bbox(map_data) # find the rough coordinates
+swe_coast <- suppressWarnings(suppressMessages(
+  st_crop(map_data,
+          c(xmin = xmin, ymin = ymin, xmax = xmax, ymax = ymax))))
+
+# Transform our map into UTM 33 coordinates, which is the equal-area projection we fit in:
+utm_zone33 <- 32633
+swe_coast_proj <- sf::st_transform(swe_coast, crs = utm_zone33)
+
+#ggplot(swe_coast_proj) + geom_sf() 
 ```
 
 ## Read data
@@ -849,6 +873,7 @@ dat$Y <- utm_coords$Y/1000 # for computational reasons
 
 ## Add cod and flounder density covariates
 ### First by fitting models and then predicting to `dat`
+
 ```{r, message=FALSE, cache=TRUE}
 d <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cpue.csv")
 
@@ -933,23 +958,6 @@ pred_grid2 <- pred_grid2 %>%
          temp_sc = (temp - mean(d$temp))/sd(d$temp),
          oxy_sc = (oxy - mean(d$oxy))/sd(d$oxy)) %>% # Need to scale these to the mean and sd in the data!
   drop_na(oxy, depth, temp)
-
-# Specify map ranges
-ymin = 54; ymax = 58; xmin = 12; xmax = 22
-
-map_data <- rnaturalearth::ne_countries(
-  scale = "medium",
-  returnclass = "sf", continent = "europe")
-
-# Crop the polygon for plotting and efficiency:
-# st_bbox(map_data) # find the rough coordinates
-swe_coast <- suppressWarnings(suppressMessages(
-  st_crop(map_data,
-          c(xmin = xmin, ymin = ymin, xmax = xmax, ymax = ymax))))
-
-# Transform our map into UTM 33 coordinates, which is the equal-area projection we fit in:
-utm_zone33 <- 32633
-swe_coast_proj <- sf::st_transform(swe_coast, crs = utm_zone33)
 
 # Predict on the pred grid, calculate index
 preds_fle <- predict(mfle, newdata = pred_grid2, return_tmb_object = TRUE, area = 2*2)

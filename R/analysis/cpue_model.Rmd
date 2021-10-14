@@ -1,5 +1,5 @@
 ---
-title: "Cod cpue in relation to oxygen"
+title: "Cod density in relation to oxygen"
 author: "Max Lindmark, Sean Andersson, Michele Casini"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
@@ -21,7 +21,7 @@ knitr::opts_chunk$set(
 ```
 
 # Intro
-Fit CPUE (density) model with environmental predictors and use that to calculate weighted mean dissolved oxygen, temperature and depth of Baltic cod
+Fit density (also referred to as CPUE) model with environmental predictors and use that to calculate weighted mean dissolved oxygen, temperature and depth of Baltic cod
 
 ```{r lib, message=FALSE}
 # Load libraries, install if needed
@@ -43,12 +43,13 @@ library(rgeos)
 library(chron)
 library(lattice)
 library(ncdf4)
-remotes::install_github("pbs-assess/sdmTMB"); library(sdmTMB)
 library(marmap)
 library(rnaturalearth)
 library(rnaturalearthdata)
 library(mapplots)
-library(qwraps2) # To load entire cache in interactive r session, do: qwraps2::lazyload_cache_dir(path = "R/analysis/cpue_model_cache/html")
+library(qwraps2) 
+#remotes::install_github("pbs-assess/sdmTMB")
+library(sdmTMB)# To load entire cache in interactive r session, do: qwraps2::lazyload_cache_dir(path = "R/analysis/cpue_model_cache/html")
 ```
 
 ## For maps
@@ -146,7 +147,10 @@ spde <- make_mesh(d, xy_cols = c("X", "Y"),
                   n_knots = 200, 
                   type = "kmeans", seed = 42)
 
+# Plot and save spde
+png(file = "figures/supp/density/spde.png", units = "in", width = 6.5, height = 6.5, res = 300)
 plot(spde)
+dev.off()
 ```
 
 ## Fit the models of cpue
@@ -168,7 +172,7 @@ tidy(m, conf.int = TRUE)
 ```{r qqplot and resid, results='hide', cache=TRUE, message=FALSE}
 d$residualsm <- residuals(m)
 
-png(file = "figures/supp/cpue_qq.png", units = "in", width = 6.5, height = 6.5, res = 300)
+png(file = "figures/supp/density/qq.png", units = "in", width = 6.5, height = 6.5, res = 300)
 qqnorm(d$residualsm); abline(a = 0, b = 1)
 dev.off()
 
@@ -183,7 +187,7 @@ ggplot(swe_coast_proj) +
   theme(strip.text = element_text(size = 8, colour = 'black', margin = margin()),
         strip.background = element_rect(fill = "grey90"))
 
-ggsave("figures/supp/cpue_spatial_resid.png", width = 6.5, height = 6.5, dpi = 600)
+ggsave("figures/supp/density/spatial_resid.png", width = 6.5, height = 6.5, dpi = 600)
 ```
 
 ## Check the AR1 parameter (`rho` is `ar_phi` on the -1 to 1 scale):
@@ -192,7 +196,7 @@ ggsave("figures/supp/cpue_spatial_resid.png", width = 6.5, height = 6.5, dpi = 6
 tidy(m, effects = "ran_pars", conf.int = TRUE) %>% filter(term == "rho")
 ```
 
-## Predict and extract CPUE-weighted mean oxygen and depth per prediction grid
+## Predict and extract density-weighted mean oxygen and depth per prediction grid
 
 ```{r predict, cache=TRUE}
 predict_mcod <- predict(m, newdata = pred_grid2)
@@ -201,7 +205,7 @@ predict_mcod <- predict(m, newdata = pred_grid2)
 ## Plot predictions on map
 
 ```{r plot, include=FALSE}
-# Plot predicted CPUE and random effects
+# Plot predicted density and random effects
 ggplot(swe_coast_proj) +
   geom_raster(data = predict_mcod, aes(x = X * 1000, y = Y * 1000, fill = exp(est))) +
   geom_sf(size = 0.3) +
@@ -211,7 +215,7 @@ ggplot(swe_coast_proj) +
   ggtitle("Predicted density (fixed + random)") +
   theme_facet_map()
   
-ggsave("figures/supp/cpue_est_map.png", width = 6.5, height = 6.5, dpi = 600)
+ggsave("figures/supp/density/est_map.png", width = 6.5, height = 6.5, dpi = 600)
 
 # Plot spatiotemporal random effect
 ggplot(swe_coast_proj) +
@@ -223,7 +227,7 @@ ggplot(swe_coast_proj) +
   ggtitle("Spatiotemporal random effects") +
   theme_facet_map()
 
-ggsave("figures/supp/cpue_epsilon_st_map.png", width = 6.5, height = 6.5, dpi = 600)
+ggsave("figures/supp/density/epsilon_st_map.png", width = 6.5, height = 6.5, dpi = 600)
 
 # Plot spatial random effect
 ggplot(swe_coast_proj) + 
@@ -235,7 +239,7 @@ ggplot(swe_coast_proj) +
   theme_light(base_size = 10) + 
   ggtitle("Spatial random effects")
   
-ggsave("figures/supp/cpue_omega_s_map.png", width = 6.5, height = 6.5, dpi = 600)
+ggsave("figures/supp/density/omega_s_map.png", width = 6.5, height = 6.5, dpi = 600)
 ```
 
 ## We can also plot the annual index
@@ -356,6 +360,9 @@ ggplot(div_index, aes(year, est/1000, color = factor(SubDiv))) +
   scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
   labs(x = "Year", y = "Tonnes") +
   NULL
+
+ggsave("figures/supp/density/density_sd.png", width = 6.5, height = 6.5, dpi = 600)
+
 ```
 
 ## Make a combined plot with biomass index and predictions on map for two years
@@ -402,7 +409,7 @@ cpue_map_94_17 <- ggplot(swe_coast_proj) +
 
 ind_plot / cpue_map_94_17 + plot_layout(heights = c(2, 1)) + plot_annotation(tag_levels = 'A')
 
-ggsave("figures/cpue.png", width = 6.5, height = 6.5, dpi = 600)
+ggsave("figures/density.png", width = 6.5, height = 6.5, dpi = 600)
 ```
 
 ## Make a combined plot with biomass-weighted average depth, oxygen and temp in relation to the environment
@@ -450,10 +457,10 @@ pal <- brewer.pal(n = 4, name = "Dark2")
 wm_depth <- preds_cod$data %>%
   group_by(year) %>%
   summarise(#depth_wm = weighted.mean(depth, exp(est)), # This is the mean
-            "Density-weighted median" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.5)),
-            "Density-weighted quantile (0.1)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.1)),
-            "Density-weighted quantile (0.9)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.9))) %>% 
-  pivot_longer(cols = c("Density-weighted median", "Density-weighted quantile (0.1)", "Density-weighted quantile (0.9)"),
+            "Density-weighted (5th decile, median)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.5)),
+            "Density-weighted (1st decile)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.1)),
+            "Density-weighted (9th decile)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.9))) %>% 
+  pivot_longer(cols = c("Density-weighted (5th decile, median)", "Density-weighted (1st decile)", "Density-weighted (9th decile)"),
                names_to = "series", values_to = "depth") %>% 
   group_by(series) %>%  # standarize within for easy plotting
   mutate(depth_ct = depth - mean(depth)) %>% 
@@ -488,10 +495,10 @@ annual_oxy <- pred_grid2 %>%
 wm_oxy <- preds_cod$data %>%
   group_by(year) %>%
   summarise(#oxy_wm = weighted.mean(oxy, exp(est)), # This is the mean
-            "Density-weighted median" = hutils::weighted_quantile(v = oxy, w = exp(est), p = c(0.5)),
-            "Density-weighted quantile (0.1)" = hutils::weighted_quantile(v = oxy, w = exp(est), p = c(0.1)),
-            "Density-weighted quantile (0.9)" = hutils::weighted_quantile(v = oxy, w = exp(est), p = c(0.9))) %>% 
-  pivot_longer(cols = c("Density-weighted median", "Density-weighted quantile (0.1)", "Density-weighted quantile (0.9)"),
+            "Density-weighted (5th decile, median)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.5)),
+            "Density-weighted (1st decile)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.1)),
+            "Density-weighted (9th decile)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.9))) %>% 
+  pivot_longer(cols = c("Density-weighted (5th decile, median)", "Density-weighted (1st decile)", "Density-weighted (9th decile)"),
                names_to = "series", values_to = "oxy") %>% 
   ungroup() %>% 
   group_by(series) %>%  # standarize within for easy plotting
@@ -529,10 +536,10 @@ annual_temp <- pred_grid2 %>%
 wm_temp <- preds_cod$data %>%
   group_by(year) %>%
   summarise(#temp_wm = weighted.mean(temp, exp(est)), # This is the mean
-            "Density-weighted median" = hutils::weighted_quantile(v = temp, w = exp(est), p = c(0.5)),
-            "Density-weighted quantile (0.1)" = hutils::weighted_quantile(v = temp, w = exp(est), p = c(0.1)),
-            "Density-weighted quantile (0.9)" = hutils::weighted_quantile(v = temp, w = exp(est), p = c(0.9))) %>% 
-  pivot_longer(cols = c("Density-weighted median", "Density-weighted quantile (0.1)", "Density-weighted quantile (0.9)"),
+            "Density-weighted (5th decile, median)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.5)),
+            "Density-weighted (1st decile)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.1)),
+            "Density-weighted (9th decile)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.9))) %>% 
+  pivot_longer(cols = c("Density-weighted (5th decile, median)", "Density-weighted (1st decile)", "Density-weighted (9th decile)"),
                names_to = "series", values_to = "temp") %>% 
   ungroup() %>% 
   group_by(series) %>%  # standarize within for easy plotting
@@ -559,13 +566,78 @@ ggplot(temp_series, aes(year, temp, color = series, group = series, fill = serie
 bathy_plot + plot_w_dep + oxy_plot + plot_w_oxy +
   plot_annotation(tag_levels = 'A') + plot_layout(ncol = 2) + 
 
-ggsave("figures/cpue_weighted_dep_pxy.png", width = 6.5, height = 8.5, dpi = 600)
+ggsave("figures/density_weighted_dep_pxy.png", width = 6.5, height = 8.5, dpi = 600)
 
 temp_plot + plot_w_temp +
   plot_annotation(tag_levels = 'A') + plot_layout(ncol = 2) + 
 
-  ggsave("figures/supp/cpue_weighted_temp.png", width = 6.5, height = 8.5, dpi = 600)
+  ggsave("figures/supp/density/weighted_temp.png", width = 6.5, height = 8.5, dpi = 600)
 ```
+
+## Marginal effect of oxygen
+
+```{r marginal effects oxygen, message=FALSE, cache=TRUE}
+# Prepare prediction data frame
+d2 <- d %>% drop_na(oxy)
+nd_oxy <- data.frame(oxy = seq(min(d2$oxy), max(d2$oxy), length.out = 100))
+
+nd_oxy <- nd_oxy %>%
+  mutate(year = 2003L,
+         depth_sc = 0,
+         oxy_sc = (oxy - mean(oxy))/sd(oxy),
+         temp_sc = 0)
+
+# Predict
+p_margin_oxy <- predict(m, newdata = nd_oxy, se_fit = TRUE, re_form = NA)
+
+ggplot(p_margin_oxy, aes(oxy, exp(est),
+  ymin = exp(est) - 1.96 * exp(est_se), ymax = exp(est) + 1.96 * exp(est_se))) +
+  geom_line() +
+  geom_ribbon(alpha = 0.4)
+```
+
+## Marginal effect of depth
+
+```{r marginal effects depth, message=FALSE, cache=TRUE}
+# Prepare prediction data frame
+nd_dep <- data.frame(depth = seq(min(d2$depth), max(d2$depth), length.out = 100))
+
+nd_dep <- nd_dep %>%
+  mutate(year = 2003L,
+         depth_sc = (depth - mean(depth))/sd(depth),
+         oxy_sc = 0,
+         temp_sc = 0)
+
+# Predict
+p_margin_dep <- predict(m, newdata = nd_dep, se_fit = TRUE, re_form = NA)
+
+ggplot(p_margin_dep, aes(depth, exp(est),
+  ymin = exp(est) - 1.96 * exp(est_se), ymax = exp(est) + 1.96 * exp(est_se))) +
+  geom_line() +
+  geom_ribbon(alpha = 0.4)
+```
+
+## Marginal effect of temperature
+
+```{r marginal effects temperature, message=FALSE, cache=TRUE}
+# Prepare prediction data frame
+nd_temp <- data.frame(temp = seq(min(d$temp), max(d$temp), length.out = 100))
+
+nd_temp <- nd_temp %>%
+  mutate(year = 2003L,
+         depth_sc = 0,
+         oxy_sc = 0,
+         temp_sc = (temp - mean(temp))/sd(temp))
+
+# Predict
+p_margin_temp <- predict(m, newdata = nd_temp, se_fit = TRUE, re_form = NA)
+
+ggplot(p_margin_temp, aes(temp, exp(est),
+  ymin = exp(est) - 1.96 * exp(est_se), ymax = exp(est) + 1.96 * exp(est_se))) +
+  geom_line() +
+  geom_ribbon(alpha = 0.4)
+```
+
 
 ```{r}
 knitr::knit_exit()
@@ -745,7 +817,7 @@ knitr::knit_exit()
 # 
 # p3+p4
 # 
-# ggsave("figures/supp/pelagics_ratio_time_series.png", width = 6.5, height = 6.5, dpi = 600)
+# ggsave("figures/supp/density/pelagics_ratio_time_series.png", width = 6.5, height = 6.5, dpi = 600)
 # 
 # 
 # # All separate
@@ -785,70 +857,6 @@ knitr::knit_exit()
 # 
 # p6 + p7 
 # 
-# ggsave("figures/supp/pelagics_time_series.png", width = 6.5, height = 6.5, dpi = 600)
-```
-
-## Marginal effect of oxygen
-
-```{r marginal effects oxygen, message=FALSE, cache=TRUE}
-# Prepare prediction data frame
-d2 <- d %>% drop_na(oxy)
-nd_oxy <- data.frame(oxy = seq(min(d2$oxy), max(d2$oxy), length.out = 100))
-
-nd_oxy <- nd_oxy %>%
-  mutate(year = 2003L,
-         depth_sc = 0,
-         oxy_sc = (oxy - mean(oxy))/sd(oxy),
-         temp_sc = 0)
-
-# Predict
-p_margin_oxy <- predict(m, newdata = nd_oxy, se_fit = TRUE, re_form = NA)
-
-ggplot(p_margin_oxy, aes(oxy, exp(est),
-  ymin = exp(est) - 1.96 * exp(est_se), ymax = exp(est) + 1.96 * exp(est_se))) +
-  geom_line() +
-  geom_ribbon(alpha = 0.4)
-```
-
-## Marginal effect of depth
-
-```{r marginal effects depth, message=FALSE, cache=TRUE}
-# Prepare prediction data frame
-nd_dep <- data.frame(depth = seq(min(d2$depth), max(d2$depth), length.out = 100))
-
-nd_dep <- nd_dep %>%
-  mutate(year = 2003L,
-         depth_sc = (depth - mean(depth))/sd(depth),
-         oxy_sc = 0,
-         temp_sc = 0)
-
-# Predict
-p_margin_dep <- predict(m, newdata = nd_dep, se_fit = TRUE, re_form = NA)
-
-ggplot(p_margin_dep, aes(depth, exp(est),
-  ymin = exp(est) - 1.96 * exp(est_se), ymax = exp(est) + 1.96 * exp(est_se))) +
-  geom_line() +
-  geom_ribbon(alpha = 0.4)
-```
-
-## Marginal effect of temperature
-
-```{r marginal effects temperature, message=FALSE, cache=TRUE}
-# Prepare prediction data frame
-nd_temp <- data.frame(temp = seq(min(d$temp), max(d$temp), length.out = 100))
-
-nd_temp <- nd_temp %>%
-  mutate(year = 2003L,
-         depth_sc = 0,
-         oxy_sc = 0,
-         temp_sc = (temp - mean(temp))/sd(temp))
-
-# Predict
-p_margin_temp <- predict(m, newdata = nd_temp, se_fit = TRUE, re_form = NA)
-
-ggplot(p_margin_temp, aes(temp, exp(est),
-  ymin = exp(est) - 1.96 * exp(est_se), ymax = exp(est) + 1.96 * exp(est_se))) +
-  geom_line() +
-  geom_ribbon(alpha = 0.4)
+# ggsave("figures/supp/density/pelagics_time_series.png", width = 6.5, height = 6.5, dpi = 600)
 ```
 
