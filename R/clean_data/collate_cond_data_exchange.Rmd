@@ -919,7 +919,7 @@ plot(spde)
 
 # Depth spline + oxy spline
 # Cod model
-mcod <- sdmTMB(density_cod ~ 0 + as.factor(year) + s(depth_sc, k = 3) + s(oxy_sc, k = 3) + s(temp_sc, k = 3),
+mcod <- sdmTMB(density_cod ~ 0 + as.factor(year) + s(depth_sc) + s(oxy_sc) + s(temp_sc),
                data = d, spde = spde, family = tweedie(link = "log"),
                fields = "AR1", include_spatial = TRUE, time = "year",
                spatial_only = FALSE, reml = FALSE,
@@ -931,7 +931,7 @@ tidy(mcod, conf.int = TRUE)
 d$residualsmcod <- residuals(mcod)
 qqnorm(d$residualsmcod); abline(a = 0, b = 1)
 
-mfle <- sdmTMB(density_fle ~ 0 + as.factor(year) + s(depth_sc, k = 3) + s(oxy_sc, k = 3) + s(temp_sc, k = 3),
+mfle <- sdmTMB(density_fle ~ 0 + as.factor(year) + s(depth_sc) + s(oxy_sc) + s(temp_sc),
                data = d, spde = spde, family = tweedie(link = "log"),
                fields = "AR1", include_spatial = TRUE, time = "year",
                spatial_only = FALSE, reml = FALSE,
@@ -1052,7 +1052,7 @@ dat <- left_join(dat, d_cod_select)
 dat <- left_join(dat, d_fle_select)
 
 # Check how well they correspond
-ggplot(dat, aes(density_cod_data, density_fle)) + geom_point() + geom_abline(color = "red")
+ggplot(dat, aes(density_cod_data, density_cod)) + geom_point() + geom_abline(color = "red")
 ggplot(dat, aes(density_fle_data, density_fle)) + geom_point() + geom_abline(color = "red")
 ```
 
