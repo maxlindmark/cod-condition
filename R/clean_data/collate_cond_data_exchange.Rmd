@@ -52,13 +52,15 @@ library(mapplots)
 library(geosphere)
 #remotes::install_github("pbs-assess/sdmTMB")
 library(sdmTMB)
-
-world <- ne_countries(scale = "medium", returnclass = "sf")
+# To load entire cache in interactive r session, do:
+# qwraps2::lazyload_cache_dir(path = "R/clean_data/collate_cond_data_exchange_cache/html")
 ```
 
 ## For maps
 
 ```{r read coastline data, message=FALSE, warning=FALSE}
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
 # Specify map ranges
 ymin = 54; ymax = 58; xmin = 12; xmax = 22
 
@@ -1062,6 +1064,7 @@ ggplot(dat, aes(density_fle_data, density_fle)) + geom_point() + geom_abline(col
 # Read data
 spr <- read_xlsx("data/BIAS/abundances_rectangles_1991-2019.xlsx",
                  sheet = 1) %>%
+  mutate(SD = ifelse(SD == "28_2", "28", SD)) %>% 
   rename("StatRec" = "Rec") %>%
   mutate(StatRec = as.factor(StatRec),
          Species = "Sprat",
@@ -1070,7 +1073,7 @@ spr <- read_xlsx("data/BIAS/abundances_rectangles_1991-2019.xlsx",
   
 her <- read_xlsx("data/BIAS/abundances_rectangles_1991-2019.xlsx",
                  sheet = 2) %>%
-  as.data.frame() %>%
+  mutate(SD = ifelse(SD == "28_2", "28", SD)) %>% 
   rename("StatRec" = "Rect2") %>% # This is not called Rec in the data for some reason
   mutate(StatRec = as.factor(StatRec),
          Species = "Herring",
@@ -1241,6 +1244,68 @@ dat %>% drop_na(abun_her) %>% arrange(abun_her) %>% dplyr::select(abun_her)
 # The NA's I have in the DAT are missing pelagic data, i.e. not 0's! Need to drop them unfortunately,
 # or fit a model to the data. Since it's only 3% of data, I will simply remove them.
 dat <- dat %>% drop_na(abun_spr) %>% drop_na(abun_her)
+
+# Now add in the sub division values
+abun_spr_sd <- read_xlsx("data/BIAS/abundance_sub_division_1991-2019.xlsx",
+                         sheet = 1) %>%
+  rename("year" = "ANNUS",
+         "SD" = "Sub_Div") %>% 
+  mutate(SD = ifelse(SD == "28_2", "28", SD)) %>% 
+  mutate(Species = "Sprat",
+         abun_spr_sd = `AGE1`+`AGE2`+`AGE3`+`AGE4`+`AGE5`+`AGE6`+`AGE7`+`AGE8+`, # omitting `0+` here
+         ID_sd_year = paste(SD, year, sep = ".")) %>% # Make new ID)
+  filter(SD %in% unique(dat$SD)) %>% 
+  dplyr::select(abun_spr_sd, ID_sd_year)
+
+abun_her_sd <- read_xlsx("data/BIAS/abundance_sub_division_1991-2019.xlsx",
+                         sheet = 2) %>%
+  rename("year" = "ANNUS",
+         "SD" = "Sub_Div") %>% 
+  mutate(SD = ifelse(SD == "28_2", "28", SD)) %>% 
+  mutate(Species = "Herring",
+         abun_her_sd = `AGE1`+`AGE2`+`AGE3`+`AGE4`+`AGE5`+`AGE6`+`AGE7`+`AGE8+`, # omitting `0+` here
+         ID_sd_year = paste(SD, year, sep = ".")) %>% # Make new ID)
+  filter(SD %in% unique(dat$SD)) %>% 
+  dplyr::select(abun_her_sd, ID_sd_year) 
+
+dat <- dat %>% mutate(ID_sd_year = paste(SD, year, sep = "."))
+
+dat <- left_join(dat, abun_spr_sd)
+
+dat <- left_join(dat, abun_her_sd)
+
+head(data.frame(dat))
+
+dat %>% 
+  group_by(year, SD) %>% 
+  summarise(sum_her_across_rect = sum(abun_her)) %>% 
+  ungroup() %>% 
+  ggplot(.) + 
+  geom_point(aes(year, sum_her_across_rect, color = "rec")) +
+  geom_point(data = dat, aes(year, abun_her_sd*100, color = "sd")) + 
+  facet_wrap(~ SD, scales = "free", ncol = 2)
+
+dat %>% 
+  ggplot(.) + 
+  geom_point(data = dat, aes(year, abun_her_sd, color = "sd")) + 
+  facet_wrap(~ SD, scales = "free", ncol = 2)
+
+```
+
+## Add Saduria from raster covariates
+
+```{r read Saduria raster from Gogina et al 2020 ICES}
+saduria <- raster("data/saduria_tif/FWBiomassm_raster_19812019presHighweightcor_no0_newZi.tif")
+
+saduria_longlat = projectRaster(saduria, crs = ('+proj=longlat'))
+
+crs(saduria)
+extent(saduria)
+
+plot(saduria_longlat)
+
+# Now extract the values from the saduria raster to the prediction grid
+dat$biomass_saduria <- extract(saduria_longlat, dat[, 5:4])
 ```
 
 ## Save data

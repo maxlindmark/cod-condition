@@ -21,7 +21,7 @@ knitr::opts_chunk$set(
 ```
 
 # Intro
-In this script, I load exchange data from datras and calculate catch of cod and flounder in unit kg/km^2 (with TVL gear), by correcting for gear dimensions, sweeplength and trawl speed, following Orio et al 2017. I also add oxygen, temperature and depth covariates, which I use for modelling this biomass index. 
+In this script, I load exchange data from datras and calculate catch of cod and flounder in unit kg/km^2 (with TVL gear), by correcting for gear dimensions, sweeplength and trawl speed, following Orio et al 2017. I also add oxygen, temperature and depth covariates, which I use for modelling this biomass index. I do this for Q1 and Q4. I use Q4 for the condition data. For the condition data, I also need the environmental covariates. Hence, the study is limited to 2019. For other analyses, I need Q1, and don't need all envi. covariates, and I have stomach data incl. 2020, hence I need to standardize all trawl data available from Datras.
 
 ## Load libraries
 
@@ -85,17 +85,17 @@ swe_coast_proj <- sf::st_transform(swe_coast, crs = utm_zone33)
 
 ```{r, message=FALSE}
 # Read HH data
-# bits_hh <- getDATRAS(record = "HH", survey = "BITS", years = 1991:2020, quarters = 4)
+# bits_hh <- getDATRAS(record = "HH", survey = "BITS", years = 1991:2020, quarters = c(1, 4))
 # write.csv(bits_hh, "data/DATRAS_exchange/bits_hh.csv")
 bits_hh <- read.csv("data/DATRAS_exchange/bits_hh.csv")
 
 # Read HL data
-# bits_hl <- getDATRAS(record = "HL", survey = "BITS", years = 1991:2020, quarters = 4)
+# bits_hl <- getDATRAS(record = "HL", survey = "BITS", years = 1991:2020, quarters = c(1, 4))
 # write.csv(bits_hl, "data/DATRAS_exchange/bits_hl.csv")
 bits_hl <- read.csv("data/DATRAS_exchange/bits_hl.csv")
 
 # Read CA data
-# bits_ca <- getDATRAS(record = "CA", survey = "BITS", years = 1991:2020, quarters = 4)
+# bits_ca <- getDATRAS(record = "CA", survey = "BITS", years = 1991:2020, quarters = c(1, 4))
 # write.csv(bits_ca, "data/DATRAS_exchange/bits_ca.csv")
 bits_ca <- read.csv("data/DATRAS_exchange/bits_ca.csv")
 
@@ -259,7 +259,7 @@ bits_hh <- bits_hh %>%
   mutate(IDx = paste(Year, Quarter, Country, Ship, Gear, StNo, HaulNo, sep = "."))
 
 # Works like a haul-id
-# bits_hh %>% group_by(IDx) %>% mutate(n = n()) %>% ungroup() %>% distinct(n)
+bits_hh %>% group_by(IDx) %>% mutate(n = n()) %>% ungroup() %>% distinct(n)
 ```
 
 ### Create the same unique haul-ID in the cpue data that I have in the sweep-file
@@ -270,6 +270,8 @@ bits_hl <- bits_hl %>%
 
 bits_hh <- bits_hh %>% 
   mutate(haul.id = paste(Year, Quarter, Country, Ship3, Gear, StNo, HaulNo, sep = ":")) 
+
+bits_hh %>% group_by(haul.id) %>% mutate(n = n()) %>% ungroup() %>% distinct(n)
 ```
 
 ### Clean DATRAS EXCHANGE data
@@ -307,8 +309,7 @@ bits_hh <- bits_hh %>%
                          "27" = "3.d.27",
                          "28" = "3.d.28.1",
                          "28" = "3.d.28.2",
-                         "29" = "3.d.29",
-                         "30" = "3.d.30"),
+                         "29" = "3.d.29"),
          SD = as.character(SD)) 
 
 # Now add the fishing line information from the sweep file (we need that later
@@ -325,12 +326,23 @@ bits_hh$Fishing.line <- as.numeric(bits_hh$Fishing.line)
 # Which gears do now have fishing line?
 bits_hh$Fishing.line[is.na(bits_hh$Fishing.line)] <- -9
 bits_hh %>% filter(Fishing.line == -9) %>% distinct(Gear)
+# 1  GRT
+# 2  CAM
+# 3  EXP
+# 4  FOT
+# 5  GOV
+# 6  EGY
+# 7   DT
+# 8  ESB
+# 9  HAK
 
-# FROM the index files (Orio)
+# FROM the index files (Orio, "Research Östersjön 2")
 # FOT has 83
 # GOV has 160
 # ESB ??
 # GRT ??
+# Rest are unknown and likely not used by swedish data (therefore their correction
+# factors my be in the sweep file)
 
 # Add these values:
 bits_hh <- bits_hh %>% mutate(Fishing.line = ifelse(Gear == "FOT", 83, Fishing.line))
@@ -402,7 +414,6 @@ hlcod0 <-  hlcod0 %>% filter(!SpecVal == "0")
 
 # Add species again after merge
 hlcod0$Species<-"Gadus morhua"
-
 
 # Flounder: Add 0s, remove them if StdSpecRecCode !=1 and then remove lines with SpecVal = 0
 hlfle0 <- full_join(hlfle, bits_hh[, comcol], by = comcol)
@@ -508,7 +519,7 @@ hlfleL <- hlfle0 %>%
 ```{r, message=FALSE}
 # Cod
 bits_ca_cod <- bits_ca %>% 
-  filter(SpecCode %in% c("164712", "126436") & Year < 2020) %>% 
+  filter(SpecCode %in% c("164712", "126436")) %>% 
   mutate(StNo = as.numeric(StNo)) %>% 
   mutate(Species = "Cod") %>% 
   mutate(ID = paste(Year, Quarter, Country, Ship, Gear, StNo, HaulNo, sep = "."))
@@ -561,7 +572,7 @@ cod_slope <- bits_ca_cod %>%
 
 # Flounder
 bits_ca_fle <- bits_ca %>% 
-  filter(SpecCode %in% c("127141", "172894") & Year < 2020) %>% 
+  filter(SpecCode %in% c("127141", "172894")) %>% 
   mutate(StNo = as.numeric(StNo)) %>% 
   mutate(Species = "Flounder") %>% 
   mutate(ID = paste(Year, Quarter, Country, Ship, Gear, StNo, HaulNo, sep = "."))
@@ -612,6 +623,7 @@ fle_slope <- bits_ca_fle %>%
 # These are the haul-data
 # hlcodL
 # hlfleL
+
 hlcodL <- left_join(hlcodL, cod_intercept, by = "Year")
 hlcodL <- left_join(hlcodL, cod_slope, by = "Year")
 
@@ -627,7 +639,7 @@ hlcodL <- hlcodL %>%
   mutate(length_cm = ifelse(LngtCode == ".", 
                             LngtClass/10,
                             LngtClass)) # Standardize length ((https://vocab.ices.dk/?ref=18))
-  
+
 filter(hlcodL, length_cm == 0) # No such thing
 
 # Now check if all rows where length is NA are the ones with zero catch!
@@ -657,6 +669,13 @@ ggplot(hlcodL, aes(weight_kg, length_cm2)) +
   geom_point() + 
   facet_wrap(~Year)
 
+# Hmm, some unrealistic weights actually
+hlcodL %>% arrange(desc(weight_kg)) %>% as.data.frame()
+hlcodL <- hlcodL %>% filter(weight_kg < 100)
+
+ggplot(hlcodL, aes(weight_kg, length_cm2)) +
+  geom_point() + 
+  facet_wrap(~Year)
 
 # Now do the same for flounder
 # First standardize length to cm and then check how zero-catches are implemented at this stage
@@ -717,32 +736,34 @@ t <- hlfleL %>% drop_na(length_cm2) # Should be no NA
 
 # What is the proportion of zero-catch hauls?
 cod_0plot <- hlcodL %>%
-  group_by(haul.id, Year) %>%
+  group_by(haul.id, Year, Quarter) %>%
   summarise(CPUEun_haul = sum(CPUEun)) %>% 
   ungroup() %>% 
   mutate(zero_catch = ifelse(CPUEun_haul == 0, "Y", "N")) %>% 
-  group_by(Year, zero_catch) %>% 
+  group_by(Year, Quarter, zero_catch) %>% 
   summarise(n = n()) %>% 
   ungroup() %>% 
   pivot_wider(names_from = zero_catch, values_from = n) %>% 
   mutate(prop_zero_catch_hauls = Y/(N+Y)) %>% 
   ggplot(., aes(Year, prop_zero_catch_hauls)) + geom_bar(stat = "identity") + 
   coord_cartesian(expand = 0, ylim = c(0, 1)) + 
+  facet_wrap(~ Quarter) +
   ggtitle("Cod")
 
 # How many zero-catch hauls?
 fle_0plot <- hlfleL %>%
-  group_by(haul.id, Year) %>%
+  group_by(haul.id, Year, Quarter) %>%
   summarise(CPUEun_haul = sum(CPUEun)) %>% 
   ungroup() %>% 
   mutate(zero_catch = ifelse(CPUEun_haul == 0, "Y", "N")) %>% 
-  group_by(Year, zero_catch) %>% 
+  group_by(Year, Quarter, zero_catch) %>% 
   summarise(n = n()) %>% 
   ungroup() %>% 
   pivot_wider(names_from = zero_catch, values_from = n) %>% 
   mutate(prop_zero_catch_hauls = Y/(N+Y)) %>% 
   ggplot(., aes(Year, prop_zero_catch_hauls)) + geom_bar(stat = "identity") + 
   coord_cartesian(expand = 0, ylim = c(0, 1)) + 
+  facet_wrap(~ Quarter) +
   ggtitle("Flounder")
 
 cod_0plot / fle_0plot
@@ -817,6 +838,15 @@ hlfleL2 <- hlfleL2 %>% mutate(GroundSpeed = ifelse(GroundSpeed == -9, NA, Ground
                               Fishing.line = ifelse(Fishing.line == -9, NA, Fishing.line),
                               SweepLngt = ifelse(SweepLngt == -9, NA, SweepLngt))
 
+hlcodL2 %>% filter(Quarter == 1) %>%
+  distinct(GroundSpeed, Fishing.line, SweepLngt) %>% as.data.frame()
+
+hlcodL2 %>% filter(Quarter == 4) %>%
+  distinct(GroundSpeed, Fishing.line, SweepLngt) %>% as.data.frame()
+
+# Hmm, Q1 has at least one of the RS or RSA variables as NAs. Will be difficult to standardize!
+# Hope the correction factors are present in Ales conversion data
+
 # Now calculate correction factors
 hlcodL2 <- hlcodL2 %>% mutate(RS_x = 3/GroundSpeed,
                               Horizontal.opening..m. = Fishing.line*0.67,
@@ -842,9 +872,13 @@ sweep <- sweep %>% mutate(Horizontal.opening..m.2 = Fishing.line*0.67,
 sweep %>%
   drop_na() %>%
   ggplot(., aes(as.numeric(RSA), RSA_x)) + geom_point() + geom_abline(intercept = 0, slope = 1)
+# Yes it's the same
 
 # Replace NAs with -1/3 (because ICES codes missing values as -9 and in the calculation above they get -1/3),
 # so that I can filter them easily later
+# sort(unique(hlcodL2$RS_x))
+# sort(unique(hlcodL2$RSA_x))
+
 hlcodL2$RS_x[is.na(hlcodL2$RS_x)] <- -1/3
 hlcodL2$RS_sweep[is.na(hlcodL2$RS_sweep)] <- -1/3
 hlcodL2$RSA_x[is.na(hlcodL2$RSA_x)] <- -1/3
@@ -858,19 +892,19 @@ hlfleL2$RSA_sweep[is.na(hlfleL2$RSA_sweep)] <- -1/3
 # Compare the difference correction factors (calculated vs imported from sweep file)
 p1 <- ggplot(filter(hlcodL2, RS_x > 0), aes(RS_x)) + geom_histogram() + xlim(0.4, 1.76)
 p2 <- ggplot(hlcodL2, aes(RSA_x)) + geom_histogram()
-p3 <- ggplot(hlcodL2, aes(RS_sweep)) + geom_histogram() + xlim(0.4, 1.76)
+p3 <- ggplot(hlcodL2, aes(RS_sweep)) + geom_histogram()
 p4 <- ggplot(hlcodL2, aes(RSA_sweep)) + geom_histogram()
 
 (p1 + p2) / (p3 + p4)
 
 p5 <- ggplot(filter(hlfleL2, RS_x > 0), aes(RS_x)) + geom_histogram() + xlim(0.4, 1.76)
 p6 <- ggplot(hlfleL2, aes(RSA_x)) + geom_histogram()
-p7 <- ggplot(hlfleL2, aes(RS_sweep)) + geom_histogram() + xlim(0.4, 1.76)
+p7 <- ggplot(hlfleL2, aes(RS_sweep)) + geom_histogram()
 p8 <- ggplot(hlfleL2, aes(RSA_sweep)) + geom_histogram()
 
 (p5 + p6) / (p7 + p8)
 
-# Why do I have RSA values smaller than one? (eihter because sweep length is longer or gear is larger (GOV))
+# Why do I have RSA values smaller than one? (either because sweep length is longer or gear is larger (GOV))
 # Check if I can calculate the same RSA in sweep as that entered there.
 # Ok, so the equation is correct. Which ID's have RSA < 1?
 hlcodL2 %>% 
@@ -904,7 +938,7 @@ hlcodL2 %>% filter(RS_x > 0 & RS_sweep > 0) %>% ggplot(., aes(RS_x, RS_sweep)) +
 hlfleL2 %>% filter(RS_x > 0 & RS_sweep > 0) %>% ggplot(., aes(RS_x, RS_sweep)) +
   geom_point() + geom_abline(aes(intercept = 0, slope = 1), color = "red")
 
-# They are the same when they overlap, so it does not matter which data source I use for RS and RSA values
+# They are largely the same when they overlap. When they differ, I will use RS_sweep
 # Make a single RS and RSA column
 
 # Cod 
@@ -1060,21 +1094,58 @@ orio_fle <- orio_fle %>%
 # hlcodhaul %>% group_by(IDx) %>% mutate(n = n()) %>% ungroup() %>% distinct(n)
 
 # Standardize data for easier plotting
-test_cod <- test_cod %>%
-  dplyr::select(haul_cpue_kg, haul_cpue, haul_cpue_kg_un, haul_cpue_un, Year, Ship3, Country, Gear) %>% 
+test_cod_q1 <- test_cod %>%
+  dplyr::select(haul_cpue_kg, haul_cpue, haul_cpue_kg_un, haul_cpue_un, Year, Ship3, Country, Gear, Quarter) %>% 
   mutate(source = "Max",
          species = "Cod") %>% 
   rename("Ship" = "Ship3") %>% 
-  filter(Year > 1992 & Year < 2017)
+  filter(Year > 1992 & Year < 2017 & Quarter == 1)
 
-test_fle <- test_fle %>%
-  dplyr::select(haul_cpue_kg, haul_cpue, haul_cpue_kg_un, haul_cpue_un, Year, Ship3, Country, Gear) %>% 
+test_cod_q4 <- test_cod %>%
+  dplyr::select(haul_cpue_kg, haul_cpue, haul_cpue_kg_un, haul_cpue_un, Year, Ship3, Country, Gear, Quarter) %>% 
+  mutate(source = "Max",
+         species = "Cod") %>% 
+  rename("Ship" = "Ship3") %>% 
+  filter(Year > 1992 & Year < 2017 & Quarter == 4)
+
+test_fle_q1 <- test_fle %>%
+  dplyr::select(haul_cpue_kg, haul_cpue, haul_cpue_kg_un, haul_cpue_un, Year, Ship3, Country, Gear, Quarter) %>% 
   mutate(source = "Max",
          species = "Fle") %>% 
   rename("Ship" = "Ship3") %>% 
-  filter(Year > 1992 & Year < 2017)
+  filter(Year > 1992 & Year < 2017 & Quarter == 1)
 
-orio_cod <- orio_cod %>%
+test_fle_q4 <- test_fle %>%
+  dplyr::select(haul_cpue_kg, haul_cpue, haul_cpue_kg_un, haul_cpue_un, Year, Ship3, Country, Gear, Quarter) %>% 
+  mutate(source = "Max",
+         species = "Fle") %>% 
+  rename("Ship" = "Ship3") %>% 
+  filter(Year > 1992 & Year < 2017 & Quarter == 4)
+
+orio_cod_q1 <- orio_cod %>%
+  dplyr::select(haul_cpue_kg, haul_cpue, haul_cpue_kg_un, haul_cpue_un, year, vessel, IDX) %>% 
+  mutate(source = "Ale",
+         species = "Cod") %>% 
+  rename("Year" = "year",
+         "Ship" = "vessel") %>% 
+  mutate(IDX2 = IDX,
+         IDX3 = IDX) %>% 
+  separate(IDX, sep = c(5:7), into = c("temp_year", "Quarter")) %>% 
+  separate(temp_year, sep = c(4:5), into = c("Year", "scrap")) %>% 
+  separate(IDX2, sep = 7, into = c("scrap2", "Country")) %>%
+  separate(Country, sep = 3, into = c("Country", "scrap3")) %>%
+  separate(IDX3, sep = 15, into = c("scrap4", "Gear")) %>%
+  separate(Gear, sep = 3, into = c("Gear", "scrap5")) %>% 
+  dplyr::select(-scrap, -scrap2, -scrap3, -scrap4, -scrap5) %>% 
+  filter(Quarter == 1) %>% 
+  mutate(Year = as.integer(Year),
+         Quarter = as.integer(Quarter)) %>% 
+  mutate(haul_cpue_kg = haul_cpue_kg/1000,
+         haul_cpue_kg_un = haul_cpue_kg_un/1000) %>% 
+  filter(Year > 1992) %>% 
+  filter(Country %in% unique(test_cod$Country))
+
+orio_cod_q4 <- orio_cod %>%
   dplyr::select(haul_cpue_kg, haul_cpue, haul_cpue_kg_un, haul_cpue_un, year, vessel, IDX) %>% 
   mutate(source = "Ale",
          species = "Cod") %>% 
@@ -1090,13 +1161,37 @@ orio_cod <- orio_cod %>%
   separate(Gear, sep = 3, into = c("Gear", "scrap5")) %>% 
   dplyr::select(-scrap, -scrap2, -scrap3, -scrap4, -scrap5) %>% 
   filter(Quarter == 4) %>% 
-  mutate(Year = as.integer(Year)) %>% 
+  mutate(Year = as.integer(Year),
+         Quarter = as.integer(Quarter)) %>% 
   mutate(haul_cpue_kg = haul_cpue_kg/1000,
          haul_cpue_kg_un = haul_cpue_kg_un/1000) %>% 
   filter(Year > 1992) %>% 
   filter(Country %in% unique(test_cod$Country))
 
-orio_fle <- orio_fle %>% 
+orio_fle_q1 <- orio_fle %>% 
+  dplyr::select(haul_cpue_kg, haul_cpue, haul_cpue_kg_un, haul_cpue_un, year, vessel, IDX) %>% 
+  mutate(source = "Ale",
+         species = "Fle") %>% 
+  rename("Year" = "year",
+         "Ship" = "vessel") %>% 
+  mutate(IDX2 = IDX,
+         IDX3 = IDX) %>% 
+  separate(IDX, sep = c(5:7), into = c("temp_year", "Quarter")) %>% 
+  separate(temp_year, sep = c(4:5), into = c("Year", "scrap")) %>% 
+  separate(IDX2, sep = 7, into = c("scrap2", "Country")) %>%
+  separate(Country, sep = 3, into = c("Country", "scrap3")) %>%
+  separate(IDX3, sep = 15, into = c("scrap4", "Gear")) %>%
+  separate(Gear, sep = 3, into = c("Gear", "scrap5")) %>% 
+  dplyr::select(-scrap, -scrap2, -scrap3, -scrap4, -scrap5) %>% 
+  filter(Quarter == 1) %>% 
+  mutate(Year = as.integer(Year),
+         Quarter = as.integer(Quarter)) %>% 
+  mutate(haul_cpue_kg = haul_cpue_kg/1000,
+         haul_cpue_kg_un = haul_cpue_kg_un/1000) %>% 
+  filter(Year > 1992) %>% 
+  filter(Country %in% unique(test_cod$Country))
+
+orio_fle_q4 <- orio_fle %>% 
   dplyr::select(haul_cpue_kg, haul_cpue, haul_cpue_kg_un, haul_cpue_un, year, vessel, IDX) %>% 
   mutate(source = "Ale",
          species = "Fle") %>% 
@@ -1112,23 +1207,31 @@ orio_fle <- orio_fle %>%
   separate(Gear, sep = 3, into = c("Gear", "scrap5")) %>% 
   dplyr::select(-scrap, -scrap2, -scrap3, -scrap4, -scrap5) %>% 
   filter(Quarter == 4) %>% 
-  mutate(Year = as.integer(Year)) %>% 
+  mutate(Year = as.integer(Year),
+         Quarter = as.integer(Quarter)) %>% 
   mutate(haul_cpue_kg = haul_cpue_kg/1000,
          haul_cpue_kg_un = haul_cpue_kg_un/1000) %>% 
   filter(Year > 1992) %>% 
   filter(Country %in% unique(test_cod$Country))
 
-# sort(unique(test_cod$Country))
-# sort(unique(orio_cod$Country))
+sort(unique(test_cod_q1$Country))
+sort(unique(orio_cod_q1$Country))
 
 # Check proportions of zero
-t <- test_cod %>% filter(haul_cpue_kg > 0)
-t <- orio_cod %>% filter(haul_cpue_kg > 0)
+t <- test_cod_q1 %>% filter(haul_cpue_kg > 0)
+t <- orio_cod_q1 %>% filter(haul_cpue_kg > 0)
 
-t <- test_fle %>% filter(haul_cpue_kg > 0)
-t <- orio_fle %>% filter(haul_cpue_kg > 0)
+t <- test_cod_q4 %>% filter(haul_cpue_kg > 0)
+t <- orio_cod_q4 %>% filter(haul_cpue_kg > 0)
 
-test_full <- bind_rows(orio_fle, orio_cod, test_cod, test_fle)
+t <- test_fle_q1 %>% filter(haul_cpue_kg > 0)
+t <- orio_fle_q1 %>% filter(haul_cpue_kg > 0)
+
+t <- test_fle_q4 %>% filter(haul_cpue_kg > 0)
+t <- orio_fle_q4 %>% filter(haul_cpue_kg > 0)
+
+test_full <- bind_rows(orio_fle_q1, orio_fle_q4, orio_cod_q1, orio_cod_q4,
+                       test_cod_q1, test_cod_q4, test_fle_q1, test_fle_q4)
 
 # Check the non-standardized data for cod
 # Raw abundance cpue
@@ -1137,10 +1240,19 @@ test_full %>%
   ggplot(., aes(factor(Year), haul_cpue_un, color = source)) + 
   geom_point(size = 1, position = position_dodge(width = 0.5)) + 
   theme(axis.text.x = element_text(angle = 90)) +
+  facet_wrap(~Quarter) +
   NULL
   
 test_full %>% 
-  filter(species == "Cod") %>% 
+  filter(species == "Cod" & Quarter == 1) %>% 
+  ggplot(., aes(haul_cpue_un, fill = source)) + 
+  geom_histogram(position = position_dodge()) + 
+  facet_wrap(~Year, scale = "free") +
+  theme(axis.text.x = element_text(angle = 90)) + 
+  NULL
+
+test_full %>% 
+  filter(species == "Cod" & Quarter == 4) %>% 
   ggplot(., aes(haul_cpue_un, fill = source)) + 
   geom_histogram(position = position_dodge()) + 
   facet_wrap(~Year, scale = "free") +
@@ -1150,35 +1262,37 @@ test_full %>%
 # Mean abundance cpue
 test_full %>% 
   filter(species == "Cod") %>% 
-  group_by(Year, source) %>% 
+  group_by(Year, Quarter, source) %>% 
   summarise(mean_cpue = mean(haul_cpue_un),
             sd_cpue = sd(haul_cpue_un)) %>% 
   ggplot(., aes(Year, mean_cpue, linetype = source, color = source)) + 
   geom_line(size = 1.1) +
   geom_point(size = 3) + 
+  facet_wrap(~Quarter, ncol = 1) +
   NULL
 
 # Mean abundance cpue by country
 test_full %>% 
   filter(species == "Cod") %>% 
-  group_by(Year, source, Country) %>% 
+  group_by(Year, source, Quarter, Country) %>% 
   summarise(mean_cpue = mean(haul_cpue_un),
             sd_cpue = sd(haul_cpue_un)) %>% 
   ggplot(., aes(Year, mean_cpue, linetype = source, color = source)) + 
   geom_line(size = 1.1) +
-  facet_wrap(~ Country) +
+  facet_grid(Quarter ~ Country) +
   NULL
 
 # Mean abundance cpue for non-zero cathes
 test_full %>% 
   filter(species == "Cod") %>% 
   filter(haul_cpue_un > 0) %>% 
-  group_by(Year, source) %>% 
+  group_by(Year, Quarter, source) %>% 
   summarise(mean_cpue = mean(haul_cpue_un),
             sd_cpue = sd(haul_cpue_un)) %>% 
   ggplot(., aes(Year, mean_cpue, linetype = source, color = source)) + 
   geom_line(size = 1.1) +
   geom_point(size = 3) + 
+  facet_wrap(~ Quarter, ncol = 1) +
   NULL
 
 # Now plot corrected biomass cpue
@@ -1187,19 +1301,20 @@ test_full %>%
   ggplot(., aes(factor(Year), haul_cpue_kg, color = source)) + 
   geom_point(size = 1, position = position_dodge(width = 0.5)) + 
   theme(axis.text.x = element_text(angle = 90)) +
+  facet_wrap(~ Quarter, ncol = 1) +
   NULL
 
 # Mean corrected biomass cpue
 test_full %>% 
   filter(species == "Cod") %>% 
-  group_by(Year, source) %>% 
+  group_by(Year, Quarter, source) %>% 
   summarise(mean_cpue = mean(haul_cpue_kg),
             sd_cpue = sd(haul_cpue_kg)) %>% 
   ggplot(., aes(Year, mean_cpue, linetype = source, color = source)) + 
   geom_line(size = 1.1) +
   geom_point(size = 3) + 
+  facet_wrap(~ Quarter, ncol = 1) +
   NULL
-
 
 # Now check in on flounder
 # Raw abundance cpue
@@ -1208,10 +1323,19 @@ test_full %>%
   ggplot(., aes(factor(Year), haul_cpue_un, color = source)) + 
   geom_point(size = 1, position = position_dodge(width = 0.5)) + 
   theme(axis.text.x = element_text(angle = 90)) +
+  facet_wrap(~ Quarter, ncol = 1) +
   NULL
   
 test_full %>% 
-  filter(species == "Fle") %>% 
+  filter(species == "Fle" & Quarter == 1) %>% 
+  ggplot(., aes(haul_cpue_un, fill = source)) + 
+  geom_histogram(position = position_dodge()) + 
+  facet_wrap(~Year, scale = "free") +
+  theme(axis.text.x = element_text(angle = 90)) + 
+  NULL
+
+test_full %>% 
+  filter(species == "Fle" & Quarter == 4) %>% 
   ggplot(., aes(haul_cpue_un, fill = source)) + 
   geom_histogram(position = position_dodge()) + 
   facet_wrap(~Year, scale = "free") +
@@ -1221,12 +1345,13 @@ test_full %>%
 # Mean abundance cpue
 test_full %>% 
   filter(species == "Fle") %>% 
-  group_by(Year, source) %>% 
+  group_by(Year, Quarter, source) %>% 
   summarise(mean_cpue = mean(haul_cpue_un),
             sd_cpue = sd(haul_cpue_un)) %>% 
   ggplot(., aes(Year, mean_cpue, linetype = source, color = source)) + 
   geom_line(size = 1.1) +
   geom_point(size = 3) + 
+  facet_wrap(~ Quarter, ncol = 1) +
   NULL
 
 # Ok, here we can see that Ale predicts an increase earlier, which we also saw 
@@ -1234,12 +1359,12 @@ test_full %>%
 # Mean abundance cpue by country to see how this can arise
 test_full %>% 
   filter(species == "Fle") %>% 
-  group_by(Year, source, Country) %>% 
+  group_by(Year, Quarter, source, Country) %>% 
   summarise(mean_cpue = mean(haul_cpue_un),
             sd_cpue = sd(haul_cpue_un)) %>% 
   ggplot(., aes(Year, mean_cpue, linetype = source, color = source)) + 
   geom_line(size = 1.1) +
-  facet_wrap(~ Country) +
+  facet_grid(Quarter ~ Country) +
   NULL
 
 # Ok, after checking, the reason I don't have the older LAT data is because I don't
@@ -1252,20 +1377,22 @@ test_full %>%
   ggplot(., aes(factor(Year), haul_cpue_kg, color = source)) + 
   geom_point(size = 1, position = position_dodge(width = 0.5)) + 
   theme(axis.text.x = element_text(angle = 90)) +
+  facet_wrap(~ Quarter, ncol = 1) +
   NULL
 
 # Mean corrected biomass cpue
 test_full %>% 
   filter(species == "Fle") %>% 
-  group_by(Year, source) %>% 
+  group_by(Year, Quarter, source) %>% 
   summarise(mean_cpue = mean(haul_cpue_kg),
             sd_cpue = sd(haul_cpue_kg)) %>% 
   ggplot(., aes(Year, mean_cpue, linetype = source, color = source)) + 
   geom_line(size = 1.1) +
   geom_point(size = 3) + 
+  facet_wrap(~ Quarter, ncol = 1) +
   NULL
 
-# Then check lenght-weight relationships again
+# Then check length-weight relationships again
 ```
 
 ## Add in the environmental variables
@@ -1292,6 +1419,11 @@ ggplot(dat, aes(depth)) + geom_histogram()
 ### Oxygen
 
 ```{r}
+# Rename fishdata to fishdat so that I don't overwrite anything. Not all years in the BITS
+# have environmental data, and I don't want to loose important trawl information 
+
+fishdat <- dat
+
 # Downloaded from here: https://resources.marine.copernicus.eu/?option=com_csw&view=details&product_id=BALTICSEA_REANALYSIS_BIO_003_012
 # Extract raster points: https://gisday.wordpress.com/2014/03/24/extract-raster-values-from-points-using-r/comment-page-1/
 # https://rpubs.com/boyerag/297592
@@ -1354,130 +1486,175 @@ years <- ifelse(years > 90, 1900 + years, 2000 + years)
 # Replace netCDF fill values with NA's
 oxy_array[oxy_array == fillvalue$value] <- NA
 
-# We only use Quarter 4 in this analysis, so now we want to loop through each time step,
-# and if it is a good month save it as a raster.
+# Next, we need to work with the months that correspond to the quarters that we use.
+# loop through each time step, and if it is a good month save it as a raster.
 # First get the index of months that correspond to Q4
 months
 
-index_keep <- which(months > 9)
+index_keep_q1 <- which(months < 4)
+index_keep_q4 <- which(months > 9)
 
-oxy_q4 <- oxy_array[, , index_keep]
+oxy_q1 <- oxy_array[, , index_keep_q1]
+oxy_q4 <- oxy_array[, , index_keep_q4]
 
-months_keep <- months[index_keep]
+months_keep_q1 <- months[index_keep_q1]
+months_keep_q4 <- months[index_keep_q4]
 
-years_keep <- years[index_keep]
+years_keep_q1 <- years[index_keep_q1]
+years_keep_q4 <- years[index_keep_q4]
 
 # Now we have an array with only Q4 data...
 # We need to now calculate the average within a year.
 # Get a sequence that takes every third value between 1: number of months (length)
-loop_seq <- seq(1, dim(oxy_q4)[3], by = 3)
+loop_seq_q1 <- seq(1, dim(oxy_q1)[3], by = 3)
+loop_seq_q4 <- seq(1, dim(oxy_q4)[3], by = 3)
 
 # Create objects that will hold data
-dlist <- list()
+dlist_q1 <- list()
+dlist_q4 <- list()
+
+oxy_1 <- c()
+oxy_2 <- c()
+oxy_3 <- c()
+oxy_ave_q1 <- c()
+
 oxy_10 <- c()
 oxy_11 <- c()
 oxy_12 <- c()
-oxy_ave <- c()
+oxy_ave_q4 <- c()
 
-# Loop through the vector sequence with every third value, then take the average of
-# three consecutive months (i.e. q4)
-for(i in loop_seq) {
+# Now average by quarter. The vector loop_seq_q1 is 1, 4, 7 etc. So first i is 1, 2, 3,
+# which is the index we want. 
+
+for(i in loop_seq_q1) { # We can use q1 as looping index, doesn't matter!
+  
+  oxy_1 <- oxy_q1[, , (i)]
+  oxy_2 <- oxy_q1[, , (i + 1)]
+  oxy_3 <- oxy_q1[, , (i + 2)]
   
   oxy_10 <- oxy_q4[, , (i)]
   oxy_11 <- oxy_q4[, , (i + 1)]
   oxy_12 <- oxy_q4[, , (i + 2)]
   
-  oxy_ave <- (oxy_10 + oxy_11 + oxy_12) / 3
+  oxy_ave_q1 <- (oxy_1 + oxy_2 + oxy_3) / 3
+  oxy_ave_q4 <- (oxy_10 + oxy_11 + oxy_12) / 3
+    
+  list_pos_q1 <- ((i/3) - (1/3)) + 1 # to get index 1:n(years)
+  list_pos_q4 <- ((i/3) - (1/3)) + 1 # to get index 1:n(years)
   
-  list_pos <- ((i/3) - (1/3)) + 1 # to get index 1:n(years)
-  
-  dlist[[list_pos]] <- oxy_ave
-  
+  dlist_q1[[list_pos_q1]] <- oxy_ave_q1
+  dlist_q4[[list_pos_q4]] <- oxy_ave_q4
+
 }
 
 # Now name the lists with the year:
-names(dlist) <- unique(years_keep)
+names(dlist_q1) <- unique(years_keep_q1)
+names(dlist_q4) <- unique(years_keep_q4)
 
 # Now I need to make a loop where I extract the raster value for each year...
 # The cpue data is called dat so far in this script
 
 # Filter years in the cpue data frame to only have the years I have oxygen for
-d_sub_oxy <- dat %>% filter(year %in% names(dlist)) %>% droplevels()
+# Note: I will append the most recent data in the end, event though we don't have
+# environmental data for it
+d_sub_oxy_q1 <- dat %>% filter(quarter == 1) %>% filter(year %in% names(dlist_q1)) %>% droplevels()
+d_sub_oxy_q4 <- dat %>% filter(quarter == 4) %>% filter(year %in% names(dlist_q4)) %>% droplevels()
 
 # Create data holding object
-data_list <- list()
+data_list_q1 <- list()
+data_list_q4 <- list()
 
 # ... And for the oxygen raster
-raster_list <- list()
+raster_list_q1 <- list()
+raster_list_q4 <- list()
 
 # Create factor year for indexing the list in the loop
-d_sub_oxy$year_f <- as.factor(d_sub_oxy$year)
+d_sub_oxy_q1$year_f <- as.factor(d_sub_oxy_q1$year)
+d_sub_oxy_q4$year_f <- as.factor(d_sub_oxy_q4$year)
 
 # Loop through each year and extract raster values for the cpue data points
-for(i in unique(d_sub_oxy$year_f)) {
+for(i in unique(d_sub_oxy_q1$year_f)) { # We can use q1 as looping index, doesn't matter!
   
   # Set plot limits
   ymin = 54; ymax = 58; xmin = 12; xmax = 22
 
   # Subset a year
-  oxy_slice <- dlist[[i]]
+  oxy_slice_q1 <- dlist_q1[[i]]
+  oxy_slice_q4 <- dlist_q4[[i]]
   
   # Create raster for that year (i)
-  r <- raster(t(oxy_slice), xmn = min(lon), xmx = max(lon), ymn = min(lat), ymx = max(lat),
-              crs = CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs+ towgs84=0,0,0"))
+  r_q1 <- raster(t(oxy_slice_q1), xmn = min(lon), xmx = max(lon), ymn = min(lat), ymx = max(lat),
+                 crs = CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs+ towgs84=0,0,0"))
+  r_q4 <- raster(t(oxy_slice_q4), xmn = min(lon), xmx = max(lon), ymn = min(lat), ymx = max(lat),
+                 crs = CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs+ towgs84=0,0,0"))
   
   # Flip...
-  r <- flip(r, direction = 'y')
+  r_q1 <- flip(r_q1, direction = 'y')
+  r_q4 <- flip(r_q4, direction = 'y')
   
-  #plot(r, main = i)
+  plot(r_q1, main = i)
+  plot(r_q4, main = i)
   
   # Filter the same year (i) in the cpue data and select only coordinates
-  d_slice <- d_sub_oxy %>% filter(year_f == i) %>% dplyr::select(lon, lat)
+  d_slice_q1 <- d_sub_oxy_q1 %>% filter(year_f == i) %>% dplyr::select(lon, lat)
+  d_slice_q4 <- d_sub_oxy_q4 %>% filter(year_f == i) %>% dplyr::select(lon, lat)
   
   # Make into a SpatialPoints object
-  data_sp <- SpatialPoints(d_slice)
+  data_sp_q1 <- SpatialPoints(d_slice_q1)
+  data_sp_q4 <- SpatialPoints(d_slice_q4)
   
   # Extract raster value (oxygen)
-  rasValue <- raster::extract(r, data_sp)
+  rasValue_q1 <- raster::extract(r_q1, data_sp_q1)
+  rasValue_q4 <- raster::extract(r_q4, data_sp_q4)
   
   # Now we want to plot the results of the raster extractions by plotting the cpue
   # data points over a raster and saving it for each year.
   # Make the SpatialPoints object into a raster again (for pl)
-  df <- as.data.frame(data_sp)
+  df_q1 <- as.data.frame(data_sp_q1)
+  df_q4 <- as.data.frame(data_sp_q4)
   
   # Add in the raster value in the df holding the coordinates for the cpue data
-  d_slice$oxy <- rasValue
+  d_slice_q1$oxy <- rasValue_q1
+  d_slice_q4$oxy <- rasValue_q4
   
   # Add in which year
-  d_slice$year <- i
+  d_slice_q1$year <- i
+  d_slice_q4$year <- i
   
   # Create a index for the data last where we store all years (because our loop index
   # i is not continuous, we can't use it directly)
-  index <- as.numeric(d_slice$year)[1] - 1992
+  index_q1 <- as.numeric(as.character(d_slice_q1$year))[1] - 1992
+  index_q4 <- as.numeric(as.character(d_slice_q4$year))[1] - 1992
   
   # Add each years' data in the list
-  data_list[[index]] <- d_slice
+  data_list_q1[[index_q1]] <- d_slice_q1
+  data_list_q4[[index_q4]] <- d_slice_q4
   
   # Save to check each year is ok! First convert the raster to points for plotting
   # (so that we can use ggplot)
-  map.p <- rasterToPoints(r)
+  map_q1 <- rasterToPoints(r_q1)
+  map_q4 <- rasterToPoints(r_q4)
   
   # Make the points a dataframe for ggplot
-  df_rast <- data.frame(map.p)
+  df_rast_q1 <- data.frame(map_q1)
+  df_rast_q4 <- data.frame(map_q4)
   
   # Rename y-variable and add year
-  df_rast <- df_rast %>% rename("oxy" = "layer") %>% mutate(year = i)
+  df_rast_q1 <- df_rast_q1 %>% rename("oxy" = "layer") %>% mutate(year = i)
+  df_rast_q4 <- df_rast_q4 %>% rename("oxy" = "layer") %>% mutate(year = i)
   
   # Add each years' raster data frame in the list
-  raster_list[[index]] <- df_rast
+  raster_list_q1[[index_q1]] <- df_rast_q1
+  raster_list_q4[[index_q4]] <- df_rast_q4
   
   # Make appropriate column headings
-  colnames(df_rast) <- c("Longitude", "Latitude", "oxy")
+  colnames(df_rast_q1) <- c("Longitude", "Latitude", "oxy")
+  colnames(df_rast_q4) <- c("Longitude", "Latitude", "oxy")
   
-  # Now make the map
-  ggplot(data = df_rast, aes(y = Latitude, x = Longitude)) +
+  # Make a map for q1
+  ggplot(data = df_rast_q1, aes(y = Latitude, x = Longitude)) +
     geom_raster(aes(fill = oxy)) +
-    geom_point(data = d_slice, aes(x = lon, y = lat, fill = oxy),
+    geom_point(data = d_slice_q1, aes(x = lon, y = lat, fill = oxy),
                color = "black", size = 5, shape = 21) +
     theme_bw() +
     geom_sf(data = world, inherit.aes = F, size = 0.2) +
@@ -1489,28 +1666,54 @@ for(i in unique(d_sub_oxy$year_f)) {
                          limits = c(-200, 400)) +
     NULL
   
-  ggsave(paste("figures/supp/cpue_oxygen_rasters/", i,".png", sep = ""),
+  ggsave(paste("figures/supp/cpue_oxygen_rasters/", i,"q1.png", sep = ""),
+         width = 6.5, height = 6.5, dpi = 600)
+  
+  # Make a map for q4
+  ggplot(data = df_rast_q4, aes(y = Latitude, x = Longitude)) +
+    geom_raster(aes(fill = oxy)) +
+    geom_point(data = d_slice_q4, aes(x = lon, y = lat, fill = oxy),
+               color = "black", size = 5, shape = 21) +
+    theme_bw() +
+    geom_sf(data = world, inherit.aes = F, size = 0.2) +
+    coord_sf(xlim = c(xmin, xmax),
+             ylim = c(ymin, ymax)) +
+    scale_colour_gradientn(colours = rev(terrain.colors(10)),
+                           limits = c(-200, 400)) +
+    scale_fill_gradientn(colours = rev(terrain.colors(10)),
+                         limits = c(-200, 400)) +
+    NULL
+  
+  ggsave(paste("figures/supp/cpue_oxygen_rasters/", i,"q4.png", sep = ""),
          width = 6.5, height = 6.5, dpi = 600)
   
 }
 
 # Now create a data frame from the list of all annual values
-big_dat_oxy <- dplyr::bind_rows(data_list)
-big_raster_dat_oxy <- dplyr::bind_rows(raster_list)
+big_dat_oxy_q1 <- dplyr::bind_rows(data_list_q1)
+big_dat_oxy_q4 <- dplyr::bind_rows(data_list_q4)
+big_dat_oxy <- bind_rows(mutate(big_dat_oxy_q1, quarter = 1),
+                         mutate(big_dat_oxy_q4, quarter = 4))
+
+big_raster_dat_oxy_q1 <- dplyr::bind_rows(raster_list_q1)
+big_raster_dat_oxy_q4 <- dplyr::bind_rows(raster_list_q4)
+big_raster_dat_oxy <- bind_rows(mutate(big_raster_dat_oxy_q1, quarter = 1),
+                                mutate(big_raster_dat_oxy_q4, quarter = 4))
 
 # Plot data, looks like there's big inter-annual variation but a negative trend over time
 big_raster_dat_oxy %>%
-  group_by(year) %>%
+  group_by(quarter, year) %>%
   drop_na(oxy) %>%
   summarise(mean_oxy = mean(oxy)) %>%
   mutate(year_num = as.numeric(year)) %>%
   ggplot(., aes(year_num, mean_oxy)) +
   geom_point(size = 2) +
   stat_smooth(method = "lm") +
+  facet_wrap(~ quarter) +
   NULL
 
 big_raster_dat_oxy %>%
-  group_by(year) %>%
+  group_by(quarter, year) %>%
   drop_na(oxy) %>%
   mutate(dead = ifelse(oxy < 0, "Y", "N")) %>%
   filter(dead == "Y") %>%
@@ -1519,27 +1722,35 @@ big_raster_dat_oxy %>%
   ggplot(., aes(year_num, n)) +
   geom_point(size = 2) +
   stat_smooth(method = "lm") +
+  facet_wrap(~ quarter) +
   NULL
 
 # Now add in the new oxygen column in the original data:
-str(d_sub_oxy)
+str(d_sub_oxy_q1)
+str(d_sub_oxy_q4)
 str(big_dat_oxy)
 
 # Create an ID for matching the oxygen data with the cpue data
-dat$id_oxy <- paste(dat$year, dat$lon, dat$lat, sep = "_")
-big_dat_oxy$id_oxy <- paste(big_dat_oxy$year, big_dat_oxy$lon, big_dat_oxy$lat, sep = "_")
+dat$id_oxy <- paste(dat$year, dat$quarter, dat$lon, dat$lat, sep = "_")
+big_dat_oxy$id_oxy <- paste(big_dat_oxy$year, big_dat_oxy$quarter, big_dat_oxy$lon, big_dat_oxy$lat, sep = "_")
 
-# Which id's are not in the cpue data (dat)?
+# Which id's are NOT in the cpue data (dat)?
+head(dat$id_oxy, 100)
+head(big_dat_oxy$id_oxy, 100)
+tail(dat$id_oxy, 100)
+tail(big_dat_oxy$id_oxy, 100)
+#dat %>% group_by(year) %>% summarise(n = n()) %>% as.data.frame()
+
 ids <- dat$id_oxy[!dat$id_oxy %in% c(big_dat_oxy$id_oxy)]
 
-unique(ids)
+dat %>% filter(id_oxy %in% ids)
 
 # Select only the columns we want to merge
 big_dat_sub_oxy <- big_dat_oxy %>% dplyr::select(id_oxy, oxy)
 
 # Remove duplicate ID (one oxy value per id)
+big_dat_sub_oxy %>% group_by(id_oxy) %>% mutate(n = n()) %>% arrange(desc(n))
 big_dat_sub_oxy2 <- big_dat_sub_oxy %>% distinct(id_oxy, .keep_all = TRUE)
-# big_dat_sub_oxy %>% group_by(id_oxy) %>% mutate(n = n()) %>% arrange(desc(n))
 
 # Join the data with raster-derived oxygen with the full cpue data
 dat <- left_join(dat, big_dat_sub_oxy2, by = "id_oxy")
@@ -1554,6 +1765,8 @@ dat$oxy <- dat$oxy * 0.0223909
 
 # Drop NA oxygen
 dat <- dat %>% drop_na(oxy)
+
+sort(unique(dat$year))
 ```
 
 ### Temperature
@@ -1801,6 +2014,26 @@ dat <- dat %>% dplyr::select(-id_temp, -id_oxy)
 
 # Drop NA temp
 dat <- dat %>% drop_na(temp)
+
+# Now, if quarter == 1 in dat, temperature should be NA beucase I haven't done temperature for q1 here (see comment in the description of this script)
+sort(unique(filter(dat, quarter == 1)$temp))
+dat <- dat %>% mutate(temp = ifelse(quarter == 1, NA, temp))
+sort(unique(filter(dat, quarter == 1)$temp))
+```
+
+## Add back in the data that get environmental variables added
+
+```{r}
+fishdat2 <- fishdat %>% filter(!year %in% unique(dat$year))
+sort(unique(fishdat2$year))
+sort(unique(dat$year))
+
+dat <- bind_rows(dat, fishdat2)
+
+sort(unique(dat$year))
+
+dat %>% group_by(year, quarter) %>% summarise(mean_temp = mean(temp)) %>% as.data.frame()
+
 ```
 
 ## Add UTM coords
