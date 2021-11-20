@@ -30,6 +30,8 @@ vignettes/*.pdf
 /R/analysis/cpue_model.html
 /R/analysis/model_selection.html
 /R/explore/condition_covariates.html
+/R/clean_data/collate_cond_data_exchange.html
+/R/clean_data/collate_cpue_data_exchange.html
 
 # OAuth2 token, see https://github.com/hadley/httr/releases/tag/v0.3
 .httr-oauth
@@ -60,6 +62,7 @@ SISP7 BITS 2017.pdf
 /data/OCEANOGRAPHY
 /data/NEMO_Nordic_SCOBI
 /data/depth_geo_tif
+/data/saduria_tif
 /data/shapefiles
 /data/ICES_StatRec_mapto_ICES_Areas
 /data/sweep.xlsx
