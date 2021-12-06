@@ -11,17 +11,19 @@
 # 
 # D. Add lat long
 #
-# E. Add saduria
-# 
-# F. Add sprat and herring
-# 
-# G. Add cod and flounder
+# E. Add ices areas via shapefiles
 #
-# H. Add ices areas via shapefiles
+# F. Add saduria
 # 
-# I. Save
+# G. Add sprat and herring
 # 
-# J. Plot
+# H. Add cod and flounder
+#
+# I. Calculate large scale variables
+# 
+# J. Save
+# 
+# K. Plot
 # 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -187,7 +189,7 @@ ggplot(swe_coast_proj) +
 hist(pred_grid$depth)
 
 
-# C. ADD WITH OXYGEN & TEMPERATURE =================================================
+# C. ADD OXYGEN & TEMPERATURE =================================================
 # ** Oxygen ========================================================================
 # Loop through each year and extract the oxygen levels
 # Downloaded from here: https://resources.marine.copernicus.eu/?option=com_csw&view=details&product_id=BALTICSEA_REANALYSIS_BIO_003_012
@@ -673,38 +675,19 @@ pred_grid <- pred_grid %>%
 pred_grid$ices_rect <- mapplots::ices.rect2(lon = pred_grid$lon, lat = pred_grid$lat)
 
 
-# E. ADD SADURIA ===================================================================
+# F. ADD SADURIA ===================================================================
 saduria <- raster("data/saduria_tif/FWBiomassm_raster_19812019presHighweightcor_no0_newZi.tif")
 saduria_longlat = projectRaster(saduria, crs = ('+proj=longlat'))
 
 # Now extract the values from the saduria raster to the prediction grid
 pred_grid$biomass_saduria <- extract(saduria_longlat, pred_grid[, 8:9])
 
-# Calculate median biomass on rectangle level
-pred_grid <- pred_grid %>%
-  drop_na(biomass_saduria) %>% 
-  group_by(year, ices_rect) %>%
-  mutate(biomass_saduria_rec = median(biomass_saduria)) %>% 
-  ungroup()
-
-# Calculate median biomass on sub division level
-pred_grid <- pred_grid %>%
-  group_by(year, sub_div) %>%
-  mutate(biomass_saduria_sd = median(biomass_saduria)) %>% 
-  ungroup()
-
 # Finest scale
 ggplot(pred_grid, aes(X, Y, fill = biomass_saduria)) + 
   geom_raster()
 
-ggplot(pred_grid, aes(X, Y, fill = biomass_saduria_rec)) + 
-  geom_raster()
 
-ggplot(pred_grid, aes(X, Y, fill = biomass_saduria_sd)) + 
-  geom_raster()
-
-
-# F. ADD SPRAT AND HERRING =========================================================
+# G. ADD SPRAT AND HERRING =========================================================
 # Read data on rectangle level
 spr <- read_xlsx("data/BIAS/N and B per Rect. 1991-2020.xlsx",
                  sheet = 4) %>%
@@ -929,7 +912,7 @@ pred_grid %>%
   NULL
 
 
-# G. ADD COD AND FLOUNDER ==========================================================
+# H. ADD COD AND FLOUNDER ==========================================================
 # This is so that we can standardize the prediction grid with respect to the data
 density <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cpue.csv")
 
@@ -959,16 +942,28 @@ pred_grid$density_fle <- cpue_fle
 ggplot(pred_grid, aes(log(density_cod))) + geom_histogram()
 ggplot(pred_grid, aes(log(density_fle))) + geom_histogram()
 
-# Calculate rectangle-level variables (use median)
-pred_grid <- pred_grid %>% group_by(year, ices_rect) %>% mutate(density_cod_rec = median(density_cod),
-                                                                density_fle_rec = median(density_fle))
 
-# Calculate sub division-level variables (use median)
-pred_grid <- pred_grid %>% group_by(year, sub_div) %>% mutate(density_cod_sd = median(density_cod),
-                                                              density_fle_sd = median(density_fle))
+# I. LARGE SCALE VARIABLES =========================================================
+pred_grid <- pred_grid %>% 
+  drop_na(depth, temp, oxy, biomass_saduria, density_cod, density_fle) %>% 
+  group_by(year, ices_rect) %>% 
+  mutate(depth_rec = median(depth),
+         temp_rec = median(temp),
+         oxy_rec = median(oxy),
+         density_cod_rec = median(density_cod),
+         density_fle_rec = median(density_fle),
+         biomass_saduria_rec = median(biomass_saduria)) %>% 
+  ungroup() %>% 
+  group_by(year, sub_div) %>% 
+  mutate(depth_sd = median(depth),
+         temp_sd = median(temp),
+         oxy_sd = median(oxy),
+         density_cod_sd = median(density_cod),
+         density_fle_sd = median(density_fle),
+         biomass_saduria_sd = median(biomass_saduria))
+  
 
-
-# I. SAVE ==========================================================================
+# J. SAVE ==========================================================================
 # Remove variables and save
 
 pred_grid <- pred_grid %>% dplyr::select(-deep, -subdiv, -subdiv2, -IDr, -ID_sd_year,
@@ -977,7 +972,7 @@ pred_grid <- pred_grid %>% dplyr::select(-deep, -subdiv, -subdiv2, -IDr, -ID_sd_
 write.csv(pred_grid, file = "data/for_analysis/pred_grid.csv", row.names = FALSE)
 
 
-# J. PLOT ==========================================================================
+# K. PLOT ==========================================================================
 # Oxygen vs depth
 ggplot(pred_grid, aes(depth, oxy)) + geom_point()
 
