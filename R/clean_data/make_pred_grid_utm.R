@@ -1,22 +1,27 @@
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # 2020.06.16: Max Lindmark
 #
-# - Make a prediction grid that is cropped to predict only on coordinates in the Baltic.
-#   Covariates are added later
+# - Make a prediction grid over the survey area with covariates at different scales
 # 
 # A. Load libraries
 # 
 # B. Basic grid with depth
 # 
-# C. Grid with oxygen & temperature
+# C. Add oxygen & temperature
 # 
 # D. Add lat long
-# 
-# E. Add ICES areas
-# 
-# F. Save
 #
-# G. Make figures of environmental variables in prediction grid
+# E. Add saduria
+# 
+# F. Add sprat and herring
+# 
+# G. Add cod and flounder
+#
+# H. Add ices areas via shapefiles
+# 
+# I. Save
+# 
+# J. Plot
 # 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -45,6 +50,8 @@ library(RCurl)
 library(sdmTMB)
 library(RColorBrewer)
 library(terra)
+library(mapplots)
+library(readxl)
 
 # Print package versions
 # sessionInfo()
@@ -52,6 +59,7 @@ library(terra)
 # [1] forcats_0.5.0    stringr_1.4.0    dplyr_1.0.0      purrr_0.3.4      readr_1.3.1
 # tidyr_1.1.0      tibble_3.0.3    [8] ggplot2_3.3.2    tidyverse_1.3.0  glmmfields_0.1.4
 # Rcpp_1.0.5.1    
+
 
 # B. BASIC GRID WITH DEPTH =========================================================
 # Get the boundaries
@@ -179,7 +187,7 @@ ggplot(swe_coast_proj) +
 hist(pred_grid$depth)
 
 
-# C. GRID WITH OXYGEN & TEMPERATURE ================================================
+# C. ADD WITH OXYGEN & TEMPERATURE =================================================
 # ** Oxygen ========================================================================
 # Loop through each year and extract the oxygen levels
 # Downloaded from here: https://resources.marine.copernicus.eu/?option=com_csw&view=details&product_id=BALTICSEA_REANALYSIS_BIO_003_012
@@ -398,8 +406,8 @@ pred_grid$oxy <- pred_grid_oxy$oxy
 # Now the unit of oxygen is mmol/m3. I want it to be ml/L. The original model is in unit ml/L
 # and it's been converted by the data host. Since it was converted without accounting for
 # pressure or temperature, I can simply use the following conversion factor:
-# 1 ml/l = 103/22.391 = 44.661 μmol/l -> 1 ml/l = 0.044661 mmol/l = 44.661 mmol/m^3 -> 0.0223909 ml/l = 1mmol/m^3
-# https://ocean.ices.dk/tools/unitconversion.aspx
+# From Ye: 1 ml/l = 10^3/22.391 = 44.661 μmol/l (same as mmol/m^3)
+# Hence, 0.0223909 ml/l = 1 μmol/l (mmol/m^3)
 
 pred_grid$oxy <- pred_grid$oxy * 0.0223909
 
@@ -615,7 +623,7 @@ str(pred_grid)
 pred_grid$temp <- pred_grid_temp$temp
 
 
-# E. ADD LATLONG ===================================================================
+# D. ADD LATLONG ===================================================================
 
 # Need to go from UTM to lat long for this one... 
 # https://stackoverflow.com/questions/30018098/how-to-convert-utm-coordinates-to-lat-and-long-in-r
@@ -629,6 +637,7 @@ pred_grid$lat <- lonlat[, 2]
 
 pred_grid$X <- pred_grid$X/1000
 pred_grid$Y <- pred_grid$Y/1000
+
 
 # E. ADD ICES AREAS VIA SHAPEFILE ==================================================
 # https://stackoverflow.com/questions/34272309/extract-shapefile-value-to-point-with-r
@@ -647,32 +656,333 @@ pred_grid$subdiv2 <- over(pts, shape)$AreasList
 # Rename subdivisions to the more common names and do some more filtering (by sub div and area)
 sort(unique(pred_grid$subdiv))
 
-pred_grid2 <- pred_grid %>% 
-  mutate(SubDiv = factor(subdiv),
-         SubDiv = fct_recode(subdiv,
-                             "24" = "3.d.24",
-                             "25" = "3.d.25",
-                             "26" = "3.d.26",
-                             "27" = "3.d.27",
-                             "28" = "3.d.28.1",
-                             "28" = "3.d.28.2"),
-         SubDiv = as.character(SubDiv)) %>% 
-  filter(SubDiv %in% c("24", "25", "26", "27", "28")) %>% 
+pred_grid <- pred_grid %>% 
+  mutate(sub_div = factor(subdiv),
+         sub_div = fct_recode(subdiv,
+                              "24" = "3.d.24",
+                              "25" = "3.d.25",
+                              "26" = "3.d.26",
+                              "27" = "3.d.27",
+                              "28" = "3.d.28.1",
+                              "28" = "3.d.28.2"),
+         sub_div = as.character(sub_div)) %>% 
+  filter(sub_div %in% c("24", "25", "26", "27", "28")) %>% 
   filter(lat > 54 & lat < 58 & lon < 22)
-  
 
-# F. SAVE ==========================================================================
-# Save
-
-write.csv(pred_grid2, file = "data/for_analysis/pred_grid2.csv", row.names = FALSE)
+# Add ICES rectangles
+pred_grid$ices_rect <- mapplots::ices.rect2(lon = pred_grid$lon, lat = pred_grid$lat)
 
 
-# G. PLOT ==========================================================================
+# E. ADD SADURIA ===================================================================
+saduria <- raster("data/saduria_tif/FWBiomassm_raster_19812019presHighweightcor_no0_newZi.tif")
+saduria_longlat = projectRaster(saduria, crs = ('+proj=longlat'))
+
+# Now extract the values from the saduria raster to the prediction grid
+pred_grid$biomass_saduria <- extract(saduria_longlat, pred_grid[, 8:9])
+
+# Calculate median biomass on rectangle level
+pred_grid <- pred_grid %>%
+  drop_na(biomass_saduria) %>% 
+  group_by(year, ices_rect) %>%
+  mutate(biomass_saduria_rec = median(biomass_saduria)) %>% 
+  ungroup()
+
+# Calculate median biomass on sub division level
+pred_grid <- pred_grid %>%
+  group_by(year, sub_div) %>%
+  mutate(biomass_saduria_sd = median(biomass_saduria)) %>% 
+  ungroup()
+
+# Finest scale
+ggplot(pred_grid, aes(X, Y, fill = biomass_saduria)) + 
+  geom_raster()
+
+ggplot(pred_grid, aes(X, Y, fill = biomass_saduria_rec)) + 
+  geom_raster()
+
+ggplot(pred_grid, aes(X, Y, fill = biomass_saduria_sd)) + 
+  geom_raster()
+
+
+# F. ADD SPRAT AND HERRING =========================================================
+# Read data on rectangle level
+spr <- read_xlsx("data/BIAS/N and B per Rect. 1991-2020.xlsx",
+                 sheet = 4) %>%
+  mutate(sub_div = ifelse(Sub_Div == "28_2", "28", Sub_Div)) %>% 
+  filter(sub_div %in% c("24", "25", "26", "27", "28")) %>% 
+  rename("ices_rect" = "RECT",
+         "Year" = "ANNUS") %>%
+  mutate_at(vars(`1`, `2`, `3`, `4`, `5`, `6`, `7`, `8`), ~replace_na(., 0)) %>% # I need to replace NA with 0, else I can't sum! According to Olavi who sent the data, NA means 0 and nothing else. Rectangle*year combinations that do not have information about biomass are simply not included in this data
+  mutate(ices_rect = as.factor(ices_rect),
+         Species = "Sprat",
+         biomass_spr = `1`+`2`+`3`+`4`+`5`+`6`+`7`+`8`, 
+         IDr = paste(ices_rect, Year, sep = ".")) # Make new ID)
+
+her <- read_xlsx("data/BIAS/N and B per Rect. 1991-2020.xlsx",
+                 sheet = 3) %>%
+  mutate(sub_div = ifelse(Sub_Div == "28_2", "28", Sub_Div)) %>% 
+  filter(sub_div %in% c("24", "25", "26", "27", "28")) %>% 
+  rename("ices_rect" = "RECT",
+         "Year" = "ANNUS") %>%
+  mutate_at(vars(`1`, `2`, `3`, `4`, `5`, `6`, `7`, `8`), ~replace_na(., 0)) %>%
+  mutate(ices_rect = as.factor(ices_rect),
+         Species = "Herring",
+         biomass_her = `1`+`2`+`3`+`4`+`5`+`6`+`7`+`8`, 
+         IDr = paste(ices_rect, Year, sep = ".")) # Make new ID)
+
+# Plot distribution over time in the whole area
+spr %>%
+  mutate(lon = ices.rect(spr$ices_rect)$lon) %>%
+  mutate(lat = ices.rect(spr$ices_rect)$lat) %>%
+  ggplot(., aes(lon, lat, fill = log(biomass_spr))) +
+  geom_raster() +
+  scale_fill_viridis() +
+  facet_wrap(~ Year, ncol = 5) +
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  labs(x = "lon", y = "lat") +
+  theme(axis.text.x = element_text(angle = 90)) +
+  NULL
+
+ggsave("figures/supp/spr_distribution.png", width = 10, height = 10, dpi = 600)
+
+her %>%
+  mutate(lon = ices.rect(her$ices_rect)$lon) %>%
+  mutate(lat = ices.rect(her$ices_rect)$lat) %>%
+  ggplot(., aes(lon, lat, fill = log(biomass_her))) +
+  geom_raster() +
+  scale_fill_viridis() +
+  facet_wrap(~ Year, ncol = 5) +
+  geom_sf(data = world, inherit.aes = F, size = 0.2) +
+  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
+  labs(x = "lon", y = "lat") +
+  theme(axis.text.x = element_text(angle = 90)) +
+  NULL
+
+ggsave("figures/supp/her_distribution.png", width = 10, height = 10, dpi = 600)
+
+# How many unique rows per IDr?
+her %>%
+  group_by(IDr) %>% 
+  mutate(n = n()) %>% 
+  ggplot(., aes(factor(n))) + geom_bar()
+
+spr %>%
+  group_by(IDr) %>% 
+  mutate(n = n()) %>% 
+  ggplot(., aes(factor(n))) + geom_bar()
+
+# Ok, some ID's with two rows...
+spr %>%
+  group_by(IDr) %>% 
+  mutate(n = n()) %>% 
+  filter(n == 2) %>% 
+  ungroup() %>% 
+  as.data.frame() %>% 
+  head(20)
+
+# It's because rectangles somehow being in different sub divisions.
+# I need to group by IDr and summarize
+spr_sum <- spr %>%
+  group_by(IDr) %>% 
+  summarise(biomass_spr = sum(biomass_spr)) %>% # Sum abundance within IDr
+  distinct(IDr, .keep_all = TRUE) %>% # Remove duplicate IDr
+  mutate(ID_temp = IDr) %>% # Create temporary IDr that we can use to split in order
+  # to get Year and StatRect back into the summarized data
+  separate(ID_temp, c("StatRec", "Year"), sep = 4)
+
+nrow(spr_sum) 
+nrow(spr)
+nrow(spr %>% group_by(IDr) %>% mutate(n = n()) %>% filter(n == 2))
+
+# Check with a specific rectangle
+filter(spr_sum, IDr == "39G4.1991")
+filter(spr, IDr == "39G4.1991")
+
+# This should equal 1 (new # rows =  old - duplicated IDr)
+nrow(spr_sum) / (nrow(spr) - 0.5*nrow(spr %>% group_by(IDr) %>% mutate(n = n()) %>% filter(n == 2)))
+
+# How many rows per rectangle?
+spr_sum %>%
+  group_by(IDr) %>% 
+  mutate(n = n()) %>% 
+  ungroup() %>% 
+  distinct(n)
+
+# Now do the same for herring
+her_sum <- her %>%
+  group_by(IDr) %>% 
+  summarise(biomass_her = sum(biomass_her)) %>% # Sum abundance within IDr
+  distinct(IDr, .keep_all = TRUE) %>% # Remove duplicate IDr
+  mutate(ID_temp = IDr) %>% # Create temporary IDr that we can use to split in order
+  # to get Year and StatRect back into the summarized data
+  separate(ID_temp, c("StatRec", "Year"), sep = 4)
+
+nrow(her_sum) 
+nrow(her)
+nrow(her %>% group_by(IDr) %>% mutate(n = n()) %>% filter(n == 2))
+
+filter(her_sum, IDr == "39G4.1991")
+filter(her, IDr == "39G4.1991")
+
+# This should equal 1 (new # rows =  old - duplicated IDr)
+nrow(her_sum) / (nrow(her) - 0.5*nrow(her %>% group_by(IDr) %>% mutate(n = n()) %>% filter(n == 2)))
+
+# How many rows per rectangle?
+her_sum %>%
+  group_by(IDr) %>% 
+  mutate(n = n()) %>% 
+  ungroup() %>% 
+  distinct(n)
+
+# Now join pelagic covariates with pred grid
+# Make ices_rect a factor in the main data
+pred_grid <- pred_grid %>% mutate(ices_rect = as.factor(ices_rect))
+
+# Create IDr in prediction grid to match pelagics data
+pred_grid <- pred_grid %>% mutate(IDr = paste(ices_rect, year, sep = "."))
+
+# Are there any StatRec that are in the prediction grid data that are not in the pelagics data?
+# Some very coastal...
+unique(pred_grid$ices_rect[!pred_grid$ices_rect %in% her$ices_rect])
+unique(pred_grid$ices_rect[!pred_grid$ices_rect %in% spr$ices_rect])
+
+# Check IDr
+pred_grid$IDr[!pred_grid$IDr %in% her$IDr]
+pred_grid$IDr[!pred_grid$IDr %in% spr$IDr]
+
+# Filter columns so that I only use sprat and herring IDr's that are in the condition data (don't need the others!)
+spr_sum <- spr_sum %>% filter(IDr %in% pred_grid$IDr)
+her_sum <- her_sum %>% filter(IDr %in% pred_grid$IDr)
+
+# Select columns from pelagic data to go in dat
+spr_sub <- spr_sum %>% dplyr::select(IDr, biomass_spr)
+her_sub <- her_sum %>% dplyr::select(IDr, biomass_her)
+
+# Now join dat and sprat data
+pred_grid <- left_join(pred_grid, spr_sub)
+nrow(dat)
+
+# And herring..
+pred_grid <- left_join(pred_grid, her_sub)
+
+# Now deal with the NA's
+unique(is.na(spr_sum$biomass_spr))
+unique(is.na(her_sum$biomass_her))
+
+unique(is.na(pred_grid$biomass_spr))
+unique(is.na(pred_grid$biomass_her))
+
+# The NA's I have in the DAT are missing pelagic data, i.e. not 0's! Need to drop them unfortunately,
+# or fit a model to the data. Since it's only 3% of data, I will simply remove them.
+pred_grid <- pred_grid %>% drop_na(biomass_spr) %>% drop_na(biomass_her)
+
+# Now add in the sub division values
+biomass_spr_sd <- read_xlsx("data/BIAS/N and B per SD 1991-2020.xlsx",
+                            sheet = 4) %>%
+  mutate(sub_div = ifelse(Sub_Div == "28_2", "28", Sub_Div)) %>% 
+  filter(sub_div %in% c("24", "25", "26", "27", "28")) %>% 
+  rename("Year" = "ANNUS") %>% 
+  mutate_at(vars(`AGE1`, `AGE2`, `AGE3`, `AGE4`, `AGE5`, `AGE6`, `AGE7`, `AGE8+`), ~replace_na(., 0)) %>% # I need to replace NA with 0, else I can't sum! According to Olavi who sent the data, NA means 0 and nothing else. Rectangle*year combinations that do not have information about biomass are simply not included in this data
+  mutate(sub_div = as.factor(sub_div),
+         Species = "Sprat",
+         biomass_spr_sd = `AGE1`+`AGE2`+`AGE3`+`AGE4`+`AGE5`+`AGE6`+`AGE7`+`AGE8+`, # omitting `0+` here
+         ID_sd_year = paste(sub_div, Year, sep = ".")) %>% # Make new ID
+  dplyr::select(biomass_spr_sd, ID_sd_year)
+
+biomass_her_sd <- read_xlsx("data/BIAS/N and B per SD 1991-2020.xlsx",
+                            sheet = 3) %>%
+  mutate(sub_div = ifelse(Sub_Div == "28_2", "28", Sub_Div)) %>% 
+  filter(sub_div %in% c("24", "25", "26", "27", "28")) %>% 
+  rename("Year" = "ANNUS") %>% 
+  mutate_at(vars(`AGE1`, `AGE2`, `AGE3`, `AGE4`, `AGE5`, `AGE6`, `AGE7`, `AGE8+`), ~replace_na(., 0)) %>% # I need to replace NA with 0, else I can't sum! According to Olavi who sent the data, NA means 0 and nothing else. Rectangle*year combinations that do not have information about biomass are simply not included in this data
+  mutate(sub_div = as.factor(sub_div),
+         Species = "Sprat",
+         biomass_her_sd = `AGE1`+`AGE2`+`AGE3`+`AGE4`+`AGE5`+`AGE6`+`AGE7`+`AGE8+`, # omitting `0+` here
+         ID_sd_year = paste(sub_div, Year, sep = ".")) %>% # Make new ID
+  dplyr::select(biomass_her_sd, ID_sd_year)
+
+# Add in the same id to the pred_grid
+pred_grid <- pred_grid %>% mutate(ID_sd_year = paste(sub_div, year, sep = "."))
+
+pred_grid <- left_join(pred_grid, biomass_spr_sd)
+
+pred_grid <- left_join(pred_grid, biomass_her_sd)
+
+# Plot
+pred_grid %>%
+  ggplot(., aes(X, Y, fill = biomass_spr_sd)) +
+  geom_raster() +
+  scale_fill_viridis() +
+  facet_wrap(~ year, ncol = 5) +
+  labs(x = "lon", y = "lat") +
+  theme(axis.text.x = element_text(angle = 90)) +
+  NULL
+
+pred_grid %>%
+  ggplot(., aes(X, Y, fill = biomass_her_sd)) +
+  geom_raster() +
+  scale_fill_viridis() +
+  facet_wrap(~ year, ncol = 5) +
+  labs(x = "lon", y = "lat") +
+  theme(axis.text.x = element_text(angle = 90)) +
+  NULL
+
+
+# G. ADD COD AND FLOUNDER ==========================================================
+# This is so that we can standardize the prediction grid with respect to the data
+density <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cpue.csv")
+
+# Load models
+mcod <- readRDS("output/mcod.rds")
+mfle <- readRDS("output/mfle.rds")
+
+# We need to scale the grid with respect to the mean and sd in the data to it was fitted to
+density_mean_depth <- mean(density$depth)
+density_sd_depth <- sd(density$depth)
+
+# Scale depth in the pred grid
+pred_grid <- pred_grid %>%
+  mutate(depth_sc = (depth - density_mean_depth) / density_sd_depth)
+
+hist((density$depth - mean(density$depth)) / sd(density$depth))
+hist(pred_grid$depth_sc)
+
+# Predict from the density models
+cpue_cod <- exp(predict(mcod, newdata = pred_grid)$est)
+cpue_fle <- exp(predict(mfle, newdata = pred_grid)$est)
+
+pred_grid$density_cod <- cpue_cod
+pred_grid$density_fle <- cpue_fle
+
+# Inspect
+ggplot(pred_grid, aes(log(density_cod))) + geom_histogram()
+ggplot(pred_grid, aes(log(density_fle))) + geom_histogram()
+
+# Calculate rectangle-level variables (use median)
+pred_grid <- pred_grid %>% group_by(year, ices_rect) %>% mutate(density_cod_rec = median(density_cod),
+                                                                density_fle_rec = median(density_fle))
+
+# Calculate sub division-level variables (use median)
+pred_grid <- pred_grid %>% group_by(year, sub_div) %>% mutate(density_cod_sd = median(density_cod),
+                                                              density_fle_sd = median(density_fle))
+
+
+# I. SAVE ==========================================================================
+# Remove variables and save
+
+pred_grid <- pred_grid %>% dplyr::select(-deep, -subdiv, -subdiv2, -IDr, -ID_sd_year,
+                                         -depth_sc)
+
+write.csv(pred_grid, file = "data/for_analysis/pred_grid.csv", row.names = FALSE)
+
+
+# J. PLOT ==========================================================================
 # Oxygen vs depth
-ggplot(pred_grid2, aes(depth, oxy)) + geom_point()
+ggplot(pred_grid, aes(depth, oxy)) + geom_point()
 
 # Oxygen vs year
-pred_grid2 %>% 
+pred_grid %>% 
   drop_na(oxy) %>% 
   group_by(year) %>% 
   summarise(mean_oxy = mean(oxy),
@@ -689,7 +999,7 @@ pred_grid2 %>%
 ggsave("figures/supp/env_oxy.png", width = 6.5, height = 6.5, dpi = 600)
 
 # Oxygen vs year and sd
-pred_grid2 %>% 
+pred_grid %>% 
   drop_na(oxy, SubDiv) %>% 
   filter(!SubDiv == 22) %>% 
   group_by(year, SubDiv) %>% 
@@ -707,7 +1017,7 @@ pred_grid2 %>%
 ggsave("figures/supp/env_oxy_sd.png", width = 6.5, height = 6.5, dpi = 600)
 
 # Oxygen vs year and sd by depth
-pred_grid2 %>% 
+pred_grid %>% 
   drop_na(oxy, SubDiv) %>% 
   mutate(deep = ifelse(depth < 50, "N", "Y")) %>% 
   filter(!SubDiv == 22) %>% 

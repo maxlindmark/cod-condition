@@ -1,0 +1,224 @@
+---
+title: "Collate condition data"
+author: "Max Lindmark"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+  df_print: paged
+pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+  
+```{r setup, include = FALSE, cache=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 12,
+  fig.asp = 0.618,
+  fig.align ='center'
+)
+```
+
+# Intro
+In this script, I fit simplified models to density data so that I can predict densities on the condition data and pred grid
+
+## Load libraries
+```{r, message=FALSE}
+rm(list = ls())
+
+library(tidyverse); theme_set(theme_light(base_size = 12))
+library(readxl)
+library(tidylog)
+library(RCurl)
+library(viridis)
+library(RColorBrewer)
+library(patchwork)
+library(janitor)
+library(icesDatras)
+library(mapdata)
+library(patchwork)
+library(rgdal)
+library(raster)
+library(sf)
+library(rgeos)
+library(chron)
+library(lattice)
+library(ncdf4)
+library(marmap)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(mapplots)
+library(geosphere)
+#remotes::install_github("pbs-assess/sdmTMB")
+library(sdmTMB)
+# To load entire cache in interactive r session, do:
+# qwraps2::lazyload_cache_dir(path = "R/clean_data/cod_fle_density_models_as_covars_cache/html")
+```
+
+## For maps
+
+```{r read coastline data, message=FALSE, warning=FALSE}
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+# Specify map ranges
+ymin = 54; ymax = 58; xmin = 12; xmax = 22
+
+map_data <- rnaturalearth::ne_countries(
+  scale = "medium",
+  returnclass = "sf", continent = "europe")
+
+# Crop the polygon for plotting and efficiency:
+# st_bbox(map_data) # find the rough coordinates
+swe_coast <- suppressWarnings(suppressMessages(
+  st_crop(map_data,
+          c(xmin = xmin, ymin = ymin, xmax = xmax, ymax = ymax))))
+
+# Transform our map into UTM 33 coordinates, which is the equal-area projection we fit in:
+utm_zone33 <- 32633
+swe_coast_proj <- sf::st_transform(swe_coast, crs = utm_zone33)
+
+#ggplot(swe_coast_proj) + geom_sf() 
+```
+
+## Load data
+
+```{r, message=FALSE, cache=TRUE}
+d <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cpue.csv")
+
+# Filter to match the data I want to predict on
+d <- d %>% filter(year > 1992 & year < 2020)
+
+# Calculate standardized variables
+d <- d %>% 
+  mutate(depth_sc = (depth - mean(depth))/sd(depth)) %>%
+  mutate(year = as.integer(year)) %>% 
+  drop_na(depth) %>% 
+  rename("density_cod" = "density") # to fit better with how flounder is named
+
+# Explore data a bit
+ggplot(d) + 
+  geom_point(aes(year, density_cod, color = factor(sub_div))) + 
+  facet_wrap(~sub_div)
+
+# Explore data a bit
+ggplot(d) + 
+  geom_point(aes(year, density_fle, color = factor(sub_div))) + 
+  facet_wrap(~sub_div)
+```
+
+## Make mesh
+
+```{r make mesh}
+# Make mesh:
+spde <- make_mesh(d, xy_cols = c("X", "Y"),
+                  n_knots = 150, 
+                  type = "kmeans", seed = 42)
+
+plot(spde)
+```
+
+## Fit models
+
+```{r fit cod models, cache=TRUE}
+# Depth spline + oxy spline
+# Cod model
+mcod <- sdmTMB(density_cod ~ 0 + as.factor(year) + s(depth_sc),
+               data = d, mesh = spde, family = tweedie(link = "log"),
+               spatiotemporal = "AR1", spatial = "on", time = "year",
+               reml = FALSE, control = sdmTMBcontrol(newton_steps = 1))
+
+tidy(mcod, conf.int = TRUE)
+
+# Check residuals of models
+d$residualsmcod <- residuals(mcod)
+qqnorm(d$residualsmcod); abline(a = 0, b = 1)
+
+# Save model (so that I can add density predictions to the pred grid for condition)
+saveRDS(mcod, "output/mcod.rds")
+```
+
+```{r fit fle models, cache=TRUE}
+# Fit flounder model
+mfle <- sdmTMB(density_fle ~ 0 + as.factor(year) + s(depth_sc),
+               data = d, mesh = spde, family = tweedie(link = "log"),
+               spatiotemporal = "AR1", spatial = "on", time = "year",
+               reml = FALSE, control = sdmTMBcontrol(newton_steps = 1))
+
+tidy(mfle, conf.int = TRUE)
+
+# Check residuals of models
+d$residualsmfle <- residuals(mfle)
+qqnorm(d$residualsmfle); abline(a = 0, b = 1)
+
+# Save model (so that I can add density predictions to the pred grid for condition)
+saveRDS(mfle, "output/mfle.rds")
+```
+
+#### I want to explore the flounder model a little bit more before I trust it, because in contrast to cod, I haven't done so yet
+
+```{r, cache=TRUE}
+# Read in pred_grid2 which has oxygen values at location and time and depth:
+pred_grid2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid2.csv")
+
+# Standardize data with respect to prediction grid:
+pred_grid2 <- pred_grid2 %>%
+  mutate(year = as.integer(year)) %>% 
+  filter(year %in% c(unique(d$year))) %>% 
+  mutate(depth_sc = (depth - mean(d$depth))/sd(d$depth),
+         temp_sc = (temp - mean(d$temp))/sd(d$temp),
+         oxy_sc = (oxy - mean(d$oxy))/sd(d$oxy)) %>% # Need to scale these to the mean and sd in the data!
+  drop_na(oxy, depth, temp)
+
+# Predict on the pred grid, calculate index
+preds_fle <- predict(mfle, newdata = pred_grid2, return_tmb_object = TRUE, area = 2*2)
+index <- get_index(preds_fle, bias_correct = FALSE)
+index <- index %>% mutate(est_t = est/1000, lwr_t = lwr/1000, upr_t = upr/1000)
+
+# Plot index
+ggplot() +
+  geom_line(data = index, aes(year, est_t, color = "blue")) +
+  geom_ribbon(data = index, aes(year, ymin = lwr_t, ymax = upr_t, fill = "blue"), alpha = 0.4) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 20)) +
+  scale_color_brewer(palette = "Dark2") +
+  scale_fill_brewer(palette = "Dark2") +
+  guides(color = FALSE) + 
+  labs(x = "Year", y = "Tonnes", fill = "Sub Divisions", label = "") +
+  theme_light(base_size = 11) +
+  theme(axis.text.x = element_text(angle = 30),
+        legend.position = c(0.8, 0.8),
+        legend.background = element_blank()) +
+  NULL
+
+# Calculate an index that corresponds to the average so that I can compare it to the data
+ncells <- filter(pred_grid2, year == max(pred_grid2$year)) %>% nrow()
+preds_fle_ave <- predict(mfle, newdata = pred_grid2, return_tmb_object = TRUE, area = 1/ncells)
+index_ave <- get_index(preds_fle_ave, bias_correct = FALSE)
+
+d_sum <- d %>%
+  ungroup() %>%
+  group_by(year) %>%
+  summarise(mean_density_fle = mean(density_fle))
+
+ggplot(index_ave, aes(year, est, color = "prediction")) +
+  geom_line() +
+  geom_ribbon(aes(ymin = lwr, ymax = upr, fill = "prediction"), alpha = 0.1) +
+  geom_point(data = d_sum, aes(year, mean_density_fle, color = "data", size = 1.1)) +
+  geom_line(data = d_sum, aes(year, mean_density_fle, color = "data"), linetype = 2) +
+  scale_color_brewer(palette = "Dark2") +
+  scale_fill_brewer(palette = "Dark2") +
+  guides(fill = FALSE) +
+  labs(x = "Year", y = expression(paste("Density [kg/", km^2, "]", sep = ""))) +
+  NULL
+
+# Plot predictions on map
+ggplot(swe_coast_proj) +
+  geom_raster(data = preds_fle$data, aes(x = X * 1000, y = Y * 1000, fill = exp(est))) +
+  geom_sf(size = 0.3) +
+  scale_fill_viridis_c(trans = "sqrt") +
+  facet_wrap(~ year, ncol = 5) +
+  labs(x = "Longitude", y = "Latitude", fill = expression(kg/km^2)) +
+  ggtitle("Predicted density (fixed + random)")
+
+## Interesting! Now predict these model on dat - i.e. the condition data so that I can use those as covariates
+```
