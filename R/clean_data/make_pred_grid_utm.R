@@ -27,6 +27,11 @@
 # 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+# Fit condition model with environmental and biological predictors
+# Make an evenly spaced UTM grid with covariates for prediction. Density variables are
+# biomass density
+
+
 # A. LOAD LIBRARIES ================================================================
 rm(list = ls())
 
@@ -680,10 +685,10 @@ saduria <- raster("data/saduria_tif/FWBiomassm_raster_19812019presHighweightcor_
 saduria_longlat = projectRaster(saduria, crs = ('+proj=longlat'))
 
 # Now extract the values from the saduria raster to the prediction grid
-pred_grid$biomass_saduria <- extract(saduria_longlat, pred_grid[, 8:9])
+pred_grid$density_saduria <- extract(saduria_longlat, pred_grid[, 8:9])
 
 # Finest scale
-ggplot(pred_grid, aes(X, Y, fill = biomass_saduria)) + 
+ggplot(pred_grid, aes(X, Y, fill = density_saduria)) + 
   geom_raster()
 
 
@@ -945,14 +950,14 @@ ggplot(pred_grid, aes(log(density_fle))) + geom_histogram()
 
 # I. LARGE SCALE VARIABLES =========================================================
 pred_grid <- pred_grid %>% 
-  drop_na(depth, temp, oxy, biomass_saduria, density_cod, density_fle) %>% 
+  drop_na(depth, temp, oxy, density_saduria, density_cod, density_fle) %>% 
   group_by(year, ices_rect) %>% 
   mutate(depth_rec = median(depth),
          temp_rec = median(temp),
          oxy_rec = median(oxy),
          density_cod_rec = median(density_cod),
          density_fle_rec = median(density_fle),
-         biomass_saduria_rec = median(biomass_saduria)) %>% 
+         density_saduria_rec = median(density_saduria)) %>% 
   ungroup() %>% 
   group_by(year, sub_div) %>% 
   mutate(depth_sd = median(depth),
@@ -960,7 +965,7 @@ pred_grid <- pred_grid %>%
          oxy_sd = median(oxy),
          density_cod_sd = median(density_cod),
          density_fle_sd = median(density_fle),
-         biomass_saduria_sd = median(biomass_saduria))
+         density_saduria_sd = median(density_saduria))
   
 
 # J. SAVE ==========================================================================
