@@ -944,7 +944,7 @@ ggplot(pred_grid, aes(log(density_fle))) + geom_histogram()
 
 
 # I. LARGE SCALE VARIABLES =========================================================
-pred_grid2 <- pred_grid %>% 
+pred_grid <- pred_grid %>% 
   drop_na(depth, temp, oxy, density_saduria, density_cod, density_fle) %>% 
   group_by(year, ices_rect) %>% 
   mutate(depth_rec = median(depth),
