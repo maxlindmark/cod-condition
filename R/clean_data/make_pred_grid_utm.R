@@ -69,20 +69,14 @@ library(readxl)
 
 
 # B. BASIC GRID WITH DEPTH =========================================================
-# Get the boundaries
-dat <- read.csv("data/for_analysis/mdat_cond.csv") 
-
-# Make predictions on a grid - basic example
-min(dat$lat)
-max(dat$lat)
-min(dat$lon)
-max(dat$lon)
-
-# These are the ranges I'm thinking of using. Convert these to UTM!
+# These ranges are based on the condition data. Convert these to UTM!
 ymin = 54
 ymax = 58
 xmin = 12
 xmax = 22
+
+# These are the years we are using
+cond_years <- c(1993:2019)
 
 # Function to go from lat long to UTM
 LongLatToUTM <- function(x, y, zone){
@@ -172,10 +166,10 @@ ggplot(swe_coast_proj) + geom_sf() +
 df <- utm_coords %>% filter(depth < 0) %>% mutate(depth = depth*-1)
 
 # Now make a new grid
-pred_grid <- data.frame(X = rep(df$X, length(unique(dat$year))),
-                        Y = rep(df$Y, length(unique(dat$year))),
-                        depth = rep(df$depth, length(unique(dat$year))),
-                        year = rep(sort(unique(dat$year)), each = nrow(df)))
+pred_grid <- data.frame(X = rep(df$X, length(unique(cond_years))),
+                        Y = rep(df$Y, length(unique(cond_years))),
+                        depth = rep(df$depth, length(unique(cond_years))),
+                        year = rep(sort(unique(cond_years)), each = nrow(df)))
 
 pred_grid <- pred_grid %>% mutate(deep = ifelse(depth > 135, "Y", "N"))
 
@@ -642,6 +636,7 @@ lonlat <- geom(y)[, c("x", "y")]
 pred_grid$lon <- lonlat[, 1]
 pred_grid$lat <- lonlat[, 2]
 
+# Also do UTM in km for computational speed
 pred_grid$X <- pred_grid$X/1000
 pred_grid$Y <- pred_grid$Y/1000
 
@@ -849,7 +844,6 @@ her_sub <- her_sum %>% dplyr::select(IDr, biomass_her)
 
 # Now join dat and sprat data
 pred_grid <- left_join(pred_grid, spr_sub)
-nrow(dat)
 
 # And herring..
 pred_grid <- left_join(pred_grid, her_sub)
@@ -861,9 +855,10 @@ unique(is.na(her_sum$biomass_her))
 unique(is.na(pred_grid$biomass_spr))
 unique(is.na(pred_grid$biomass_her))
 
-# The NA's I have in the DAT are missing pelagic data, i.e. not 0's! Need to drop them unfortunately,
-# or fit a model to the data. Since it's only 3% of data, I will simply remove them.
-pred_grid <- pred_grid %>% drop_na(biomass_spr) %>% drop_na(biomass_her)
+# The NA's I have in the DAT are missing pelagic data, i.e. not 0's!
+# I will keep them as NA here, because else the prediction grid won't be complete in space
+# For visualizing predictions, I will replace NA with the mean in that sub_divivsion, but
+# for the data I will drop NA. Hence I do not do it here!
 
 # Now add in the sub division values
 biomass_spr_sd <- read_xlsx("data/BIAS/N and B per SD 1991-2020.xlsx",
@@ -949,7 +944,7 @@ ggplot(pred_grid, aes(log(density_fle))) + geom_histogram()
 
 
 # I. LARGE SCALE VARIABLES =========================================================
-pred_grid <- pred_grid %>% 
+pred_grid2 <- pred_grid %>% 
   drop_na(depth, temp, oxy, density_saduria, density_cod, density_fle) %>% 
   group_by(year, ices_rect) %>% 
   mutate(depth_rec = median(depth),
@@ -966,7 +961,7 @@ pred_grid <- pred_grid %>%
          density_cod_sd = median(density_cod),
          density_fle_sd = median(density_fle),
          density_saduria_sd = median(density_saduria))
-  
+
 
 # J. SAVE ==========================================================================
 # Remove variables and save
@@ -974,7 +969,11 @@ pred_grid <- pred_grid %>%
 pred_grid <- pred_grid %>% dplyr::select(-deep, -subdiv, -subdiv2, -IDr, -ID_sd_year,
                                          -depth_sc)
 
-write.csv(pred_grid, file = "data/for_analysis/pred_grid.csv", row.names = FALSE)
+pred_grid_93_06 <- pred_grid %>% filter(year < 2007)
+pred_grid_07_19 <- pred_grid %>% filter(year > 2006)
+
+write.csv(pred_grid_93_06, file = "data/for_analysis/pred_grid_(1_2).csv", row.names = FALSE)
+write.csv(pred_grid_07_19, file = "data/for_analysis/pred_grid_(2_2).csv", row.names = FALSE)
 
 
 # K. PLOT ==========================================================================
