@@ -954,7 +954,10 @@ ggplot(dat, aes(lon, lat, color = density_saduria)) +
 dat <- dat %>% mutate(year_rect_id = paste(year, ices_rect, sep = "_"),
                       year_sd_id = paste(year, sub_div, sep = "_"))
 
-pred_grid <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid.csv")
+pred_grid1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(1_2).csv")
+pred_grid2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(2_2).csv")
+
+pred_grid <- bind_rows(pred_grid1, pred_grid2)
 
 # t <- pred_grid %>% 
 #   mutate(test_id = paste(year, ices_rect)) %>% 

@@ -1721,7 +1721,7 @@ dat &lt;- dat %&gt;% mutate(year_rect_id = paste(year, ices_rect, sep = &quot;_&
 #&gt; mutate: new variable &#39;year_rect_id&#39; (character) with 1,134 unique values and 0% NA
 #&gt;         new variable &#39;year_sd_id&#39; (character) with 135 unique values and 0% NA
 
-pred_grid &lt;- readr::read_csv(&quot;https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid.csv&quot;)
+pred_grid1 &lt;- readr::read_csv(&quot;https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(1_2).csv&quot;)
 #&gt; 
 #&gt; ── Column specification ────────────────────────────────────────────────────────
 #&gt; cols(
@@ -1729,6 +1729,16 @@ pred_grid &lt;- readr::read_csv(&quot;https://raw.githubusercontent.com/maxlindm
 #&gt;   ices_rect = col_character()
 #&gt; )
 #&gt; ℹ Use `spec()` for the full column specifications.
+pred_grid2 &lt;- readr::read_csv(&quot;https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(2_2).csv&quot;)
+#&gt; 
+#&gt; ── Column specification ────────────────────────────────────────────────────────
+#&gt; cols(
+#&gt;   .default = col_double(),
+#&gt;   ices_rect = col_character()
+#&gt; )
+#&gt; ℹ Use `spec()` for the full column specifications.
+
+pred_grid &lt;- bind_rows(pred_grid1, pred_grid2)
 
 # t &lt;- pred_grid %&gt;% 
 #   mutate(test_id = paste(year, ices_rect)) %&gt;% 
@@ -1749,16 +1759,16 @@ pred_grid_rec_vars &lt;- pred_grid %&gt;%
   dplyr::select(year_rect_id,
                 density_saduria_rec, density_cod_rec, density_fle_rec,
                 depth_rec, oxy_rec, temp_rec, biomass_spr, biomass_her)
-#&gt; mutate: new variable &#39;year_rect_id&#39; (character) with 1,261 unique values and 0% NA
-#&gt; distinct: removed 226,690 rows (99%), 1,261 rows remaining
+#&gt; mutate: new variable &#39;year_rect_id&#39; (character) with 1,647 unique values and 0% NA
+#&gt; distinct: removed 247,806 rows (99%), 1,647 rows remaining
   
 # Join!
 dat &lt;- left_join(dat, pred_grid_rec_vars)
 #&gt; Joining, by = &quot;year_rect_id&quot;
 #&gt; left_join: added 8 columns (density_saduria_rec, density_cod_rec, density_fle_rec, depth_rec, oxy_rec, …)
-#&gt;            &gt; rows only in x     9,412
-#&gt;            &gt; rows only in y  (    255)
-#&gt;            &gt; matched rows     237,345
+#&gt;            &gt; rows only in x       860
+#&gt;            &gt; rows only in y  (    541)
+#&gt;            &gt; matched rows     245,897
 #&gt;            &gt;                 =========
 #&gt;            &gt; rows total       246,757
 
@@ -1769,16 +1779,16 @@ pred_grid_sd_vars &lt;- pred_grid %&gt;%
   dplyr::select(year_sd_id,
                 density_saduria_sd, density_cod_sd, density_fle_sd,
                 depth_sd, oxy_sd, temp_sd, biomass_spr_sd, biomass_her_sd)
-#&gt; mutate: new variable &#39;year_sd_id&#39; (character) with 132 unique values and 0% NA
-#&gt; distinct: removed 227,819 rows (&gt;99%), 132 rows remaining
+#&gt; mutate: new variable &#39;year_sd_id&#39; (character) with 135 unique values and 0% NA
+#&gt; distinct: removed 249,318 rows (&gt;99%), 135 rows remaining
 
 # Join!
 dat &lt;- left_join(dat, pred_grid_sd_vars)
 #&gt; Joining, by = &quot;year_sd_id&quot;
 #&gt; left_join: added 8 columns (density_saduria_sd, density_cod_sd, density_fle_sd, depth_sd, oxy_sd, …)
-#&gt;            &gt; rows only in x     1,624
+#&gt;            &gt; rows only in x         0
 #&gt;            &gt; rows only in y  (      0)
-#&gt;            &gt; matched rows     245,133
+#&gt;            &gt; matched rows     246,757
 #&gt;            &gt;                 =========
 #&gt;            &gt; rows total       246,757</code></pre>
 </div>
