@@ -228,40 +228,40 @@ shape <- shapefile("data/ICES_StatRec_mapto_ICES_Areas/StatRec_map_Areas_Full_20
 pts <- SpatialPoints(cbind(bits_hh$ShootLong, bits_hh$ShootLat), 
                      proj4string = CRS(proj4string(shape)))
 
-bits_hh$SD <- over(pts, shape)$Area_27
+bits_hh$sub_div <- over(pts, shape)$Area_27
 
 # Rename subdivisions to the more common names and do some more filtering (by sub div and area)
-sort(unique(bits_hh$SD))
+sort(unique(bits_hh$sub_div))
 
 bits_hh <- bits_hh %>% 
-  mutate(SD = factor(SD),
-         SD = fct_recode(SD,
-                         "20" = "3.a.20",
-                         "21" = "3.a.21",
-                         "22" = "3.c.22",
-                         "23" = "3.b.23",
-                         "24" = "3.d.24",
-                         "25" = "3.d.25",
-                         "26" = "3.d.26",
-                         "27" = "3.d.27",
-                         "28" = "3.d.28.1",
-                         "28" = "3.d.28.2",
-                         "29" = "3.d.29",
-                         "30" = "3.d.30"),
-         SD = as.character(SD)) 
+  mutate(sub_div = factor(sub_div),
+         sub_div = fct_recode(sub_div,
+                              "20" = "3.a.20",
+                              "21" = "3.a.21",
+                              "22" = "3.c.22",
+                              "23" = "3.b.23",
+                              "24" = "3.d.24",
+                              "25" = "3.d.25",
+                              "26" = "3.d.26",
+                              "27" = "3.d.27",
+                              "28" = "3.d.28.1",
+                              "28" = "3.d.28.2",
+                              "29" = "3.d.29",
+                              "30" = "3.d.30"),
+         sub_div = as.character(sub_div)) 
 
 # Match columns from the HH data to the HL and CA data
-sort(unique(bits_hh$SD))
+sort(unique(bits_hh$sub_div))
 sort(colnames(bits_hh))
 bits_hh_merge <- bits_hh %>% 
-                       dplyr::select(SD, Rect, HaulVal, StdSpecRecCode, BySpecRecCode,
+                       dplyr::select(sub_div, Rect, HaulVal, StdSpecRecCode, BySpecRecCode,
                                      IDx, ShootLat, ShootLong)
 
 bits_ca <- left_join(bits_ca, bits_hh_merge, by = "IDx")
 
 # Now filter the subdivisions I want from all data sets
-bits_hh <- bits_hh %>% filter(SD %in% c(24, 25, 26, 27, 28))
-bits_ca <- bits_ca %>% filter(SD %in% c(24, 25, 26, 27, 28))
+bits_hh <- bits_hh %>% filter(sub_div %in% c(24, 25, 26, 27, 28))
+bits_ca <- bits_ca %>% filter(sub_div %in% c(24, 25, 26, 27, 28))
 ```
 
 ### Now clean the CA data and go to 1 row 1 observation
@@ -313,7 +313,7 @@ dat <- bits_ca %>% rename("year" = "Year",
                           "lon" = "ShootLong",
                           "quarter" = "Quarter",
                           "ices_rect" = "Rect") %>% 
-  dplyr::select(weight_g, length_cm, year, lat, lon, quarter, IDx, ices_rect, SD)
+  dplyr::select(weight_g, length_cm, year, lat, lon, quarter, IDx, ices_rect, sub_div)
 
 # > nrow(dat)
 # [1] 98863
@@ -874,181 +874,46 @@ dat$Y <- utm_coords$Y/1000 # for computational reasons
 ```
 
 ## Add cod and flounder density covariates
-### First by fitting models and then predicting to `dat`
-
-```{r, message=FALSE, cache=TRUE}
-d <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cpue.csv")
-
-# Calculate standardized variables
-d <- d %>% 
-  mutate(oxy_sc = oxy,
-         temp_sc = temp,
-         depth_sc = depth,
-         ) %>%
-  mutate_at(c("oxy_sc", "temp_sc", "depth_sc"),
-            ~(scale(.) %>% as.vector)) %>% 
-  mutate(year = as.integer(year)) %>% 
-  drop_na(oxy, depth, temp) %>% 
-  rename("density_cod" = "density") # to fit better with how flounder is named
-
-# Also for the condition data which we predict on
-dat <- dat %>% 
-  mutate(oxy_sc = (oxy - mean(d$oxy))/sd(d$oxy),
-         temp_sc = (temp - mean(d$temp))/sd(d$temp),
-         depth_sc = (depth - mean(d$depth))/sd(d$depth)) %>%
-  mutate(year = as.integer(year))
-
-hist(dat$oxy_sc)
-hist(dat$temp_sc)
-hist(dat$depth_sc)
-
-# Explore data a bit
-ggplot(d) + 
-  geom_point(aes(year, density_cod, color = factor(SD))) + 
-  facet_wrap(~SD)
-
-# Explore data a bit
-ggplot(d) + 
-  geom_point(aes(year, density_fle, color = factor(SD))) + 
-  facet_wrap(~SD)
-
-# Make mesh:
-spde <- make_mesh(d, xy_cols = c("X", "Y"),
-                  n_knots = 200, 
-                  type = "kmeans", seed = 42)
-
-plot(spde)
-
-# Depth spline + oxy spline
-# Cod model
-mcod <- sdmTMB(density_cod ~ 0 + as.factor(year) + s(depth_sc) + s(oxy_sc) + s(temp_sc),
-               data = d, spde = spde, family = tweedie(link = "log"),
-               fields = "AR1", include_spatial = TRUE, time = "year",
-               spatial_only = FALSE, reml = FALSE,
-               control = sdmTMBcontrol(newton_steps = 1))
-
-tidy(mcod, conf.int = TRUE)
-
-# Check residuals of models
-d$residualsmcod <- residuals(mcod)
-qqnorm(d$residualsmcod); abline(a = 0, b = 1)
-
-mfle <- sdmTMB(density_fle ~ 0 + as.factor(year) + s(depth_sc) + s(oxy_sc) + s(temp_sc),
-               data = d, spde = spde, family = tweedie(link = "log"),
-               fields = "AR1", include_spatial = TRUE, time = "year",
-               spatial_only = FALSE, reml = FALSE,
-               control = sdmTMBcontrol(newton_steps = 1))
-
-tidy(mfle, conf.int = TRUE)
-
-# Check residuals of models
-d$residualsmfle <- residuals(mfle)
-qqnorm(d$residualsmfle); abline(a = 0, b = 1)
-```
-
-#### I want to explore the flounder model a little bit more before I trust it, because in contrast to cod, I haven't done so yet
-
-```{r, cache=TRUE}
-# Read in pred_grid2 which has oxygen values at location and time and depth:
-pred_grid2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid2.csv")
-
-# Standardize data with respect to prediction grid:
-pred_grid2 <- pred_grid2 %>%
-  mutate(year = as.integer(year)) %>% 
-  filter(year %in% c(unique(d$year))) %>% 
-  mutate(depth_sc = (depth - mean(d$depth))/sd(d$depth),
-         temp_sc = (temp - mean(d$temp))/sd(d$temp),
-         oxy_sc = (oxy - mean(d$oxy))/sd(d$oxy)) %>% # Need to scale these to the mean and sd in the data!
-  drop_na(oxy, depth, temp)
-
-# Predict on the pred grid, calculate index
-preds_fle <- predict(mfle, newdata = pred_grid2, return_tmb_object = TRUE, area = 2*2)
-index <- get_index(preds_fle, bias_correct = FALSE)
-index <- index %>% mutate(est_t = est/1000, lwr_t = lwr/1000, upr_t = upr/1000)
-
-# Plot index
-ggplot() +
-  geom_line(data = index, aes(year, est_t, color = "blue")) +
-  geom_ribbon(data = index, aes(year, ymin = lwr_t, ymax = upr_t, fill = "blue"), alpha = 0.4) +
-  scale_x_continuous(breaks = scales::pretty_breaks(n = 20)) +
-  scale_color_brewer(palette = "Dark2") +
-  scale_fill_brewer(palette = "Dark2") +
-  guides(color = FALSE) + 
-  labs(x = "Year", y = "Tonnes", fill = "Sub Divisions", label = "") +
-  theme_light(base_size = 11) +
-  theme(axis.text.x = element_text(angle = 30),
-        legend.position = c(0.8, 0.8),
-        legend.background = element_blank()) +
-  NULL
-
-# Calculate an index that corresponds to the average so that I can compare it to the data
-ncells <- filter(pred_grid2, year == max(pred_grid2$year)) %>% nrow()
-preds_fle_ave <- predict(mfle, newdata = pred_grid2, return_tmb_object = TRUE, area = 1/ncells)
-index_ave <- get_index(preds_fle_ave, bias_correct = FALSE)
-
-d_sum <- d %>%
-  ungroup() %>%
-  group_by(year) %>%
-  summarise(mean_density_fle = mean(density_fle))
-
-ggplot(index_ave, aes(year, est, color = "prediction")) +
-  geom_line() +
-  geom_ribbon(aes(ymin = lwr, ymax = upr, fill = "prediction"), alpha = 0.1) +
-  geom_point(data = d_sum, aes(year, mean_density_fle, color = "data", size = 1.1)) +
-  geom_line(data = d_sum, aes(year, mean_density_fle, color = "data"), linetype = 2) +
-  scale_color_brewer(palette = "Dark2") +
-  scale_fill_brewer(palette = "Dark2") +
-  guides(fill = FALSE) +
-  labs(x = "Year", y = expression(paste("Density [kg/", km^2, "]", sep = ""))) +
-  NULL
-
-# Plot predictions on map
-ggplot(swe_coast_proj) +
-  geom_raster(data = preds_fle$data, aes(x = X * 1000, y = Y * 1000, fill = exp(est))) +
-  geom_sf(size = 0.3) +
-  scale_fill_viridis_c(trans = "sqrt") +
-  facet_wrap(~ year, ncol = 5) +
-  labs(x = "Longitude", y = "Latitude", fill = expression(kg/km^2)) +
-  ggtitle("Predicted density (fixed + random)")
-
-## Interesting! Now predict these model on dat - i.e. the condition data so that I can use those as covariates
-```
-
-#### Now make the predictions from the cpue models to the condition data
 
 ```{r, message=FALSE}
-predict_mcod <- predict(mcod, newdata = dat)
-predict_mfle <- predict(mfle, newdata = dat)
+# This is so that we can standardize the prediction grid with respect to the data
+density <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cpue.csv")
 
-# Add to data
-dat$density_cod <- exp(predict_mcod$est)
-dat$density_fle <- exp(predict_mfle$est)
+# Load models
+mcod <- readRDS("output/mcod.rds")
+mfle <- readRDS("output/mfle.rds")
 
-# Test to plot the relationships between a simple condition index and these variables
-dat <- dat %>% 
-  mutate(cond = weight_g / (0.01*length_cm^3))
+# We need to scale the grid with respect to the mean and sd in the data to it was fitted to
+density_mean_depth <- mean(density$depth)
+density_sd_depth <- sd(density$depth)
 
-# Remove apparent errors!
-dat %>% arrange(desc(cond)) %>% data.frame() %>% head(20)
+# Scale depth in the data
+dat <- dat %>%
+  mutate(depth_sc = (depth - density_mean_depth) / density_sd_depth)
 
-dat <- dat %>% filter(cond < 5)
+hist((density$depth - mean(density$depth)) / sd(density$depth))
+hist(dat$depth_sc)
 
-ggplot(dat) +
-  geom_point(aes(density_cod, cond), alpha = 0.2) + ggtitle("cod")
+# Predict from the density models
+cpue_cod <- exp(predict(mcod, newdata = dat)$est)
+cpue_fle <- exp(predict(mfle, newdata = dat)$est)
 
-ggplot(dat) +
-  geom_point(aes(density_fle, cond), alpha = 0.2) + ggtitle("fle")
+dat$density_cod <- cpue_cod
+dat$density_fle <- cpue_fle
 
-# Now remove the standardized variables, because when I fit the real model, I want to
-# standardize them to the prediction grid, not the CPUE data, and I would forget that
-# if I don't remove them now
-dat <- dat %>% dplyr::select(-oxy_sc, temp_sc, depth_sc)
+# Inspect
+ggplot(dat, aes(log(density_cod))) + geom_histogram()
+ggplot(dat, aes(log(density_fle))) + geom_histogram()
+
+# Remove the scaled depth variable
+dat <- dat %>% dplyr::select(-depth_sc)
 ```
 
 ### ... And secondly by doing a `left_join` from the CPUE data using `haul.id` 
+
 ```{r, message=FALSE}
-d_cod_select <- d %>% dplyr::select(density_cod, IDx) %>% rename("density_cod_data" = "density_cod")
-d_fle_select <- d %>% dplyr::select(density_fle, IDx) %>% rename("density_fle_data" = "density_fle")
+d_cod_select <- density %>% dplyr::select(density, IDx) %>% rename("density_cod_data" = "density")
+d_fle_select <- density %>% dplyr::select(density_fle, IDx) %>% rename("density_fle_data" = "density_fle")
 
 dat <- left_join(dat, d_cod_select)
 dat <- left_join(dat, d_fle_select)
@@ -1056,240 +921,6 @@ dat <- left_join(dat, d_fle_select)
 # Check how well they correspond
 ggplot(dat, aes(density_cod_data, density_cod)) + geom_point() + geom_abline(color = "red")
 ggplot(dat, aes(density_fle_data, density_fle)) + geom_point() + geom_abline(color = "red")
-```
-
-## Add pelagic covariates
-
-```{r, message=FALSE}
-# Read data
-spr <- read_xlsx("data/BIAS/abundances_rectangles_1991-2019.xlsx",
-                 sheet = 1) %>%
-  mutate(SD = ifelse(SD == "28_2", "28", SD)) %>% 
-  rename("StatRec" = "Rec") %>%
-  mutate(StatRec = as.factor(StatRec),
-         Species = "Sprat",
-         abun_spr = `Age 1`+`Age 2`+`Age 3`+`Age 4`+`Age 5`+`Age 6`+`Age 7`+`Age 8+`, # omitting `0+` here
-         IDr = paste(StatRec, Year, sep = ".")) # Make new ID)
-  
-her <- read_xlsx("data/BIAS/abundances_rectangles_1991-2019.xlsx",
-                 sheet = 2) %>%
-  mutate(SD = ifelse(SD == "28_2", "28", SD)) %>% 
-  rename("StatRec" = "Rect2") %>% # This is not called Rec in the data for some reason
-  mutate(StatRec = as.factor(StatRec),
-         Species = "Herring",
-         abun_her = `Age 1`+`Age 2`+`Age 3`+`Age 4`+`Age 5`+`Age 6`+`Age 7`+`Age 8+`, # omitting `1+` here
-         IDr = paste(StatRec, Year, sep = ".")) # Make new ID
-
-# Plot distribution over time in the whole area
-spr %>%
-  mutate(lon = ices.rect(spr$StatRec)$lon) %>%
-  mutate(lat = ices.rect(spr$StatRec)$lat) %>%
-  filter(!StatRec %in% c("41G0", "41G1", "41G2", "42G1", "42G2", "43G1", "43G2", "44G0", "44G1")) %>%
-  ggplot(., aes(lon, lat, fill = log(abun_spr))) +
-  geom_raster() +
-  scale_fill_viridis() +
-  facet_wrap(~ Year, ncol = 5) +
-  geom_sf(data = world, inherit.aes = F, size = 0.2) +
-  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
-  labs(x = "lon", y = "lat") +
-  NULL
-
-ggsave("figures/supp/spr_distribution.png", width = 10, height = 10, dpi = 600)
-
-her %>%
-  mutate(lon = ices.rect(her$StatRec)$lon) %>%
-  mutate(lat = ices.rect(her$StatRec)$lat) %>%
-  filter(! StatRec %in% c("41G0", "41G1", "41G2", "42G1", "42G2", "43G1", "43G2", "44G0", "44G1")) %>%
-  ggplot(., aes(lon, lat, fill = log(abun_her))) +
-  geom_raster() +
-  scale_fill_viridis() +
-  facet_wrap(~ Year, ncol = 5) +
-  geom_sf(data = world, inherit.aes = F, size = 0.2) +
-  coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
-  labs(x = "lon", y = "lat") +
-  NULL
-
-ggsave("figures/supp/her_distribution.png", width = 10, height = 10, dpi = 600)
-
-# As can be seen in the above plots, we don't have data for all rectangles in all years
-# It is important those rectangles are made NA - not 0 - when merging
-
-# Check distribution of data
-# https://www.researchgate.net/publication/47933620_Environmental_factors_and_uncertainty_in_fisheries_management_in_the_northern_Baltic_Sea/figures?lo=1
-sort(unique(spr$SD))
-sort(unique(her$SD))
-
-# How many unique rows per IDr?
-her %>%
-  group_by(IDr) %>% 
-  mutate(n = n()) %>% 
-  ggplot(., aes(factor(n))) + geom_bar()
-
-spr %>%
-  group_by(IDr) %>% 
-  mutate(n = n()) %>% 
-  ggplot(., aes(factor(n))) + geom_bar()
-
-# Ok, some ID's with two rows...
-spr %>%
-  group_by(IDr) %>% 
-  mutate(n = n()) %>% 
-  filter(n == 2) %>% 
-  ungroup() %>% 
-  as.data.frame() %>% 
-  head(20)
-
-# Seems to be due to rectangles somehow being in different sub divisions.
-# I need to group by IDr and summarize
-# First check all rectangles with more than one row have two rows and not more
-nrow(spr)
-nrow(spr %>% group_by(IDr) %>% mutate(n = n()) %>% filter(n == 2))
-nrow(spr %>% group_by(IDr) %>% mutate(n = n()) %>% filter(!n == 1))
-
-spr_sum <- spr %>%
-  group_by(IDr) %>% 
-  summarise(abun_spr = sum(abun_spr)) %>% # Sum abundance within IDr
-  distinct(IDr, .keep_all = TRUE) %>% # Remove duplicate IDr
-  mutate(ID_temp = IDr) %>% # Create temporary IDr that we can use to split in order
-                            # to get Year and StatRect back into the summarized data
-  separate(ID_temp, c("StatRec", "Year"), sep = 4)
-
-nrow(spr_sum) 
-nrow(spr)
-nrow(spr %>% group_by(IDr) %>% mutate(n = n()) %>% filter(n == 2))
-
-filter(spr_sum, IDr == "39G2.1991")
-filter(spr, IDr == "39G2.1991")
-
-# This should equal 1 (new # rows =  old - duplicated IDr)
-nrow(spr_sum) / (nrow(spr) - 0.5*nrow(spr %>% group_by(IDr) %>% mutate(n = n()) %>% filter(n == 2)))
-
-# How many rows per rectangle?
-spr_sum %>%
-  group_by(IDr) %>% 
-  mutate(n = n()) %>% 
-  ungroup() %>% 
-  distinct(n)
-  
-# Now do the same for herring
-nrow(her)
-nrow(her %>% group_by(IDr) %>% mutate(n = n()) %>% filter(n == 2))
-nrow(her %>% group_by(IDr) %>% mutate(n = n()) %>% filter(!n == 1))
-
-her_sum <- her %>%
-  group_by(IDr) %>% 
-  summarise(abun_her = sum(abun_her)) %>% # Sum abundance within IDr
-  distinct(IDr, .keep_all = TRUE) %>% # Remove duplicate IDr
-  mutate(ID_temp = IDr) %>% # Create temporary IDr that we can use to split in order
-  # to get Year and StatRect back into the summarized data
-  separate(ID_temp, c("StatRec", "Year"), sep = 4)
-
-nrow(her_sum) 
-nrow(her)
-nrow(her %>% group_by(IDr) %>% mutate(n = n()) %>% filter(n == 2))
-
-filter(her_sum, IDr == "39G2.1991")
-filter(her, IDr == "39G2.1991")
-
-# This should equal 1 (new # rows =  old - duplicated IDr)
-nrow(her_sum) / (nrow(her) - 0.5*nrow(her %>% group_by(IDr) %>% mutate(n = n()) %>% filter(n == 2)))
-
-# How many rows per rectangle?
-her_sum %>%
-  group_by(IDr) %>% 
-  mutate(n = n()) %>% 
-  ungroup() %>% 
-  distinct(n)
-
-# Now join pelagic covariates
-# Make ices_rect a factor in the main data
-dat <- dat %>% mutate(ices_rect = as.factor(ices_rect))
-
-# Create IDr in main data to match pelagics data
-dat <- dat %>% mutate(IDr = paste(ices_rect, year, sep = "."))
-
-# Are there any StatRec that are in the condition data that are not in the pelagics data?
-dat$ices_rect[!dat$ices_rect %in% her$StatRec]
-dat$ices_rect[!dat$ices_rect %in% spr$StatRec]
-
-# No, but not all IDr's are present
-head(dat$IDr[!dat$IDr %in% her$IDr])
-head(dat$IDr[!dat$IDr %in% spr$IDr])
-
-# Filter columns so that I only use sprat and herring IDr's that are in the condition data (don't need the others!)
-spr_sum <- spr_sum %>% filter(IDr %in% dat$IDr)
-her_sum <- her_sum %>% filter(IDr %in% dat$IDr)
-
-# Select columns from pelagic data to go in dat
-spr_sub <- spr_sum %>% dplyr::select(IDr, abun_spr)
-her_sub <- her_sum %>% dplyr::select(IDr, abun_her)
-
-# Now join dat and sprat data
-dat <- left_join(dat, spr_sub)
-nrow(dat)
-
-# And herring..
-dat <- left_join(dat, her_sub)
-
-# Now deal with the NA's
-unique(is.na(spr_sum$abun_spr))
-unique(is.na(her_sum$abun_her))
-
-unique(is.na(dat$abun_spr))
-unique(is.na(dat$abun_her))
-
-dat %>% drop_na(abun_spr) %>% arrange(abun_spr) %>% dplyr::select(abun_spr)
-dat %>% drop_na(abun_her) %>% arrange(abun_her) %>% dplyr::select(abun_her)
-
-# The NA's I have in the DAT are missing pelagic data, i.e. not 0's! Need to drop them unfortunately,
-# or fit a model to the data. Since it's only 3% of data, I will simply remove them.
-dat <- dat %>% drop_na(abun_spr) %>% drop_na(abun_her)
-
-# Now add in the sub division values
-abun_spr_sd <- read_xlsx("data/BIAS/abundance_sub_division_1991-2019.xlsx",
-                         sheet = 1) %>%
-  rename("year" = "ANNUS",
-         "SD" = "Sub_Div") %>% 
-  mutate(SD = ifelse(SD == "28_2", "28", SD)) %>% 
-  mutate(Species = "Sprat",
-         abun_spr_sd = `AGE1`+`AGE2`+`AGE3`+`AGE4`+`AGE5`+`AGE6`+`AGE7`+`AGE8+`, # omitting `0+` here
-         ID_sd_year = paste(SD, year, sep = ".")) %>% # Make new ID)
-  filter(SD %in% unique(dat$SD)) %>% 
-  dplyr::select(abun_spr_sd, ID_sd_year)
-
-abun_her_sd <- read_xlsx("data/BIAS/abundance_sub_division_1991-2019.xlsx",
-                         sheet = 2) %>%
-  rename("year" = "ANNUS",
-         "SD" = "Sub_Div") %>% 
-  mutate(SD = ifelse(SD == "28_2", "28", SD)) %>% 
-  mutate(Species = "Herring",
-         abun_her_sd = `AGE1`+`AGE2`+`AGE3`+`AGE4`+`AGE5`+`AGE6`+`AGE7`+`AGE8+`, # omitting `0+` here
-         ID_sd_year = paste(SD, year, sep = ".")) %>% # Make new ID)
-  filter(SD %in% unique(dat$SD)) %>% 
-  dplyr::select(abun_her_sd, ID_sd_year) 
-
-dat <- dat %>% mutate(ID_sd_year = paste(SD, year, sep = "."))
-
-dat <- left_join(dat, abun_spr_sd)
-
-dat <- left_join(dat, abun_her_sd)
-
-head(data.frame(dat))
-
-dat %>% 
-  group_by(year, SD) %>% 
-  summarise(sum_her_across_rect = sum(abun_her)) %>% 
-  ungroup() %>% 
-  ggplot(.) + 
-  geom_point(aes(year, sum_her_across_rect, color = "rec")) +
-  geom_point(data = dat, aes(year, abun_her_sd*100, color = "sd")) + 
-  facet_wrap(~ SD, scales = "free", ncol = 2)
-
-dat %>% 
-  ggplot(.) + 
-  geom_point(data = dat, aes(year, abun_her_sd, color = "sd")) + 
-  facet_wrap(~ SD, scales = "free", ncol = 2)
-
 ```
 
 ## Add Saduria from raster covariates
@@ -1304,18 +935,77 @@ extent(saduria)
 
 plot(saduria_longlat)
 
-# Now extract the values from the saduria raster to the prediction grid
-dat$biomass_saduria <- extract(saduria_longlat, dat[, 5:4])
+# Now extract the values from the saduria raster to the data
+dat$density_saduria <- extract(saduria_longlat, dat[, 5:4])
+
+ggplot(dat, aes(lon, lat, color = density_saduria)) +
+  geom_point()
+```
+
+## Add large scale variables from the prediciton grid
+
+```{r add large scale variables}
+# The fine scale variables are matched to haul. However, the ices_rect level variables
+# and sub division averages should not be averages of the hauls in those areas, but rather
+# average prediction on those levels. To achieve that, I will join in those averages from the 
+# pred_grid:
+
+# First create ID's for joining
+dat <- dat %>% mutate(year_rect_id = paste(year, ices_rect, sep = "_"),
+                      year_sd_id = paste(year, sub_div, sep = "_"))
+
+pred_grid <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid.csv")
+
+# t <- pred_grid %>% 
+#   mutate(test_id = paste(year, ices_rect)) %>% 
+#   group_by(test_id) %>% 
+#   mutate(n = unique(temp_rec)) %>% 
+#   ungroup() %>% 
+#   distinct(n)
+# 
+# tt <- pred_grid %>% filter(year == "1994" & ices_rect == "39G7")
+# unique(tt$temp_rec)
+
+# Ok, some weird rounding error! Anyhow... 
+
+# Take distinct year + ices_rect id's and select the variables
+pred_grid_rec_vars <- pred_grid %>% 
+  mutate(year_rect_id = paste(year, ices_rect, sep = "_")) %>% 
+  distinct(year_rect_id, .keep_all = TRUE) %>% 
+  dplyr::select(year_rect_id,
+                density_saduria_rec, density_cod_rec, density_fle_rec,
+                depth_rec, oxy_rec, temp_rec, biomass_spr, biomass_her)
+  
+# Join!
+dat <- left_join(dat, pred_grid_rec_vars)
+
+# Take distinct year + sub_div id's and select the variables
+pred_grid_sd_vars <- pred_grid %>% 
+  mutate(year_sd_id = paste(year, sub_div, sep = "_")) %>% 
+  distinct(year_sd_id, .keep_all = TRUE) %>% 
+  dplyr::select(year_sd_id,
+                density_saduria_sd, density_cod_sd, density_fle_sd,
+                depth_sd, oxy_sd, temp_sd, biomass_spr_sd, biomass_her_sd)
+
+# Join!
+dat <- left_join(dat, pred_grid_sd_vars)
 ```
 
 ## Save data
 
 ```{r, message=FALSE}
-dat %>% data.frame() %>% head()
+colnames(dat)
 
 # Trim data a little bit to not make it unnecessarily large
-dat <- dat %>% dplyr::select(-IDx, quarter, cond, IDr)
+dat <- dat %>%
+  dplyr::select(-IDx, -quarter, -IDx, -year_sd_id, -year_rect_id) %>% 
+  dplyr::select(-density_cod_data, -density_fle_data) %>% 
+  drop_na()
 
-write.csv(dat, file = "data/for_analysis/mdat_cond.csv", row.names = FALSE)
+dat_93_06 <- dat %>% filter(year < 2007)
+dat_07_19 <- dat %>% filter(year > 2006)
+
+write.csv(dat_93_06, file = "data/for_analysis/mdat_cond_(1_2).csv", row.names = FALSE)
+write.csv(dat_07_19, file = "data/for_analysis/mdat_cond_(2_2).csv", row.names = FALSE)
 ```
 
