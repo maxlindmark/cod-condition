@@ -999,10 +999,14 @@ dat <- left_join(dat, pred_grid_sd_vars)
 ```{r, message=FALSE}
 colnames(dat)
 
+# Check for outliers
+dat <- dat %>% 
+  mutate(Fulton_K = weight_g/(0.01*length_cm^3)) %>% 
+  filter(Fulton_K < 3 & Fulton_K > 0.15) # Visual exploration, larger values likely data entry errors
+
 # Trim data a little bit to not make it unnecessarily large
 dat <- dat %>%
-  dplyr::select(-IDx, -quarter, -IDx, -year_sd_id, -year_rect_id) %>% 
-  dplyr::select(-density_cod_data, -density_fle_data) %>% 
+  dplyr::select(-IDx, -quarter, -IDx, -year_sd_id, -year_rect_id, -Fulton_K, -density_cod_data, -density_fle_data) %>% 
   drop_na()
 
 dat_93_06 <- dat %>% filter(year < 2007)

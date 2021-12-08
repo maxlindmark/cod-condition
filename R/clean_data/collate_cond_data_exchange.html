@@ -166,7 +166,7 @@ pre code {
 
 <h1 class="title toc-ignore">Collate condition data</h1>
 <h4 class="author">Max Lindmark</h4>
-<h4 class="date">07 December, 2021</h4>
+<h4 class="date">08 December, 2021</h4>
 
 </div>
 
@@ -1809,10 +1809,14 @@ dat &lt;- left_join(dat, pred_grid_sd_vars)
 #&gt; [34] &quot;oxy_sd&quot;              &quot;temp_sd&quot;             &quot;biomass_spr_sd&quot;     
 #&gt; [37] &quot;biomass_her_sd&quot;
 
+# Check for outliers
+dat &lt;- dat %&gt;% 
+  mutate(Fulton_K = weight_g/(0.01*length_cm^3)) %&gt;% 
+  filter(Fulton_K &lt; 3 &amp; Fulton_K &gt; 0.15) # Visual exploration, larger values likely data entry errors
+
 # Trim data a little bit to not make it unnecessarily large
 dat &lt;- dat %&gt;%
-  dplyr::select(-IDx, -quarter, -IDx, -year_sd_id, -year_rect_id) %&gt;% 
-  dplyr::select(-density_cod_data, -density_fle_data) %&gt;% 
+  dplyr::select(-IDx, -quarter, -IDx, -year_sd_id, -year_rect_id, -Fulton_K, -density_cod_data, -density_fle_data) %&gt;% 
   drop_na()
 
 dat_93_06 &lt;- dat %&gt;% filter(year &lt; 2007)
