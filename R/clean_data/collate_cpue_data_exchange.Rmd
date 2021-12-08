@@ -291,26 +291,26 @@ shape <- shapefile("data/ICES_StatRec_mapto_ICES_Areas/StatRec_map_Areas_Full_20
 pts <- SpatialPoints(cbind(bits_hh$ShootLong, bits_hh$ShootLat), 
                      proj4string = CRS(proj4string(shape)))
 
-bits_hh$SD <- over(pts, shape)$Area_27
+bits_hh$sub_div <- over(pts, shape)$Area_27
 
 # Rename subdivisions to the more common names and do some more filtering (by sub div and area)
-sort(unique(bits_hh$SD))
+sort(unique(bits_hh$sub_div))
 
 bits_hh <- bits_hh %>% 
-  mutate(SD = factor(SD),
-         SD = fct_recode(SD,
-                         "20" = "3.a.20",
-                         "21" = "3.a.21",
-                         "22" = "3.c.22",
-                         "23" = "3.b.23",
-                         "24" = "3.d.24",
-                         "25" = "3.d.25",
-                         "26" = "3.d.26",
-                         "27" = "3.d.27",
-                         "28" = "3.d.28.1",
-                         "28" = "3.d.28.2",
-                         "29" = "3.d.29"),
-         SD = as.character(SD)) 
+  mutate(sub_div = factor(sub_div),
+         sub_div = fct_recode(sub_div,
+                              "20" = "3.a.20",
+                              "21" = "3.a.21",
+                              "22" = "3.c.22",
+                              "23" = "3.b.23",
+                              "24" = "3.d.24",
+                              "25" = "3.d.25",
+                              "26" = "3.d.26",
+                              "27" = "3.d.27",
+                              "28" = "3.d.28.1",
+                              "28" = "3.d.28.2",
+                              "29" = "3.d.29"),
+         sub_div = as.character(sub_div)) 
 
 # Now add the fishing line information from the sweep file (we need that later
 # to standardize based on gear geometry). We add in the in the HH data and then
@@ -353,19 +353,19 @@ bits_hl <- bits_hl %>%
   filter(haul.id %in% bits_hh$haul.id)
 
 # Match columns from the HH data to the HL and CA data
-sort(unique(bits_hh$SD))
+sort(unique(bits_hh$sub_div))
 sort(colnames(bits_hh))
 bits_hh_merge <- bits_hh %>% 
-                       dplyr::select(SD, Rect, HaulVal, StdSpecRecCode, BySpecRecCode, Fishing.line,
+                       dplyr::select(sub_div, Rect, HaulVal, StdSpecRecCode, BySpecRecCode, Fishing.line,
                                      DataType, HaulDur, GroundSpeed, haul.id, IDx, ShootLat, ShootLong)
 
 bits_hl <- left_join(dplyr::select(bits_hl, -haul.id), bits_hh_merge, by = "IDx")
 bits_ca <- left_join(bits_ca, bits_hh_merge, by = "IDx")
 
 # Now filter the subdivisions I want from all data sets
-bits_hh <- bits_hh %>% filter(SD %in% c(24, 25, 26, 27, 28))
-bits_hl <- bits_hl %>% filter(SD %in% c(24, 25, 26, 27, 28))
-bits_ca <- bits_ca %>% filter(SD %in% c(24, 25, 26, 27, 28))
+bits_hh <- bits_hh %>% filter(sub_div %in% c(24, 25, 26, 27, 28))
+bits_hl <- bits_hl %>% filter(sub_div %in% c(24, 25, 26, 27, 28))
+bits_ca <- bits_ca %>% filter(sub_div %in% c(24, 25, 26, 27, 28))
 ```
 
 ### Filter species
@@ -1048,7 +1048,7 @@ dat <- hlcodhaul %>% rename("year" = "Year",
                             "lon" = "ShootLong",
                             "quarter" = "Quarter",
                             "ices_rect" = "Rect") %>% 
-  dplyr::select(density, year, lat, lon, quarter, haul.id, IDx, ices_rect, SD)
+  dplyr::select(density, year, lat, lon, quarter, haul.id, IDx, ices_rect, sub_div)
 
 # Now add in the flounder data in the cod data based on haul ID
 hlflehaul_select <- hlflehaul %>% mutate(density_fle = density) %>% dplyr::select(density_fle, haul.id)

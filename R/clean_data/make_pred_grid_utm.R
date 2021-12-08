@@ -699,7 +699,7 @@ spr <- read_xlsx("data/BIAS/N and B per Rect. 1991-2020.xlsx",
   mutate(ices_rect = as.factor(ices_rect),
          Species = "Sprat",
          biomass_spr = `1`+`2`+`3`+`4`+`5`+`6`+`7`+`8`, 
-         IDr = paste(ices_rect, Year, sep = ".")) # Make new ID)
+         IDr = paste(ices_rect, Year, sep = ".")) # Make new ID
 
 her <- read_xlsx("data/BIAS/N and B per Rect. 1991-2020.xlsx",
                  sheet = 3) %>%
