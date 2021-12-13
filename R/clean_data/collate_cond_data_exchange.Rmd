@@ -24,6 +24,7 @@ knitr::opts_chunk$set(
 In this script, I load exchange data from datras and extract CA data (i.e. biological data), which is used for the condition model. In theory I could have joined the CPUE data to the CA data and get all important covariates and variables (oxygen, depth, ices information, densities of cod and flounder). However, the CPUE data has been standardized with respect to trawl speed, gear dimension, sweep length and trawl duration. Because many haul id's did not have this information, the CPUE data has fewer id's. In order to not lose condition data because I don't have haul-level CPUE of cod and flounder, I will instead repeat the data cleaning process here, fit models to cod and flounder CPUE and predict at the location of the condition data.
 
 ## Load libraries
+
 ```{r, message=FALSE}
 rm(list = ls())
 
@@ -52,8 +53,6 @@ library(mapplots)
 library(geosphere)
 #remotes::install_github("pbs-assess/sdmTMB")
 library(sdmTMB)
-# To load entire cache in interactive r session, do:
-# qwraps2::lazyload_cache_dir(path = "R/clean_data/collate_cond_data_exchange_cache/html")
 ```
 
 ## For maps
@@ -318,6 +317,11 @@ dat <- bits_ca %>% rename("year" = "Year",
 # > nrow(dat)
 # [1] 98863
 ```
+
+dat %>% drop_na(weight_g) %>% filter(year > 1992) %>% 
+ggplot(., aes(lon, lat)) +
+  geom_point(size = 0.1) + 
+  facet_wrap(~year)
 
 ## Add in the environmental variables
 ### Depth
@@ -877,7 +881,9 @@ dat$Y <- utm_coords$Y/1000 # for computational reasons
 
 ```{r, message=FALSE}
 # This is so that we can standardize the prediction grid with respect to the data
-density <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cpue.csv")
+density <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cpue_q_1_4.csv")
+
+density <- density %>% filter(quarter == 4)
 
 # Load models
 mcod <- readRDS("output/mcod.rds")
