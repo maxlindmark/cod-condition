@@ -1,5 +1,5 @@
 ---
-title: "Collate condition data"
+title: "Fit cod and flounder density models which are used as covariates in the condition model"
 author: "Max Lindmark"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
@@ -84,10 +84,10 @@ swe_coast_proj <- sf::st_transform(swe_coast, crs = utm_zone33)
 ## Load data
 
 ```{r, message=FALSE, cache=TRUE}
-d <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cpue.csv")
+d <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cpue_q_1_4.csv")
 
 # Filter to match the data I want to predict on
-d <- d %>% filter(year > 1992 & year < 2020)
+d <- d %>% filter(year > 1992 & year < 2020 & quarter == 4)
 
 # Calculate standardized variables
 d <- d %>% 
@@ -155,11 +155,20 @@ qqnorm(d$residualsmfle); abline(a = 0, b = 1)
 saveRDS(mfle, "output/mfle.rds")
 ```
 
+## Now that the models have been fit, I can create the `pred_gid` (make_pred_grid_utm.R)
+
+```{r}
+knitr::knit_exit()
+```
+
 #### I want to explore the flounder model a little bit more before I trust it, because in contrast to cod, I haven't done so yet
 
 ```{r, cache=TRUE}
-# Read in pred_grid2 which has oxygen values at location and time and depth:
-pred_grid2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid2.csv")
+# Read in pred_grid which has oxygen values at location and time and depth:
+pred_grid1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(1_2).csv")
+pred_grid2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(2_2).csv")
+
+pred_grid <- bind_rows(pred_grid1, pred_grid2)
 
 # Standardize data with respect to prediction grid:
 pred_grid2 <- pred_grid2 %>%
