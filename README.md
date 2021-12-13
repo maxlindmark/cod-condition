@@ -24,6 +24,8 @@ Contains figures of results
 `output`
 Contains .rds objects of model outputs due to long computation times
 
+For reproducing the model data from scratch, run scripts in this order: collate_cpue_data_exchange.Rmd (to get cpue model objects) -> make_pred_grid_utm.R (to get large scale predictor variables [ices rectangle and sub-division]) -> collate_cond_data_exchange.Rmd (to get condition data, haul-level and large scale covariates from the cpue model and the pred_grid) -> cpue_model.Rmd or condition_model.Rmd
+
 *References for NEMO-Nordic-SCOBI*
 
 Almroth-Rosell, E., Eilola, K., Hordoir, R., Meier, H.E.M., Hall, P.O.J., 2011. Transport of fresh and resuspended particulate organic material in the Baltic Sea — a model study. *J.Mar.Sys*. 87, 1-12. Doi: 10.1016/j.jmarsys.2011.02.005
