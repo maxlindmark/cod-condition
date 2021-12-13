@@ -60,7 +60,10 @@ SISP7 BITS 2017.pdf
 /data/shapefiles
 /data/ICES_StatRec_mapto_ICES_Areas
 /data/sweep.xlsx
-/output/
+/output/predict_mcod_density.csv
+/output/mcod.rds
+/output/mfle.rds
+/output/gif/
 /data/test/
 
 .Rproj.user

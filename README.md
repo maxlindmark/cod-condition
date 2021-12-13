@@ -24,7 +24,13 @@ Contains figures of results
 `output`
 Contains .rds objects of model outputs due to long computation times
 
-For reproducing the model data from scratch, run scripts in this order: collate_cpue_data_exchange.Rmd (to get cpue model objects) -> make_pred_grid_utm.R (to get large scale predictor variables [ices rectangle and sub-division]) -> collate_cond_data_exchange.Rmd (to get condition data, haul-level and large scale covariates from the cpue model and the pred_grid) -> cpue_model.Rmd or condition_model.Rmd
+For reproducing the model data from scratch, run scripts in this order: 
+
+1. `collate_cpue_data_exchange.Rmd` (to get cpue model objects)
+2. `make_pred_grid_utm.Rmd` (to get large scale predictor variables [ices rectangle and sub-division])
+3. `collate_cond_data_exchange.Rmd` (to get condition data, haul-level and large scale covariates from the cpue model and the pred_grid)
+4. `cpue_model.Rmd` or `condition_model.Rmd` (main model fitting and result-visualizing scripts)
+5. `sensitivity_analysis.Rmd` (takes output from the main model in step 4.)
 
 *References for NEMO-Nordic-SCOBI*
 

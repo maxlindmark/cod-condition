@@ -84,14 +84,10 @@ swe_coast_proj <- sf::st_transform(swe_coast, crs = utm_zone33)
 
 ```{r, message=FALSE}
 # Read HH data
-# bits_hh <- getDATRAS(record = "HH", survey = "BITS", years = 1991:2020, quarters = 4)
-# write.csv(bits_hh, "data/DATRAS_exchange/bits_hh.csv")
-bits_hh <- read.csv("data/DATRAS_exchange/bits_hh.csv")
+bits_hh <- read.csv("data/DATRAS_exchange/bits_hh.csv") %>% filter(Quarter == 4)
 
 # Read CA data
-# bits_ca <- getDATRAS(record = "CA", survey = "BITS", years = 1991:2020, quarters = 4)
-# write.csv(bits_ca, "data/DATRAS_exchange/bits_ca.csv")
-bits_ca <- read.csv("data/DATRAS_exchange/bits_ca.csv")
+bits_ca <- read.csv("data/DATRAS_exchange/bits_ca.csv") %>% filter(Quarter == 4)
 ```
 
 ## Standardize catch data
