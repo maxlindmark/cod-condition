@@ -10,7 +10,7 @@ editor_options:
   chunk_output_type: console
 ---
   
-```{r setup, include = FALSE, cache=FALSE}
+```{r setup, include = FALSE}
 knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>",
@@ -84,6 +84,7 @@ swe_coast_proj <- sf::st_transform(swe_coast, crs = utm_zone33)
 ## Read data
 
 ```{r, message=FALSE}
+# Data were read in from getDATRAS on 2021.10.13
 # Read HH data
 # bits_hh <- getDATRAS(record = "HH", survey = "BITS", years = 1991:2020, quarters = c(1, 4))
 # write.csv(bits_hh, "data/DATRAS_exchange/bits_hh.csv")
@@ -2100,5 +2101,5 @@ dat$Y <- utm_coords$Y/1000 # for computational reasons
 ## Save data
 
 ```{r}
-write.csv(dat, file = "data/for_analysis/mdat_cpue.csv", row.names = FALSE)
+write.csv(dat, file = "data/for_analysis/mdat_cpue_q_1_4.csv", row.names = FALSE)
 ```
