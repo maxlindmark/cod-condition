@@ -1,0 +1,275 @@
+---
+title: "Condition model - fitted to mature and immature cod separately and different sub-divisions"
+author: "Max Lindmark, Sean Andersson, Mayya Gogina and Michele Casini"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include = FALSE, cache=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 12,
+  fig.asp = 0.618,
+  fig.align ='center'
+)
+```
+
+# Fit condition model with environmental and biological predictors
+Fit main model (see exploratory scripts and model comparison), visualize results.
+
+## Load packages
+
+```{r packages, message=FALSE, warning=TRUE}
+library(tidyverse); theme_set(theme_light(base_size = 12))
+library(tidylog)
+library(viridis)
+library(marmap)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(sf)
+library(RColorBrewer)
+library(gganimate)
+library(gifski)
+library(latex2exp)
+library(patchwork)
+library(png)
+library(RCurl)
+library(wesanderson)
+library(qwraps2) 
+library(ggcorrplot)
+#remotes::install_github("pbs-assess/sdmTMB", ref = "sim2")
+library(sdmTMB)
+
+# To load entire cache in interactive r session, do: 
+# qwraps2::lazyload_cache_dir(path = "R/supp_analysis/sensitivity_analysis_cache/html")
+```
+
+## Read data
+
+```{r read and process data, message=FALSE, warning=FALSE}
+# Read the split files and join them
+d1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cond_(1_2).csv")
+d2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cond_(2_2).csv")
+
+d <- bind_rows(d1, d2)
+
+# Calculate standardized variables
+d <- d %>% 
+  mutate(ln_length_cm = log(length_cm),
+         ln_weight_g = log(weight_g),
+         year_ct = year - mean(year),
+         biomass_her_sc = biomass_her,
+         biomass_her_sd_sc = biomass_her_sd,
+         biomass_spr_sc = biomass_spr,
+         biomass_spr_sd_sc = biomass_spr_sd,
+         density_cod_sc = density_cod,
+         density_cod_rec_sc = density_cod_rec,
+         density_fle_sc = density_fle,
+         density_fle_rec_sc = density_fle_rec,
+         density_saduria_sc = density_saduria,
+         density_saduria_rec_sc = density_saduria_rec,
+         depth_sc = depth,
+         depth_rec_sc = depth_rec,
+         depth_sd_sc = depth_sd,
+         oxy_sc = oxy,
+         oxy_rec_sc = oxy_rec,
+         oxy_sd_sc = oxy_sd,
+         temp_sc = temp,
+         temp_rec_sc = temp_rec,
+         temp_sd_sc = temp_sd)  %>%
+  mutate_at(c("biomass_her_sc", "biomass_her_sd_sc", "biomass_spr_sc", "biomass_spr_sd_sc",
+              "density_cod_sc", "density_cod_rec_sc", 
+              "density_fle_sc", "density_fle_rec_sc", 
+              "density_saduria_sc", "density_saduria_rec_sc", 
+              "depth_sc", "depth_rec_sc", "depth_sd_sc",
+              "oxy_sc", "oxy_rec_sc", "oxy_sd_sc",
+              "temp_sc", "temp_rec_sc", "temp_sd_sc"
+              ),
+            ~(scale(.) %>% as.vector)) %>% 
+  mutate(year = as.integer(year))
+```
+
+## Subset data
+
+```{r subset data}
+# Filter cod based on size and subdivision
+d_adu <- d %>% filter(length_cm > 30)
+d_juv <- d %>% filter(length_cm < 30)
+d_25_28 <- d %>% filter(!sub_div == 24)
+```
+
+## Make spde mesh
+
+```{r make spde mesh, results='hide', message=FALSE}
+spde_adu <- make_mesh(d_adu, xy_cols = c("X", "Y"),
+                      n_knots = 200, type = "kmeans", seed = 42)
+
+spde_juv <- make_mesh(d_juv, xy_cols = c("X", "Y"),
+                      n_knots = 200, type = "kmeans", seed = 42)
+
+spde_25_28 <- make_mesh(d_25_28, xy_cols = c("X", "Y"),
+                        n_knots = 200, type = "kmeans", seed = 42)
+
+# Plot
+plot(spde_adu)
+plot(spde_juv)
+plot(spde_25_28)
+```
+
+## Full models
+### Adults
+
+```{r fit models, cache=TRUE}
+# Mature cod sizes
+ptm <- proc.time()
+m_adu <- sdmTMB(
+  formula = ln_weight_g ~ -1 + ln_length_cm + biomass_her_sc + biomass_her_sd_sc +
+    biomass_spr_sc + biomass_spr_sd_sc +
+    density_cod_sc + density_cod_rec_sc +
+    density_fle_sc + density_fle_rec_sc +
+    density_saduria_sc + density_saduria_rec_sc +
+    depth_sc + depth_rec_sc +
+    oxy_sc + oxy_rec_sc +
+    temp_sc + temp_rec_sc, 
+  time_varying = ~ 1, data = d_adu, time = "year", mesh = spde_adu,
+  family = student(link = "identity", df = 5),
+  spatiotemporal = "AR1", spatial = "on", silent = TRUE, reml = FALSE,
+  control = sdmTMBcontrol(newton_loops = 1, eval.max = 10000, iter.max = 10000, nlminb_loops = 2))
+proc.time() - ptm
+
+tidy(m_adu, conf.int = TRUE)
+```
+
+### Juveniles
+
+```{r juveniles, cache=TRUE}
+# Immature cod sizes
+ptm <- proc.time()
+m_juv <- sdmTMB(
+  formula = ln_weight_g ~ -1 + ln_length_cm + biomass_her_sc + biomass_her_sd_sc +
+    biomass_spr_sc + biomass_spr_sd_sc +
+    density_cod_sc + density_cod_rec_sc + 
+    density_fle_sc + density_fle_rec_sc + 
+    density_saduria_sc + density_saduria_rec_sc +
+    depth_sc + depth_rec_sc + 
+    oxy_sc + oxy_rec_sc + 
+    temp_sc + temp_rec_sc, 
+  time_varying = ~ 1, data = d_juv, time = "year", mesh = spde_juv,
+  family = student(link = "identity", df = 5),
+  spatiotemporal = "AR1", spatial = "on", silent = TRUE, reml = FALSE,
+  control = sdmTMBcontrol(newton_loops = 1, eval.max = 10000, iter.max = 10000, nlminb_loops = 2))
+proc.time() - ptm
+
+tidy(m_juv, conf.int = TRUE)
+```
+
+### Omit SD 24
+
+```{r omit sd 24, cache=TRUE}
+ptm <- proc.time()
+m_25_28 <- sdmTMB(
+  formula = ln_weight_g ~ -1 + ln_length_cm + biomass_her_sc + biomass_her_sd_sc +
+    biomass_spr_sc + biomass_spr_sd_sc +
+    density_cod_sc + density_cod_rec_sc + 
+    density_fle_sc + density_fle_rec_sc + 
+    density_saduria_sc + density_saduria_rec_sc + 
+    depth_sc + depth_rec_sc + 
+    oxy_sc + oxy_rec_sc + 
+    temp_sc + temp_rec_sc, 
+  time_varying = ~ 1, data = d_25_28, time = "year", mesh = spde_25_28,
+  family = student(link = "identity", df = 5),
+  spatiotemporal = "AR1", spatial = "on", silent = TRUE, reml = FALSE,
+  control = sdmTMBcontrol(newton_loops = 1, eval.max = 10000, iter.max = 10000, nlminb_loops = 2))
+proc.time() - ptm
+
+tidy(m_25_28, conf.int = TRUE)
+```
+
+## Extract coefficients
+
+```{r extract coefficients, message=FALSE}
+# Extract random and fixed coefficients from the adult model
+m_adu_est <- bind_rows(tidy(m_adu, effects = "ran_par", conf.int = TRUE) %>%
+                         filter(term %in% c("sigma_O", "sigma_E")),
+                       tidy(m_adu, effects = "fixed", conf.int = TRUE) %>%
+                         filter(!term %in% c("ln_length_cm"))) 
+
+# Extract random and fixed coefficients from the juvenile model
+m_juv_est <- bind_rows(tidy(m_juv, effects = "ran_par", conf.int = TRUE) %>%
+                         filter(term %in% c("sigma_O", "sigma_E")),
+                       tidy(m_juv, effects = "fixed", conf.int = TRUE) %>%
+                         filter(!term %in% c("ln_length_cm")))
+
+# Extract random and fixed coefficients from the sd25+ model
+m_25_28_est <- bind_rows(tidy(m_25_28, effects = "ran_par", conf.int = TRUE) %>%
+                           filter(term %in% c("sigma_O", "sigma_E")),
+                         tidy(m_25_28, effects = "fixed", conf.int = TRUE) %>%
+                           filter(!term %in% c("ln_length_cm")))
+```
+
+## Plot the differences in effect sizes
+
+```{r}
+m_juv_est$Model <- "< 30 cm"
+m_adu_est$Model <- "> 30 cm"
+m_25_28_est$Model <- "SubDiv 25-28"
+
+# Read in coefficients from the main model
+m_full <- read.csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/output/mfull_est.csv") %>%
+  dplyr::select(-X) %>% 
+  mutate(Model = "Full model", term = as.factor(term))
+
+plot_dat <- bind_rows(m_juv_est, m_adu_est, m_25_28_est, m_full) %>% 
+  mutate(term = as.factor(term))
+
+# Plot effects
+ggplot(plot_dat, aes(reorder(term, term2), estimate, color = Model)) +
+  geom_hline(yintercept = 0, linetype = 2, color = "gray40", alpha = 0.5) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2,
+                position = position_dodge(width = 0.7), alpha = 0.6) +
+  geom_point(size = 2.5, position = position_dodge(width = 0.7), alpha = 0.6) +
+  scale_color_brewer(palette = "Dark2") +
+  labs(x = "", y = "Standardized coefficient") +
+  scale_x_discrete(breaks = levels(plot_dat$term),
+                   labels = c(expression(Herring[rec]),
+                              expression(Herring[sub]),
+                              expression(Sprat[rec]),
+                              expression(Sprat[sub]),
+                              expression(Cod[rec]),
+                              expression(Cod[haul]),
+                              expression(Flounder[rec]),
+                              expression(Flounder[haul]),
+                              expression(Saduria~entomon[rec]),
+                              expression(Saduria~entomon[haul]),
+                              expression(Depth[rec]),
+                              expression(Depth[haul]),
+                              expression(Oxygen[rec]),
+                              expression(Oxygen[haul]),
+                              expression(sigma[E]),
+                              expression(sigma[O]),
+                              expression(Temp[rec]),
+                              expression(Temp[haul])
+                              )) +
+  coord_flip() +
+  guides(color = guide_legend(ncol = 2)) +
+  theme(plot.margin = unit(c(0.4, 0.4, 0.4, 0), "cm"),
+        legend.position = "bottom")
+  NULL
+  
+ggsave("figures/supp/sensitivity_coefficients.png", width = 4.5, height = 6.5, dpi = 600)
+
+# Just a test to see the labels were alright
+effect_sizes <- ggplot(plot_dat, aes(reorder(term, estimate), estimate)) +
+  geom_hline(yintercept = 0, linetype = 2, color = "red", alpha = 0.5) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +
+  labs(x = "", y = "Standardized coefficient") +
+  coord_flip()
+```
+
