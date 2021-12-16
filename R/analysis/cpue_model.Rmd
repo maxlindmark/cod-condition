@@ -25,7 +25,7 @@ Fit density (also referred to as CPUE) model with environmental predictors and u
 
 ```{r lib, message=FALSE}
 # Load libraries, install if needed
-library(tidyverse); theme_set(theme_light(base_size = 10))
+library(tidyverse); theme_set(theme_light(base_size = 11))
 library(readxl)
 library(tidylog)
 library(RCurl)
@@ -210,8 +210,7 @@ plot_map_raster +
   facet_wrap(~ year, ncol = 5) +
   labs(color = "residuals") +
   theme(strip.text = element_text(size = 8, colour = 'black', margin = margin()),
-        strip.background = element_rect(fill = "grey90")) +
-  geom_sf()
+        strip.background = element_rect(fill = "grey90"))
 
 ggsave("figures/supp/density/spatial_resid.png", width = 6.5, height = 6.5, dpi = 600)
 ```
@@ -240,8 +239,7 @@ plot_map_raster +
   scale_fill_viridis_c(trans = "sqrt") +
   facet_wrap(~ year, ncol = 5) +
   labs(fill = expression(kg/km^2)) +
-  ggtitle("Predicted density (fixed + random)") + 
-  geom_sf()
+  ggtitle("Predicted density (fixed + random)")
   
 ggsave("figures/supp/density/est_map.png", width = 6.5, height = 6.5, dpi = 600)
 
@@ -250,8 +248,7 @@ plot_map_raster +
   geom_raster(data = predict_mcod, aes(x = X * 1000, y = Y * 1000, fill = epsilon_st)) +
   scale_fill_gradient2() +
   facet_wrap(~ year, ncol = 5) +
-  ggtitle("Spatiotemporal random effects") +
-  geom_sf()
+  ggtitle("Spatiotemporal random effects")
 
 ggsave("figures/supp/density/epsilon_st_map.png", width = 6.5, height = 6.5, dpi = 600)
 
@@ -261,8 +258,7 @@ plot_map_raster +
   scale_fill_gradient2() +
   facet_wrap(~ year, ncol = 5) +
   theme_plot() +
-  ggtitle("Spatial random effects") +
-  geom_sf()
+  ggtitle("Spatial random effects")
   
 ggsave("figures/supp/density/omega_s_map.png", width = 6.5, height = 6.5, dpi = 600)
 ```
@@ -446,18 +442,20 @@ div_index_sim <- div_index_sim %>% mutate(est_t = est/1000, lwr_t = lwr/1000, up
 
 ind_plot_sd <- 
   ggplot() +
-  scale_x_continuous(breaks = scales::pretty_breaks(n = 20)) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
   geom_line(data = filter(div_index_sim, !sub_div == "Total"), aes(year, est_t, color = sub_div)) + 
   geom_ribbon(data = filter(div_index_sim, !sub_div == "Total"), aes(year, ymin = lwr_t, ymax = upr_t, fill = sub_div), alpha = 0.2) +
   scale_color_brewer(palette = "Dark2") +
-  scale_fill_brewer(palette = "Dark2", name = "ICES\nSub division") +
+  scale_fill_brewer(palette = "Dark2", name = "ICES Sub division") +
   guides(color = FALSE) + 
   labs(x = "Year", y = "Tonnes", fill = "Sub Divisions") +
-  theme_light(base_size = 11) +
-  theme(axis.text.x = element_text(angle = 30),
-        #legend.position = c(0.9, 0.83),
+  theme_plot() +
+  theme(legend.key.height = unit(0.2, "cm"),
+        legend.key.width = unit(0.2, "cm"),
+        legend.margin = margin(0, 0, 0, 0),
         legend.background = element_blank(),
-        plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+        plot.margin = unit(c(0, 0.1, 0.15, 0), "cm"),
+        legend.position = "bottom") +
   NULL
 
 ind_plot_tot <- 
@@ -466,27 +464,29 @@ ind_plot_tot <-
             aes(year, est_t)) +
   geom_ribbon(data = filter(div_index_sim, sub_div == "Total"),
               aes(year, ymin = lwr_t, ymax = upr_t, fill = "Total"), alpha = 0.4) +
-  scale_x_continuous(breaks = scales::pretty_breaks(n = 20)) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
   scale_fill_manual(values = "grey40") + 
   labs(x = "Year", y = "Tonnes", fill = "") +
-  theme_light(base_size = 11) +
-  theme(axis.text.x = element_text(angle = 30),
-        #legend.position = c(0.9, 0.83),
+  theme_plot() +
+  theme(legend.key.height = unit(0.2, "cm"),
+        legend.margin = margin(0, 0, 0, 0),
         legend.background = element_blank(),
-        plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+        plot.margin = unit(c(0, 0.1, 0.15, 0), "cm"),
+        legend.position = "bottom") +
   NULL
 
-cpue_map_94_17 <- plot_map_raster_labels +
+cpue_map_95_17 <- plot_map_raster_labels +
   geom_raster(data = filter(predict_mcod, year %in% c("1995", "2017")), aes(x = X * 1000, y = Y * 1000, fill = exp(est))) +
-  scale_fill_viridis_c(trans = "sqrt") +
+  scale_fill_viridis_c() +
   facet_wrap(~ year, ncol = 2) +
   labs(fill = expression(kg/km^2)) +
   theme_plot() +
-  theme(plot.margin = unit(c(0, 0, 0, 0), "cm")) + 
-  geom_sf() +
+  theme(plot.margin = unit(c(0, 0, 0, 0), "cm"),
+        legend.text = element_text(size = 6),
+        legend.position = "bottom") +
   NULL
 
-(ind_plot_sd / ind_plot_tot) / cpue_map_94_17 + plot_annotation(tag_levels = 'A')
+(ind_plot_sd + ind_plot_tot) / cpue_map_95_17 + plot_annotation(tag_levels = 'A') 
 
 ggsave("figures/density.png", width = 6.5, height = 6.5, dpi = 600)
 ```
@@ -570,8 +570,7 @@ bathy_plot <- plot_map_raster_labels +
   labs(fill = "Depth") +
   theme_plot() +
   theme(legend.position = "bottom",
-        plot.margin = unit(c(0.2, 0.2, 0.2, 0.2), "cm")) +
-  geom_sf() +
+        plot.margin = unit(c(0.2, 0.2, 0.2, 0.2), "cm"))
   NULL
   
 # Now calculate deciles of the biomass-weighted values
@@ -609,18 +608,17 @@ oxy_plot <- plot_map_raster_labels +
   labs(fill = expression(paste("O" [2], " [ml/L]", sep = ""))) +
   theme_plot() +
   theme(legend.position = "bottom",
-        plot.margin = unit(c(0.2, 0.2, 0.2, 0.2), "cm")) +
-  geom_sf() +
+        plot.margin = unit(c(0.2, 0.2, 0.2, 0.2), "cm"))
   NULL
 
 # Plot biomass-weighted oxygen
 annual_oxy <- pred_grid %>%
   drop_na(oxy) %>%
   group_by(year) %>%
-  summarize(mean_oxy = mean(oxy)) %>%
+  summarize(median_oxy = median(oxy)) %>%
   ungroup() %>% 
-  rename("oxy" = "mean_oxy") %>% 
-  mutate(series = "Mean in environment",
+  rename("oxy" = "median_oxy") %>% 
+  mutate(series = "Median in environment",
          oxy_ct = oxy - mean(oxy))
   
 # Weighted total
@@ -657,65 +655,64 @@ ggplot(oxygen_series, aes(year, oxy, color = series, group = series, fill = seri
 (bathy_plot | plot_w_dep) / (oxy_plot | plot_w_oxy) / (sad_plot | spr_plot) +
   plot_annotation(tag_levels = 'A')
 
-ggsave("figures/density_weighted_dep_oxy_sad_spr2.png", width = 6.5, height = 8.5, dpi = 600)
+ggsave("figures/density_weighted_dep_oxy_sad_spr.png", width = 6.5, height = 8.5, dpi = 600)
 ```
 
 ### Plot biomass-weighted temperature
 
 ```{r biomass-weighted temperature, message=FALSE}
-# # Plot temperature in 1999
-# temp_plot <- plot_map_raster +
-#   geom_raster(data = filter(preds_cod$data, year == "1999"), aes(x = X * 1000, y = Y * 1000, fill = temp)) +
-#   scale_fill_viridis(option = "inferno", direction = -1) +
-#   labs(fill = "Temperature [°C]") +
-#   theme_plot() +
-#   theme(legend.position = "bottom",
-#         plot.margin = unit(c(0, 0.1, 0, 0.2), "cm")) +
-#   geom_sf() +
-#   NULL
-#   
-# annual_temp <- pred_grid %>%
-#   drop_na(temp) %>%
-#   group_by(year) %>%
-#   summarize(mean_temp = mean(temp)) %>%
-#   ungroup() %>% 
-#   rename("temp" = "mean_temp") %>% 
-#   mutate(series = "Mean in environment",
-#          temp_ct = temp - mean(temp))
-#   
-# # Weighted total
-# wm_temp <- preds_cod$data %>%
-#   group_by(year) %>%
-#   summarise("Density-weighted (5th decile, median)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.5)),
-#             "Density-weighted (1st decile)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.1)),
-#             "Density-weighted (9th decile)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.9))) %>% 
-#   pivot_longer(cols = c("Density-weighted (5th decile, median)", "Density-weighted (1st decile)", "Density-weighted (9th decile)"),
-#                names_to = "series", values_to = "temp") %>% 
-#   ungroup() %>% 
-#   group_by(series) %>%  # standardize within for easy plotting
-#   mutate(temp_ct = temp - mean(temp)) %>%
-#   ungroup()
-# 
-# temp_series <- bind_rows(wm_temp, annual_temp)
-# 
-# plot_w_temp <-
-#   ggplot(temp_series, aes(year, temp, color = series, group = series, fill = series, linetype = series)) +
-#   stat_smooth(method = "gam", formula = y ~ s(x, k = 4), se = FALSE, size = 1) +
-#   geom_point(size = 1.5, alpha = 0.8, color = "white", shape = 21) +
-#   scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
-#   scale_linetype_manual(values = c(1,1,1,2)) +
-#   scale_color_manual(values = pal) +
-#   scale_fill_manual(values = pal) +
-#   guides(fill = FALSE, linetype = FALSE, color = guide_legend(nrow = 4)) +
-#   labs(y = "Temperature [°C]", x = "Year",
-#        color = "") +
-#   theme_plot() +
-#   theme(plot.margin = unit(c(0, 0, 0, 0), "cm")) +
-#   NULL
-# temp_plot + plot_w_temp +
-#   plot_annotation(tag_levels = 'A') + plot_layout(ncol = 2) + 
-# 
-# ggsave("figures/supp/density/weighted_temp.png", width = 6.5, height = 8.5, dpi = 600)
+# Plot temperature in 1999
+temp_plot <- plot_map_raster +
+  geom_raster(data = filter(predict_mcod, year == "1999"), aes(x = X * 1000, y = Y * 1000, fill = temp)) +
+  scale_fill_viridis(option = "inferno", direction = -1) +
+  labs(fill = "Temperature [°C]") +
+  theme_plot() +
+  theme(legend.position = "bottom",
+        plot.margin = unit(c(0, 0.1, 0, 0.2), "cm"))
+  NULL
+
+annual_temp <- pred_grid %>%
+  drop_na(temp) %>%
+  group_by(year) %>%
+  summarize(median_temp = median(temp)) %>%
+  ungroup() %>%
+  rename("temp" = "median_temp") %>%
+  mutate(series = "Median in environment",
+         temp_ct = temp - mean(temp))
+
+# Weighted total
+wm_temp <- predict_mcod %>%
+  group_by(year) %>%
+  summarise("Density-weighted (5th decile, median)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.5)),
+            "Density-weighted (1st decile)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.1)),
+            "Density-weighted (9th decile)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.9))) %>%
+  pivot_longer(cols = c("Density-weighted (5th decile, median)", "Density-weighted (1st decile)", "Density-weighted (9th decile)"),
+               names_to = "series", values_to = "temp") %>%
+  ungroup() %>%
+  group_by(series) %>% # standardize within for easy plotting
+  mutate(temp_ct = temp - mean(temp)) %>%
+  ungroup()
+
+temp_series <- bind_rows(wm_temp, annual_temp)
+
+plot_w_temp <-
+  ggplot(temp_series, aes(year, temp, color = series, group = series, fill = series, linetype = series)) +
+  stat_smooth(method = "gam", formula = y ~ s(x, k = 4), se = FALSE, size = 1) +
+  geom_point(size = 1.5, alpha = 0.8, color = "white", shape = 21) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  scale_linetype_manual(values = c(1,1,1,2)) +
+  scale_color_manual(values = pal) +
+  scale_fill_manual(values = pal) +
+  guides(fill = FALSE, linetype = FALSE, color = guide_legend(nrow = 4)) +
+  labs(y = "Temperature [°C]", x = "Year",
+       color = "") +
+  theme_plot() +
+  theme(plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+  NULL
+temp_plot + plot_w_temp +
+  plot_annotation(tag_levels = 'A') + plot_layout(ncol = 2)
+
+ggsave("figures/supp/density/weighted_temp.png", width = 6.5, height = 8.5, dpi = 600)
 ```
 
 ## Marginal effect of oxygen

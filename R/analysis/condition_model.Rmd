@@ -112,7 +112,6 @@ ggplot(swe_coast_proj) +
   labs(x = "Longitude", y = "Latitude") +
   geom_sf(size = 0.3) + 
   theme_plot() +
-  geom_sf() +
   NULL
 
 plot_map_raster_labels <- 
@@ -287,7 +286,27 @@ pred_grid %>%
 ```
 
 ```{r, include=FALSE}
-# Include some tests for the manuscript
+# Include some tests & calculations for the manuscript
+median(d$weight_g)
+# What does an effect size of 0.0034 mean for change in log weight and weight?
+t <- tibble(l = seq(1, 80, 0.1)) %>% 
+  mutate(w1 = 0.01*l^3,
+         log_w1 = log(w1),
+         log_w2 = log_w1*1.0034,
+         w2 = exp(log_w2),
+         perc_chang_log_w = ((log_w2-log_w1)/log_w1)*100,
+         perc_chang_w = ((w2-w1)/w1)*100) %>% 
+  as.data.frame()
+
+t %>% filter(w1 > median(0.95*d$weight_g)) %>% head(10)
+
+ggplot(t) +
+  geom_line(aes(l, w1, color = "w1")) +
+  geom_line(aes(l, w2, color = "w2"))
+
+ggplot(t) +
+  geom_line(aes(w1, perc_chang_w, color = "w1"))
+
 # pred_grid_test <- pred_grid %>%
 #   mutate(oxy_cat = ifelse(oxy > 4.3, "normal", "low"),
 #          oxy_cat = ifelse(oxy < 1, "dead", oxy_cat)) %>%
@@ -299,7 +318,6 @@ pred_grid %>%
 #   facet_wrap(~ year) +
 #   scale_fill_manual(values = c("black", "gray70", "skyblue")) +
 #   theme_light() +
-#   geom_sf() + 
 #   NULL
 
 # ggplot(pred_grid, aes(depth, oxy)) + geom_point() +
@@ -378,7 +396,6 @@ plot_map_raster +
   scale_colour_gradient2() +
   facet_wrap(~ year, ncol = 5) +
   labs(color = "residuals") +
-  geom_sf() +
   NULL
 
 ggsave("figures/supp/condition/spatial_resid.png", width = 6.5, height = 6.5, dpi = 600)
@@ -826,7 +843,6 @@ plot_map_raster +
   scale_fill_gradientn(colours = rev(pal), name = "log(condition factor)") +
   facet_wrap(~ year, ncol = 5) +
   theme_facet_map() +
-  geom_sf() +
   NULL
 
 ggsave("figures/supp/condition/all_years_condition_map_covars.png", width = 6.5, height = 6.5, dpi = 600)
@@ -838,7 +854,6 @@ plot_map_raster_labels +
   scale_fill_gradientn(colours = rev(pal), name = "log(condition factor)") + 
   facet_wrap(~ year, ncol = 2) +
   theme_plot() +
-  geom_sf() +
   NULL
 
 ggsave("figures/condition_map_covars.png", width = 6.5, height = 6.5, dpi = 600)
@@ -849,7 +864,6 @@ ggsave("figures/condition_map_covars.png", width = 6.5, height = 6.5, dpi = 600)
 #   geom_raster(data = pred_map2, aes(x = X*1000, y = Y*1000, fill = est)) +
 #   scale_fill_gradientn(colours = rev(pal), name = "log(condition factor)") +
 #   theme_plot() +
-#   geom_sf() +
 #   NULL
 # 
 # # Here comes the gganimate specific bits
@@ -872,7 +886,6 @@ plot_map_raster +
   scale_fill_gradient2() +
   facet_wrap(~ year, ncol = 5) +
   ggtitle("Spatiotemporal random effects") +
-  geom_sf() +
   NULL
 
 ggsave("figures/supp/condition/epsilon_st_map.png", width = 6.5, height = 6.5, dpi = 600)
@@ -884,7 +897,6 @@ plot_map_raster +
   facet_wrap(~ year, ncol = 5) +
   theme_plot() + 
   ggtitle("Spatial random effects") +
-  geom_sf() +
   NULL
 
 ggsave("figures/supp/condition/omega_s_map.png", width = 6.5, height = 6.5, dpi = 600)
@@ -914,30 +926,9 @@ plot_map_raster +
   facet_wrap(~ term, ncol = 5) +
   theme_plot() +
   ggtitle("Time slopes by each pred grid") +
-  geom_sf() +
   NULL
 
 ggsave("figures/supp/condition/spatial_trend_condition.png", width = 6.5, height = 6.5, dpi = 600)
-
-# Plot the upper CI
-# ggplot(swe_coast_proj) +
-#   geom_raster(data = time_slopes_by_year2, aes(x = X * 1000, y = Y * 1000, fill = estimate + std.error*1.96)) +
-#   geom_sf(size = 0.3) +
-#   scale_fill_gradient2(midpoint = 0) +
-#   facet_wrap(~ term, ncol = 5) +
-#   labs(x = "Longitude", y = "Latitude") +
-#   theme_light(base_size = 10) +
-#   ggtitle("Upper CI of time slopes by each pred grid")
-# 
-# # Lower CI
-# ggplot(swe_coast_proj) +
-#   geom_raster(data = time_slopes_by_year2, aes(x = X * 1000, y = Y * 1000, fill = estimate - std.error*1.96)) +
-#   geom_sf(size = 0.3) +
-#   scale_fill_gradient2(midpoint = 0) +
-#   facet_wrap(~ term, ncol = 5) +
-#   labs(x = "Longitude", y = "Latitude") +
-#   theme_light(base_size = 10) +
-#   ggtitle("Lower CI of time slopes by each pred grid")
 ``` 
 
 ## Visualize marginal effects
