@@ -1,5 +1,5 @@
 ---
-title: "Cod density in relation to oxygen"
+title: "Cod density in relation to environmental variables"
 author: "Max Lindmark, Sean Andersson, Michele Casini"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
@@ -48,15 +48,19 @@ library(rnaturalearth)
 library(rnaturalearthdata)
 library(mapplots)
 library(qwraps2) 
+library(wesanderson)
 #remotes::install_github("pbs-assess/sdmTMB")
-library(sdmTMB)# To load entire cache in interactive r session, do: qwraps2::lazyload_cache_dir(path = "R/analysis/cpue_model_cache/html")
+library(sdmTMB)
+
+# To load entire cache in interactive r session, do: 
+# qwraps2::lazyload_cache_dir(path = "R/analysis/cpue_model_cache/html")
 ```
 
 ## For maps
 
 ```{r read coastline data, message=FALSE, warning=FALSE}
 # Specify map ranges
-ymin = 54; ymax = 58; xmin = 12; xmax = 22
+ymin = 52; ymax = 60; xmin = 10; xmax = 24
 
 map_data <- rnaturalearth::ne_countries(
   scale = "medium",
@@ -72,10 +76,8 @@ swe_coast <- suppressWarnings(suppressMessages(
 utm_zone33 <- 32633
 swe_coast_proj <- sf::st_transform(swe_coast, crs = utm_zone33)
 
-ggplot(swe_coast_proj) + geom_sf() 
-
 # Define plotting theme for main plot
-theme_weighted_plot <- function(base_size = 10, base_family = "") {
+theme_plot <- function(base_size = 10, base_family = "") {
   theme_light(base_size = 10, base_family = "") +
     theme(
       axis.text.x = element_text(angle = 90),
@@ -86,8 +88,8 @@ theme_weighted_plot <- function(base_size = 10, base_family = "") {
       legend.key.height = unit(0.2, "cm"),
       legend.margin = margin(0, 0, 0, 0),
       legend.box.margin = margin(-5, -5, -5, -5),
-      strip.text = element_text(size = 8, colour = 'black', margin = margin()),
-      strip.background = element_rect(fill = "grey90")
+      strip.text = element_text(size = 8, colour = 'gray10', margin = margin()),
+      strip.background = element_rect(fill = "grey95")
       )
 }
 
@@ -97,19 +99,44 @@ theme_facet_map <- function(base_size = 10, base_family = "") {
     theme(
         axis.text.x = element_text(angle = 90),
         axis.text = element_text(size = 6),
-        strip.text = element_text(size = 8, colour = 'black', margin = margin()),
-        strip.background = element_rect(fill = "grey90")
+        strip.text = element_text(size = 8, colour = 'gray10', margin = margin()),
+        strip.background = element_rect(fill = "gray95"),
+        legend.position = c(0.7, 0.02),
+        legend.direction = "horizontal"
       )
 }
+
+# Make default base map plot
+xmin2 <- 303000; xmax2 <- 916000; xrange <- xmax2 - xmin2
+ymin2 <- 5980000; ymax2 <- 6450000; yrange <- ymax2 - ymin2
+
+plot_map_raster <- 
+ggplot(swe_coast_proj) + 
+  xlim(xmin2, xmax2) +
+  ylim(ymin2, ymax2) +
+  labs(x = "Longitude", y = "Latitude") +
+  geom_sf(size = 0.3) + 
+  theme_plot()
+
+plot_map_raster_labels <- 
+  plot_map_raster + 
+  annotate("text", label = "Sweden", x = xmin2 + 0.25*xrange, y = ymin2 + 0.8*yrange, color = "black", size = 1.9) +
+  annotate("text", label = "Denmark", x = xmin2 + 0.029*xrange, y = ymin2 + 0.43*yrange, color = "black", size = 1.9, angle = 75) +
+  annotate("text", label = "Germany", x = xmin2 + 0.07*xrange, y = ymin2 + 0.025*yrange, color = "black", size = 1.9) +
+  annotate("text", label = "Poland", x = xmin2 + 0.55*xrange, y = ymin2 + 0.1*yrange, color = "black", size = 1.9) +
+  annotate("text", label = "Russia", x = xmin2 + 0.95*xrange, y = ymin2 + 0.2*yrange, color = "black", size = 1.9) +
+  annotate("text", label = "Lithuania", x = xmin2 + 1*xrange, y = ymin2 + 0.47*yrange, color = "black", size = 1.9, angle = 75) +
+  annotate("text", label = "Latvia", x = xmin2 + 0.99*xrange, y = ymin2 + 0.68*yrange, color = "black", size = 1.9, angle = 75)
 ```
 
 ## Read data
 
 ```{r read and process data, message=FALSE, warning=FALSE}
-d <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cpue.csv")
+d <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cpue_q_1_4.csv")
 
 # Calculate standardized variables
 d <- d %>% 
+  filter(year < 2020 & year > 1992 & quarter == 4) %>% 
   mutate(oxy_sc = oxy,
          temp_sc = temp,
          depth_sc = depth,
@@ -119,19 +146,20 @@ d <- d %>%
   mutate(year = as.integer(year)) %>% 
   drop_na(oxy, depth, temp)
 
-ggplot(swe_coast_proj) +
-  geom_sf() + 
+plot_map_raster +
   geom_point(data = d, aes(X*1000, Y*1000))
 ```
 
 ## Read the prediction grids
 
 ```{r read and process prediction grid, message=FALSE, warning=FALSE}
-# And now read in pred_grid2 which has oxygen values at location and time and depth:
-pred_grid2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid2.csv")
+pred_grid1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(1_2).csv")
+pred_grid <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(2_2).csv")
+
+pred_grid <- bind_rows(pred_grid1, pred_grid)
 
 # Standardize data with respect to prediction grid:
-pred_grid2 <- pred_grid2 %>%
+pred_grid <- pred_grid %>%
   mutate(year = as.integer(year)) %>% 
   filter(year %in% c(unique(d$year))) %>% 
   mutate(depth_sc = (depth - mean(d$depth))/sd(d$depth),
@@ -153,16 +181,15 @@ plot(spde)
 dev.off()
 ```
 
-## Fit the models of cpue
+## Fit the density model
 
 ```{r fit, results='hide', cache=TRUE, message=FALSE}
 # Depth spline + oxy spline
 # Takes about 30 minutes
-m <- sdmTMB(density ~ 0 + as.factor(year) + s(depth_sc, k = 3) + s(oxy_sc, k = 3) + s(temp_sc, k = 3),
-            data = d, spde = spde, family = tweedie(link = "log"),
-            fields = "AR1", include_spatial = TRUE, time = "year",
-            spatial_only = FALSE, reml = FALSE,
-            control = sdmTMBcontrol(newton_steps = 1))
+m <- sdmTMB(density ~ 0 + as.factor(year) + s(depth_sc) + s(oxy_sc) + s(temp_sc),
+            data = d, mesh = spde, family = tweedie(link = "log"),
+            spatiotemporal = "AR1", spatial = "on", time = "year",
+            reml = FALSE, control = sdmTMBcontrol(newton_steps = 1))
 
 tidy(m, conf.int = TRUE)
 ```
@@ -177,15 +204,14 @@ qqnorm(d$residualsm); abline(a = 0, b = 1)
 dev.off()
 
 # Residuals on map
-ggplot(swe_coast_proj) +
+plot_map_raster +
   geom_point(data = d, aes(x = X * 1000, y = Y * 1000, color = residualsm)) +
-  geom_sf(size = 0.3) +
   scale_colour_gradient2() +
   facet_wrap(~ year, ncol = 5) +
-  labs(x = "Longitude", y = "Latitude", color = "residuals") +
-  theme_facet_map() + 
+  labs(color = "residuals") +
   theme(strip.text = element_text(size = 8, colour = 'black', margin = margin()),
-        strip.background = element_rect(fill = "grey90"))
+        strip.background = element_rect(fill = "grey90")) +
+  geom_sf()
 
 ggsave("figures/supp/density/spatial_resid.png", width = 6.5, height = 6.5, dpi = 600)
 ```
@@ -196,278 +222,373 @@ ggsave("figures/supp/density/spatial_resid.png", width = 6.5, height = 6.5, dpi 
 tidy(m, effects = "ran_pars", conf.int = TRUE) %>% filter(term == "rho")
 ```
 
-## Predict and extract density-weighted mean oxygen and depth per prediction grid
+## Predict on grid
 
 ```{r predict, cache=TRUE}
-predict_mcod <- predict(m, newdata = pred_grid2)
+predict_mcod <- predict(m, newdata = pred_grid)
+
+# Save prediction as csv (smaller than the model object...)
+write.csv(predict_mcod, "output/predict_mcod_density.csv")
 ```
 
 ## Plot predictions on map
 
-```{r plot, include=FALSE}
+```{r plot}
 # Plot predicted density and random effects
-ggplot(swe_coast_proj) +
+plot_map_raster +
   geom_raster(data = predict_mcod, aes(x = X * 1000, y = Y * 1000, fill = exp(est))) +
-  geom_sf(size = 0.3) +
   scale_fill_viridis_c(trans = "sqrt") +
   facet_wrap(~ year, ncol = 5) +
-  labs(x = "Longitude", y = "Latitude", fill = expression(kg/km^2)) +
-  ggtitle("Predicted density (fixed + random)") +
-  theme_facet_map()
+  labs(fill = expression(kg/km^2)) +
+  ggtitle("Predicted density (fixed + random)") + 
+  geom_sf()
   
 ggsave("figures/supp/density/est_map.png", width = 6.5, height = 6.5, dpi = 600)
 
 # Plot spatiotemporal random effect
-ggplot(swe_coast_proj) +
+plot_map_raster +
   geom_raster(data = predict_mcod, aes(x = X * 1000, y = Y * 1000, fill = epsilon_st)) +
-  geom_sf(size = 0.3) +
   scale_fill_gradient2() +
   facet_wrap(~ year, ncol = 5) +
-  labs(x = "Longitude", y = "Latitude") +
   ggtitle("Spatiotemporal random effects") +
-  theme_facet_map()
+  geom_sf()
 
 ggsave("figures/supp/density/epsilon_st_map.png", width = 6.5, height = 6.5, dpi = 600)
 
 # Plot spatial random effect
-ggplot(swe_coast_proj) + 
+plot_map_raster +
   geom_raster(data = filter(predict_mcod, year == 1999), aes(x = X * 1000, y = Y * 1000, fill = omega_s)) +
-  geom_sf(size = 0.3) +
   scale_fill_gradient2() +
   facet_wrap(~ year, ncol = 5) +
-  labs(x = "Longitude", y = "Latitude") +
-  theme_light(base_size = 10) + 
-  ggtitle("Spatial random effects")
+  theme_plot() +
+  ggtitle("Spatial random effects") +
+  geom_sf()
   
 ggsave("figures/supp/density/omega_s_map.png", width = 6.5, height = 6.5, dpi = 600)
 ```
 
-## We can also plot the annual index
+## Get the annual index
 
 ```{r cpue index, message=FALSE, cache=TRUE}
-# From these models, predict annual cpue index
-# Make a new prediction this time without the deep areas! For the previous plot, I predict first then make NA 
-# to make them more visible on the map. Here I don't want them to be included in the index-calculation
+# # From these models, predict annual cpue index
+# # Make a new prediction this time without the deep areas! For the previous plot, I predict first then make NA 
+# # to make them more visible on the map. Here I don't want them to be included in the index-calculation
+# 
+# # First, get an index for average density (which we can compare with data)
+# ncells <- filter(pred_grid, year == max(pred_grid$year)) %>% nrow()
+# 
+# # Total prediction 
+# preds_cod_ave <- predict(m, newdata = pred_grid, return_tmb_object = TRUE, area = 1/ncells)
+# 
+# # Now get the total index by specifying the area of a grid cell
+# # Total prediction 
+# preds_cod <- predict(m, newdata = pred_grid, return_tmb_object = TRUE, area = 2*2)
+# 
+# # Total prediction (omitting SD 24!)
+# preds_cod25_28 <- predict(m, newdata = filter(pred_grid, !sub_div == 24),
+#                           return_tmb_object = TRUE, area = 2*2)
+# 
+# # SD 24-25
+# preds_cod24_25 <- predict(m, newdata = filter(pred_grid, sub_div %in% c(24, 25)),
+#                           return_tmb_object = TRUE, area = 2*2)
+# 
+# # SD 24
+# preds_cod24 <- predict(m, newdata = filter(pred_grid, sub_div == 24),
+#                        return_tmb_object = TRUE, area = 2*2)
+# 
+# # SD 25
+# preds_cod25 <- predict(m, newdata = filter(pred_grid, sub_div == 25),
+#                        return_tmb_object = TRUE, area = 2*2)
+# 
+# # SD 26
+# preds_cod26 <- predict(m, newdata = filter(pred_grid, sub_div == 26),
+#                        return_tmb_object = TRUE, area = 2*2)
+# 
+# # SD 27
+# preds_cod27 <- predict(m, newdata = filter(pred_grid, sub_div == 27),
+#                        return_tmb_object = TRUE, area = 2*2)
+# 
+# # SD 28
+# preds_cod28 <- predict(m, newdata = filter(pred_grid, sub_div == 28),
+#                        return_tmb_object = TRUE, area = 2*2)
+# 
+# # Now calculate the CPUE index (average)
+# index_ave <- get_index(preds_cod_ave, bias_correct = FALSE)
+# index <- get_index(preds_cod, bias_correct = FALSE)
+# index24_25 <- get_index(preds_cod24_25, bias_correct = FALSE)
+# index25_28 <- get_index(preds_cod25_28, bias_correct = FALSE)
+# index24 <- get_index(preds_cod24, bias_correct = FALSE)
+# index25 <- get_index(preds_cod25, bias_correct = FALSE)
+# index26 <- get_index(preds_cod26, bias_correct = FALSE)
+# index27 <- get_index(preds_cod27, bias_correct = FALSE)
+# index28 <- get_index(preds_cod28, bias_correct = FALSE)
+# 
+# # By sub divisions
+# index <- index %>% mutate(sub_div = "Total")
+# index24 <- index24 %>% mutate(sub_div = "24")
+# index25 <- index25 %>% mutate(sub_div = "25")
+# index26 <- index26 %>% mutate(sub_div = "26")
+# index27 <- index27 %>% mutate(sub_div = "27")
+# index28 <- index28 %>% mutate(sub_div = "28")
+# 
+# div_index <- bind_rows(index, index24, index25, index26, index27, index28)
+```
 
-# First, get an index for average density (which we can compare with data)
-ncells <- filter(pred_grid2, year == max(pred_grid2$year)) %>% nrow()
+## Compare average in data with get index function
 
-# Total prediction 
-preds_cod_ave <- predict(m, newdata = pred_grid2, return_tmb_object = TRUE, area = 1/ncells)
+```{r plot indices, message=FALSE, cache=TRUE}
+# # Comparing to average cpue in data
+# d_sum <- d %>% 
+#   ungroup() %>% 
+#   group_by(year) %>%
+#   summarise(mean_density = mean(density),
+#             tot_density = sum(density))
+# 
+# index_ave %>%
+#   ggplot(., aes(year, est)) +
+#   geom_line() + 
+#   geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.4) +
+#   theme(axis.text.x = element_text(angle = 30),
+#         legend.position = c(0.8, 0.8)) +
+#   scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+#   labs(x = "Year", y = expression(paste("Density [kg/", km^2, "]", sep = ""))) +
+#   NULL
+# 
+# # E-mail method from Sean - results in the same estimated average... 
+# # ... and both are comparable to the average cpue in the data
+# get_average_log_density <- function(obj, level = 0.95, ...)  {
+#   sdmTMB:::get_generic(obj, value_name = "link_total",
+#     bias_correct = FALSE, level = level, trans = I, ...)
+# }
+# 
+# avg <- get_average_log_density(preds_cod_ave)
+# 
+# d_sum <- d %>%
+#   ungroup() %>%
+#   group_by(year) %>%
+#   summarise(mean_density = mean(density))
+# 
+# avg %>%
+#   ggplot(., aes(year, exp(est))) +
+#   geom_line() +
+#   geom_ribbon(aes(ymin = exp(lwr), ymax = exp(upr)), alpha = 0.4) +
+#   geom_point(data = d_sum, aes(year, mean_density)) +
+#   geom_line(data = d_sum, aes(year, mean_density), linetype = 2) +
+#   labs(x = "Year", y = expression(paste("Density [kg/", km^2, "]", sep = ""))) +
+#   geom_point(data = index_ave, aes(year, est), color = "red", inherit.aes = FALSE) + # The get_index method
+#   NULL
+```
 
+## Annual indices using `get_index_sims` method to avoid slow bias correction (not done above!)
+
+```{r pred cod sim, cache=TRUE}
+# preds_cod_sim <- predict(m, newdata = pred_grid, sims = 100)
+# x <- get_index_sims(preds_cod_ave_sim, area = rep(2*2, nrow(preds_cod_ave_sim)))
+# 
+# ggplot(x, aes(year, est/1000, ymin = lwr/1000, ymax = upr/1000)) +
+#     geom_line() +
+#     geom_ribbon(alpha = 0.4)
+# x_sims <- get_index_sims(preds_cod_ave_sim, return_sims = TRUE)
+# ggplot(x_sims, aes(as.factor(year), log(.value))) +
+#     geom_violin()
+
+###
 # Now get the total index by specifying the area of a grid cell
 # Total prediction 
-preds_cod <- predict(m, newdata = pred_grid2, return_tmb_object = TRUE, area = 2*2)
+preds_cod_sim <- predict(m, newdata = pred_grid, sims = 100)
 
 # Total prediction (omitting SD 24!)
-preds_cod25_28 <- predict(m, newdata = filter(pred_grid2, !SubDiv == 24),
-                          return_tmb_object = TRUE, area = 2*2)
+preds_cod25_28_sim <- predict(m, newdata = filter(pred_grid, !sub_div == 24), sims = 100)
 
 # SD 24-25
-preds_cod24_25 <- predict(m, newdata = filter(pred_grid2, SubDiv %in% c(24, 25)),
-                          return_tmb_object = TRUE, area = 2*2)
+preds_cod24_25_sim <- predict(m, newdata = filter(pred_grid, sub_div %in% c(24, 25)), sims = 100)
 
 # SD 24
-preds_cod24 <- predict(m, newdata = filter(pred_grid2, SubDiv == 24),
-                       return_tmb_object = TRUE, area = 2*2)
+preds_cod24_sim <- predict(m, newdata = filter(pred_grid, sub_div == 24), sims = 100)
 
 # SD 25
-preds_cod25 <- predict(m, newdata = filter(pred_grid2, SubDiv == 25),
-                       return_tmb_object = TRUE, area = 2*2)
+preds_cod25_sim <- predict(m, newdata = filter(pred_grid, sub_div == 25), sims = 100)
 
 # SD 26
-preds_cod26 <- predict(m, newdata = filter(pred_grid2, SubDiv == 26),
-                       return_tmb_object = TRUE, area = 2*2)
+preds_cod26_sim <- predict(m, newdata = filter(pred_grid, sub_div == 26), sims = 100)
 
 # SD 27
-preds_cod27 <- predict(m, newdata = filter(pred_grid2, SubDiv == 27),
-                       return_tmb_object = TRUE, area = 2*2)
+preds_cod27_sim <- predict(m, newdata = filter(pred_grid, sub_div == 27), sims = 100)
 
 # SD 28
-preds_cod28 <- predict(m, newdata = filter(pred_grid2, SubDiv == 28),
-                       return_tmb_object = TRUE, area = 2*2)
+preds_cod28_sim <- predict(m, newdata = filter(pred_grid, sub_div == 28), sims = 100)
 
 # Now calculate the CPUE index (average)
-index_ave <- get_index(preds_cod_ave, bias_correct = FALSE)
-index <- get_index(preds_cod, bias_correct = FALSE)
-index24_25 <- get_index(preds_cod24_25, bias_correct = FALSE)
-index25_28 <- get_index(preds_cod25_28, bias_correct = FALSE)
-index24 <- get_index(preds_cod24, bias_correct = FALSE)
-index25 <- get_index(preds_cod25, bias_correct = FALSE)
-index26 <- get_index(preds_cod26, bias_correct = FALSE)
-index27 <- get_index(preds_cod27, bias_correct = FALSE)
-index28 <- get_index(preds_cod28, bias_correct = FALSE)
+index_sim <- get_index_sims(preds_cod_sim, area = rep(2*2, nrow(preds_cod_sim)))
+index24_25_sim <- get_index_sims(preds_cod24_25_sim, area = rep(2*2, nrow(preds_cod24_25_sim)))
+index25_28_sim <- get_index_sims(preds_cod25_28_sim, area = rep(2*2, nrow(preds_cod25_28_sim)))
+index24_sim <- get_index_sims(preds_cod24_sim, area = rep(2*2, nrow(preds_cod24_sim)))
+index25_sim <- get_index_sims(preds_cod25_sim, area = rep(2*2, nrow(preds_cod25_sim)))
+index26_sim <- get_index_sims(preds_cod26_sim, area = rep(2*2, nrow(preds_cod26_sim)))
+index27_sim <- get_index_sims(preds_cod27_sim, area = rep(2*2, nrow(preds_cod27_sim)))
+index28_sim <- get_index_sims(preds_cod28_sim, area = rep(2*2, nrow(preds_cod28_sim)))
+
+# Join indices
+index_sim <- index_sim %>% mutate(sub_div = "Total")
+index24_sim <- index24_sim %>% mutate(sub_div = "24")
+index25_sim <- index25_sim %>% mutate(sub_div = "25")
+index26_sim <- index26_sim %>% mutate(sub_div = "26")
+index27_sim <- index27_sim %>% mutate(sub_div = "27")
+index28_sim <- index28_sim %>% mutate(sub_div = "28")
+
+div_index_sim <- bind_rows(index_sim, index24_sim, index25_sim, index26_sim, index27_sim, index28_sim)
 ```
 
-## Now plot them
-
-```{r plot indices, message=FALSE}
-# Comparing to average cpue in data
-d_sum <- d %>% 
-  ungroup() %>% 
-  group_by(year) %>%
-  summarise(mean_density = mean(density),
-            tot_density = sum(density))
-
-index_ave %>%
-  ggplot(., aes(year, est)) +
-  geom_line() + 
-  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.4) +
-  theme(axis.text.x = element_text(angle = 30),
-        legend.position = c(0.8, 0.8)) +
-  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
-  labs(x = "Year", y = expression(paste("Density [kg/", km^2, "]", sep = ""))) +
-  NULL
-
-# E-mail method from Sean - results in the same estimated average... 
-# ... and both are comparable to the average cpue in the data
-get_average_log_density <- function(obj, level = 0.95, ...)  {
-  sdmTMB:::get_generic(obj, value_name = "link_total",
-    bias_correct = FALSE, level = level, trans = I, ...)
-}
-
-avg <- get_average_log_density(preds_cod_ave)
-
-d_sum <- d %>%
-  ungroup() %>%
-  group_by(year) %>%
-  summarise(mean_density = mean(density))
-
-avg %>%
-  ggplot(., aes(year, exp(est))) +
-  geom_line() +
-  geom_ribbon(aes(ymin = exp(lwr), ymax = exp(upr)), alpha = 0.4) +
-  geom_point(data = d_sum, aes(year, mean_density)) +
-  geom_line(data = d_sum, aes(year, mean_density), linetype = 2) +
-  labs(x = "Year", y = expression(paste("Density [kg/", km^2, "]", sep = ""))) +
-  geom_point(data = index_ave, aes(year, est), color = "red", inherit.aes = FALSE) + # The get_index method
-  NULL
-
-# By sub divisions
-index <- index %>% mutate(SubDiv = 1)
-index24 <- index24 %>% mutate(SubDiv = 24)
-index25 <- index25 %>% mutate(SubDiv = 25)
-index26 <- index26 %>% mutate(SubDiv = 26)
-index27 <- index27 %>% mutate(SubDiv = 27)
-index28 <- index28 %>% mutate(SubDiv = 28)
-
-div_index <- bind_rows(index, index24, index25, index26, index27, index28)
-
-ggplot(div_index, aes(year, est/1000, color = factor(SubDiv))) +
-  geom_line() + 
-  scale_color_brewer(palette = "Dark2") +
-  theme(axis.text.x = element_text(angle = 30)) +
-  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
-  labs(x = "Year", y = "Tonnes") +
-  NULL
-
-ggsave("figures/supp/density/density_sd.png", width = 6.5, height = 6.5, dpi = 600)
-
-```
-
-## Make a combined plot with biomass index and predictions on map for two years
+## Combined plot with biomass index by sd, total and predictions on map for two years
 
 ```{r make cpue index and cpue pred on map figure, message=FALSE}
-index24_25 <- index24_25 %>% mutate(SubDiv = "24-25", est_t = est/1000, lwr_t = lwr/1000, upr_t = upr/1000) 
-index25_28 <- index25_28 %>% mutate(SubDiv = "25-28", est_t = est/1000, lwr_t = lwr/1000, upr_t = upr/1000)
+div_index_sim <- div_index_sim %>% mutate(est_t = est/1000, lwr_t = lwr/1000, upr_t = upr/1000) 
 
-ind_plot <- 
+ind_plot_sd <- 
   ggplot() +
-  geom_line(data = index24_25, aes(year, est_t, color = "red")) + # 24-25
-  geom_ribbon(data = index24_25, aes(year, ymin = lwr_t, ymax = upr_t, fill = "red"), alpha = 0.4) + # 24-25
-  geom_line(data = index25_28, aes(year, est_t, color = "blue")) + # 25-28
-  geom_ribbon(data = index25_28, aes(year, ymin = lwr_t, ymax = upr_t, fill = "blue"), alpha = 0.4) + # 25-28
   scale_x_continuous(breaks = scales::pretty_breaks(n = 20)) +
+  geom_line(data = filter(div_index_sim, !sub_div == "Total"), aes(year, est_t, color = sub_div)) + 
+  geom_ribbon(data = filter(div_index_sim, !sub_div == "Total"), aes(year, ymin = lwr_t, ymax = upr_t, fill = sub_div), alpha = 0.2) +
   scale_color_brewer(palette = "Dark2") +
-  scale_fill_brewer(palette = "Dark2", labels = c("24-25", "25-28")) +
+  scale_fill_brewer(palette = "Dark2", name = "ICES\nSub division") +
   guides(color = FALSE) + 
   labs(x = "Year", y = "Tonnes", fill = "Sub Divisions") +
   theme_light(base_size = 11) +
   theme(axis.text.x = element_text(angle = 30),
-        legend.position = c(0.8, 0.8),
-        legend.background = element_blank()) +
+        #legend.position = c(0.9, 0.83),
+        legend.background = element_blank(),
+        plot.margin = unit(c(0, 0, 0, 0), "cm")) +
   NULL
 
-xmin <- 303379.1; xmax <- 958492.4; xrange <- xmax - xmin
-ymin <- 5983578; ymax <- 6450163; yrange <- ymax - ymin
+ind_plot_tot <- 
+  ggplot() +
+  geom_line(data = filter(div_index_sim, sub_div == "Total"),
+            aes(year, est_t)) +
+  geom_ribbon(data = filter(div_index_sim, sub_div == "Total"),
+              aes(year, ymin = lwr_t, ymax = upr_t, fill = "Total"), alpha = 0.4) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 20)) +
+  scale_fill_manual(values = "grey40") + 
+  labs(x = "Year", y = "Tonnes", fill = "") +
+  theme_light(base_size = 11) +
+  theme(axis.text.x = element_text(angle = 30),
+        #legend.position = c(0.9, 0.83),
+        legend.background = element_blank(),
+        plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+  NULL
 
-cpue_map_94_17 <- ggplot(swe_coast_proj) +
+cpue_map_94_17 <- plot_map_raster_labels +
   geom_raster(data = filter(predict_mcod, year %in% c("1995", "2017")), aes(x = X * 1000, y = Y * 1000, fill = exp(est))) +
-  geom_sf() +
   scale_fill_viridis_c(trans = "sqrt") +
   facet_wrap(~ year, ncol = 2) +
-  labs(x = "Longitude", y = "Latitude", fill = expression(kg/km^2)) +
-  theme_facet_map() +
-  theme(axis.text.x = element_text(angle = 0)) +
-  annotate("text", label = "Sweden", x = xmin + 0.25*xrange, y = ymin + 0.8*yrange, color = "black", size = 1.7) +
-  annotate("text", label = "Denmark", x = xmin + 0.029*xrange, y = ymin + 0.43*yrange, color = "black", size = 1.7, angle = 75) +
-  annotate("text", label = "Germany", x = xmin + 0.07*xrange, y = ymin + 0.03*yrange, color = "black", size = 1.7) +
-  annotate("text", label = "Poland", x = xmin + 0.55*xrange, y = ymin + 0.1*yrange, color = "black", size = 1.7) +
-  annotate("text", label = "Russia", x = xmin + 0.9*xrange, y = ymin + 0.2*yrange, color = "black", size = 1.7) +
-  annotate("text", label = "Lithuania", x = xmin + 0.93*xrange, y = ymin + 0.47*yrange, color = "black", size = 1.7, angle = 90) +
-  annotate("text", label = "Latvia", x = xmin + 0.9*xrange, y = ymin + 0.68*yrange, color = "black", size = 1.7, angle = 90)
+  labs(fill = expression(kg/km^2)) +
+  theme_plot() +
+  theme(plot.margin = unit(c(0, 0, 0, 0), "cm")) + 
+  geom_sf() +
+  NULL
 
-ind_plot / cpue_map_94_17 + plot_layout(heights = c(2, 1)) + plot_annotation(tag_levels = 'A')
+(ind_plot_sd / ind_plot_tot) / cpue_map_94_17 + plot_annotation(tag_levels = 'A')
 
 ggsave("figures/density.png", width = 6.5, height = 6.5, dpi = 600)
 ```
 
-## Make a combined plot with biomass-weighted average depth, oxygen and temp in relation to the environment
+## Calculate biomass weighted-overlap index with saduria and sprat
 
-```{r combined plot weighted means, message=FALSE}
+```{r biomass-weighted overlap plots, message=FALSE}
+# Calculate biomass-weighted overlap of cod and saduria
+predict_mcod_sad <- predict_mcod %>% 
+  filter(!sub_div == 24) %>% # Filter sub division 24 where there are no saduria anyway...
+  mutate(est_kg_km = exp(est)) %>% # est is response scale not link, saduria is unit g/m2
+  drop_na(est_kg_km) %>% 
+  drop_na(density_saduria) %>% 
+  group_by(year) %>% 
+  mutate(numerator = (est_kg_km / max(est_kg_km)) * (density_saduria / max(density_saduria)),
+         denominator = density_saduria / max(density_saduria)) %>% 
+  summarise(sum_num = sum(numerator),
+            sum_den = sum(denominator),
+            BWOI = sum_num / sum_den) %>% # max is here within a year)
+  ungroup()
+
+sad_plot <- ggplot(predict_mcod_sad) +
+  geom_point(aes(year, BWOI), size = 1.3, color = "gray30") +
+  stat_smooth(aes(year, BWOI), method = "gam", formula = y ~ s(x, k = 3),
+              color = "tomato") +
+  theme_plot() +
+  labs(x = "Year") +
+  labs(y = "Saduria overlap index") + 
+  theme(plot.margin = unit(c(0.2, 0.2, 0.2, 0.2), "cm"),
+        axis.text.x = element_text(angle = 0)) +
+  NULL
+
+sad_plot
+
+# Calculate biomass-weighted overlap index (across year and ices rectangle)
+predict_mcod_rec <- predict_mcod %>% 
+  drop_na(biomass_spr) %>% 
+  group_by(year) %>% 
+  mutate(numerator = (est / max(est)) * (biomass_spr / max(biomass_spr)),
+         denominator = (biomass_spr / max(biomass_spr))) %>% 
+  summarise(sum_num = sum(numerator),
+            sum_den = sum(denominator),
+            BWOI = sum_num / sum_den) %>% # max is here within a year)
+  ungroup() %>% 
+  dplyr::select(year, BWOI) %>% 
+  mutate(Scale = "ICES Rectangle")
+
+# Calculate biomass-weighted overlap index (across year and ices sub division)
+predict_mcod_sd <- predict_mcod %>% 
+  drop_na(biomass_spr) %>% 
+  group_by(year) %>% 
+  mutate(numerator = (est / max(est)) * (biomass_spr_sd / max(biomass_spr_sd)),
+         denominator = (biomass_spr_sd / max(biomass_spr_sd))) %>% 
+  summarise(sum_num = sum(numerator),
+            sum_den = sum(denominator),
+            BWOI = sum_num / sum_den) %>% # max is here within a year)
+  ungroup() %>% 
+  dplyr::select(year, BWOI) %>% 
+  mutate(Scale = "ICES Sub division")
+
+overlap_sprat <- bind_rows(predict_mcod_rec, predict_mcod_sd)
+
+pal <- brewer.pal(n = 8, name = "Dark2")[c(6,8)]
+
+spr_plot <- ggplot(overlap_sprat, aes(year, BWOI, color = Scale, fill = Scale)) + 
+  geom_point(size = 1.3) +
+  scale_color_manual(values = pal) +
+  scale_fill_manual(values = pal) +
+  stat_smooth(method = "gam", formula = y ~ s(x, k = 3)) +
+  theme_plot() +
+  labs(y = "Sprat overlap index", x = "Year") + 
+  theme(plot.margin = unit(c(0.2, 0.2, 0.2, 0.2), "cm"),
+        axis.text.x = element_text(angle = 0))
+  
+spr_plot
+
 # Plot bathymetry
-bathy_plot <- ggplot(swe_coast_proj) + 
-  geom_raster(data = filter(preds_cod$data, year == "1999"), aes(x = X * 1000, y = Y * 1000, fill = depth)) +
-  geom_sf(size = 0.5) +
+bathy_plot <- plot_map_raster_labels +
+  geom_raster(data = filter(predict_mcod, year == "1999"), aes(x = X * 1000, y = Y * 1000, fill = depth)) +
   scale_fill_distiller(palette = "Blues", direction = 1) +
-  labs(x = "Longitude", y = "Latitude", fill = "Depth") +
-  theme_weighted_plot() +
+  labs(fill = "Depth") +
+  theme_plot() +
+  theme(legend.position = "bottom",
+        plot.margin = unit(c(0.2, 0.2, 0.2, 0.2), "cm")) +
+  geom_sf() +
   NULL
   
-# Plot oxygen in 1999
-oxy_plot <- ggplot(swe_coast_proj) + 
-  geom_raster(data = filter(preds_cod$data, year == "1999"), aes(x = X * 1000, y = Y * 1000, fill = oxy)) +
-  geom_sf(size = 0.5) +
-  scale_fill_viridis() +
-  labs(x = "Longitude", y = "Latitude", fill = expression(paste("O" [2], " [ml/L]", sep = ""))) +
-  theme_weighted_plot() +
-  NULL
+# Now calculate deciles of the biomass-weighted values
+pal <- c(rev(brewer.pal(n = 8, name = "Dark2")), "gray20")
 
-# Plot temperature in 1999
-temp_plot <- ggplot(swe_coast_proj) + 
-  geom_raster(data = filter(preds_cod$data, year == "1999"), aes(x = X * 1000, y = Y * 1000, fill = temp)) +
-  geom_sf(size = 0.5) +
-  scale_fill_viridis(option = "inferno", direction = -1) +
-  labs(x = "Longitude", y = "Latitude", fill = "Temperature [°C]") +
-  theme_weighted_plot() +
-  NULL
-  
-# Now calculate quantiles of the biomass-weighted values
-# Depth
-# Weighted total
-# First define a palette that works..
-# scales::show_col(viridis_pal(option = "magma")(10))
-# viridis(option = "magma", n = 10)
-# 
-# pal <- c("#721F81FF", "#CD4071FF", "#FEC98DFF", "gray50")
-
-pal <- c(brewer.pal(n = 3, name = "Set2"), "gray20")
-pal <- brewer.pal(n = 4, name = "Dark2")
-
-wm_depth <- preds_cod$data %>%
+wm_depth <- predict_mcod %>%
   group_by(year) %>%
-  summarise(#depth_wm = weighted.mean(depth, exp(est)), # This is the mean
-            "Density-weighted (5th decile, median)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.5)),
+  summarise("Density-weighted (5th decile, median)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.5)),
             "Density-weighted (1st decile)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.1)),
             "Density-weighted (9th decile)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.9))) %>% 
   pivot_longer(cols = c("Density-weighted (5th decile, median)", "Density-weighted (1st decile)", "Density-weighted (9th decile)"),
                names_to = "series", values_to = "depth") %>% 
-  group_by(series) %>%  # standarize within for easy plotting
+  group_by(series) %>%  # standardize within for easy plotting
   mutate(depth_ct = depth - mean(depth)) %>% 
   ungroup()
   
 plot_w_dep <- ggplot(wm_depth, aes(year, depth, color = series, group = series, fill = series)) +
-  #geom_smooth(method = "gam", formula = y ~ s(x, k = 4), color = NA, alpha = 0.2) +
   stat_smooth(method = "gam", formula = y ~ s(x, k = 4), se = FALSE, size = 1) +
   geom_point(size = 1.5, alpha = 0.8, color = "white", shape = 21) +
   scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
@@ -475,14 +596,25 @@ plot_w_dep <- ggplot(wm_depth, aes(year, depth, color = series, group = series, 
   scale_fill_manual(values = pal) +
   guides(fill = FALSE, color = guide_legend(nrow = 4)) +
   labs(y = "Depth [m]", x = "Year", color = "") +
-  theme_weighted_plot() +
+  scale_y_reverse() + 
+  theme_plot() +
+  theme(legend.position = "bottom",
+        plot.margin = unit(c(0.2, 0.2, 0.2, 0.2), "cm")) +
   NULL
 
-# For the next two plots we want to calculate the average in the prediction grid every year 
-# to track the change in the environment and contrast that to the biomass-weighted change
+# Plot oxygen in 1999
+oxy_plot <- plot_map_raster_labels +
+  geom_raster(data = filter(predict_mcod, year == "1999"), aes(x = X * 1000, y = Y * 1000, fill = oxy)) +
+  scale_fill_viridis() +
+  labs(fill = expression(paste("O" [2], " [ml/L]", sep = ""))) +
+  theme_plot() +
+  theme(legend.position = "bottom",
+        plot.margin = unit(c(0.2, 0.2, 0.2, 0.2), "cm")) +
+  geom_sf() +
+  NULL
 
 # Plot biomass-weighted oxygen
-annual_oxy <- pred_grid2 %>%
+annual_oxy <- pred_grid %>%
   drop_na(oxy) %>%
   group_by(year) %>%
   summarize(mean_oxy = mean(oxy)) %>%
@@ -492,16 +624,15 @@ annual_oxy <- pred_grid2 %>%
          oxy_ct = oxy - mean(oxy))
   
 # Weighted total
-wm_oxy <- preds_cod$data %>%
+wm_oxy <- predict_mcod %>%
   group_by(year) %>%
-  summarise(#oxy_wm = weighted.mean(oxy, exp(est)), # This is the mean
-            "Density-weighted (5th decile, median)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.5)),
-            "Density-weighted (1st decile)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.1)),
-            "Density-weighted (9th decile)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.9))) %>% 
+  summarise("Density-weighted (5th decile, median)" = hutils::weighted_quantile(v = oxy, w = exp(est), p = c(0.5)),
+            "Density-weighted (1st decile)" = hutils::weighted_quantile(v = oxy, w = exp(est), p = c(0.1)),
+            "Density-weighted (9th decile)" = hutils::weighted_quantile(v = oxy, w = exp(est), p = c(0.9))) %>% 
   pivot_longer(cols = c("Density-weighted (5th decile, median)", "Density-weighted (1st decile)", "Density-weighted (9th decile)"),
                names_to = "series", values_to = "oxy") %>% 
   ungroup() %>% 
-  group_by(series) %>%  # standarize within for easy plotting
+  group_by(series) %>% # standardize within for easy plotting
   mutate(oxy_ct = oxy - mean(oxy)) %>%
   ungroup()
 
@@ -509,7 +640,6 @@ oxygen_series <- bind_rows(wm_oxy, annual_oxy)
 
 plot_w_oxy <-
 ggplot(oxygen_series, aes(year, oxy, color = series, group = series, fill = series, linetype = series)) +
-  #geom_smooth(method = "gam", formula = y ~ s(x, k = 4), color = NA, alpha = 0.2) +
   stat_smooth(method = "gam", formula = y ~ s(x, k = 4), se = FALSE, size = 1) +
   geom_point(size = 1.5, alpha = 0.8, color = "white", shape = 21) +
   scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
@@ -519,59 +649,73 @@ ggplot(oxygen_series, aes(year, oxy, color = series, group = series, fill = seri
   guides(fill = FALSE, linetype = FALSE, color = guide_legend(nrow = 4)) +
   labs(y = expression(paste("O" [2], " [ml/L]", sep = "")), x = "Year",
        color = "") +
-  theme_weighted_plot() +
+  theme_plot() +
+  theme(legend.position = "bottom",
+        plot.margin = unit(c(0.2, 0.2, 0.2, 0.2), "cm")) +
   NULL
 
-# Plot biomass-weighted temperature
-annual_temp <- pred_grid2 %>%
-  drop_na(temp) %>%
-  group_by(year) %>%
-  summarize(mean_temp = mean(temp)) %>%
-  ungroup() %>% 
-  rename("temp" = "mean_temp") %>% 
-  mutate(series = "Mean in environment",
-         temp_ct = temp - mean(temp))
-  
-# Weighted total
-wm_temp <- preds_cod$data %>%
-  group_by(year) %>%
-  summarise(#temp_wm = weighted.mean(temp, exp(est)), # This is the mean
-            "Density-weighted (5th decile, median)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.5)),
-            "Density-weighted (1st decile)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.1)),
-            "Density-weighted (9th decile)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.9))) %>% 
-  pivot_longer(cols = c("Density-weighted (5th decile, median)", "Density-weighted (1st decile)", "Density-weighted (9th decile)"),
-               names_to = "series", values_to = "temp") %>% 
-  ungroup() %>% 
-  group_by(series) %>%  # standarize within for easy plotting
-  mutate(temp_ct = temp - mean(temp)) %>%
-  ungroup()
+(bathy_plot | plot_w_dep) / (oxy_plot | plot_w_oxy) / (sad_plot | spr_plot) +
+  plot_annotation(tag_levels = 'A')
 
-temp_series <- bind_rows(wm_temp, annual_temp)
+ggsave("figures/density_weighted_dep_oxy_sad_spr2.png", width = 6.5, height = 8.5, dpi = 600)
+```
 
-plot_w_temp <-
-ggplot(temp_series, aes(year, temp, color = series, group = series, fill = series, linetype = series)) +
-  #geom_smooth(method = "gam", formula = y ~ s(x, k = 4), color = NA, alpha = 0.2) +
-  stat_smooth(method = "gam", formula = y ~ s(x, k = 4), se = FALSE, size = 1) +
-  geom_point(size = 1.5, alpha = 0.8, color = "white", shape = 21) +
-  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
-  scale_linetype_manual(values = c(1,1,1,2)) +
-  scale_color_manual(values = pal) +
-  scale_fill_manual(values = pal) +
-  guides(fill = FALSE, linetype = FALSE, color = guide_legend(nrow = 4)) +
-  labs(y = "Temperature [°C]", x = "Year",
-       color = "") +
-  theme_weighted_plot() +
-  NULL
+### Plot biomass-weighted temperature
 
-bathy_plot + plot_w_dep + oxy_plot + plot_w_oxy +
-  plot_annotation(tag_levels = 'A') + plot_layout(ncol = 2) + 
-
-ggsave("figures/density_weighted_dep_pxy.png", width = 6.5, height = 8.5, dpi = 600)
-
-temp_plot + plot_w_temp +
-  plot_annotation(tag_levels = 'A') + plot_layout(ncol = 2) + 
-
-  ggsave("figures/supp/density/weighted_temp.png", width = 6.5, height = 8.5, dpi = 600)
+```{r biomass-weighted temperature, message=FALSE}
+# # Plot temperature in 1999
+# temp_plot <- plot_map_raster +
+#   geom_raster(data = filter(preds_cod$data, year == "1999"), aes(x = X * 1000, y = Y * 1000, fill = temp)) +
+#   scale_fill_viridis(option = "inferno", direction = -1) +
+#   labs(fill = "Temperature [°C]") +
+#   theme_plot() +
+#   theme(legend.position = "bottom",
+#         plot.margin = unit(c(0, 0.1, 0, 0.2), "cm")) +
+#   geom_sf() +
+#   NULL
+#   
+# annual_temp <- pred_grid %>%
+#   drop_na(temp) %>%
+#   group_by(year) %>%
+#   summarize(mean_temp = mean(temp)) %>%
+#   ungroup() %>% 
+#   rename("temp" = "mean_temp") %>% 
+#   mutate(series = "Mean in environment",
+#          temp_ct = temp - mean(temp))
+#   
+# # Weighted total
+# wm_temp <- preds_cod$data %>%
+#   group_by(year) %>%
+#   summarise("Density-weighted (5th decile, median)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.5)),
+#             "Density-weighted (1st decile)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.1)),
+#             "Density-weighted (9th decile)" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.9))) %>% 
+#   pivot_longer(cols = c("Density-weighted (5th decile, median)", "Density-weighted (1st decile)", "Density-weighted (9th decile)"),
+#                names_to = "series", values_to = "temp") %>% 
+#   ungroup() %>% 
+#   group_by(series) %>%  # standardize within for easy plotting
+#   mutate(temp_ct = temp - mean(temp)) %>%
+#   ungroup()
+# 
+# temp_series <- bind_rows(wm_temp, annual_temp)
+# 
+# plot_w_temp <-
+#   ggplot(temp_series, aes(year, temp, color = series, group = series, fill = series, linetype = series)) +
+#   stat_smooth(method = "gam", formula = y ~ s(x, k = 4), se = FALSE, size = 1) +
+#   geom_point(size = 1.5, alpha = 0.8, color = "white", shape = 21) +
+#   scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+#   scale_linetype_manual(values = c(1,1,1,2)) +
+#   scale_color_manual(values = pal) +
+#   scale_fill_manual(values = pal) +
+#   guides(fill = FALSE, linetype = FALSE, color = guide_legend(nrow = 4)) +
+#   labs(y = "Temperature [°C]", x = "Year",
+#        color = "") +
+#   theme_plot() +
+#   theme(plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+#   NULL
+# temp_plot + plot_w_temp +
+#   plot_annotation(tag_levels = 'A') + plot_layout(ncol = 2) + 
+# 
+# ggsave("figures/supp/density/weighted_temp.png", width = 6.5, height = 8.5, dpi = 600)
 ```
 
 ## Marginal effect of oxygen
@@ -590,10 +734,13 @@ nd_oxy <- nd_oxy %>%
 # Predict
 p_margin_oxy <- predict(m, newdata = nd_oxy, se_fit = TRUE, re_form = NA)
 
-ggplot(p_margin_oxy, aes(oxy, exp(est),
+mar_oxy <- ggplot(p_margin_oxy, aes(oxy, exp(est),
   ymin = exp(est) - 1.96 * exp(est_se), ymax = exp(est) + 1.96 * exp(est_se))) +
   geom_line() +
-  geom_ribbon(alpha = 0.4)
+  geom_ribbon(alpha = 0.4) +
+  coord_cartesian(ylim = c(30, 220)) +
+  theme(aspect.ratio = 1) +
+  labs(x = expression(Oxygen[haul]))
 ```
 
 ## Marginal effect of depth
@@ -611,10 +758,13 @@ nd_dep <- nd_dep %>%
 # Predict
 p_margin_dep <- predict(m, newdata = nd_dep, se_fit = TRUE, re_form = NA)
 
-ggplot(p_margin_dep, aes(depth, exp(est),
+mar_depth <- ggplot(p_margin_dep, aes(depth, exp(est),
   ymin = exp(est) - 1.96 * exp(est_se), ymax = exp(est) + 1.96 * exp(est_se))) +
   geom_line() +
-  geom_ribbon(alpha = 0.4)
+  geom_ribbon(alpha = 0.4) +
+  coord_cartesian(ylim = c(30, 220)) +
+  theme(aspect.ratio = 1) +
+  labs(x = expression(Depth[haul]))
 ```
 
 ## Marginal effect of temperature
@@ -632,231 +782,24 @@ nd_temp <- nd_temp %>%
 # Predict
 p_margin_temp <- predict(m, newdata = nd_temp, se_fit = TRUE, re_form = NA)
 
-ggplot(p_margin_temp, aes(temp, exp(est),
+mar_temp <- ggplot(p_margin_temp, aes(temp, exp(est),
   ymin = exp(est) - 1.96 * exp(est_se), ymax = exp(est) + 1.96 * exp(est_se))) +
   geom_line() +
-  geom_ribbon(alpha = 0.4)
+  geom_ribbon(alpha = 0.4) +
+  coord_cartesian(ylim = c(30, 220)) +
+  theme(aspect.ratio = 1) +
+  labs(x = expression(Temp[haul]))
 ```
 
+### Plot together
+
+```{r}
+mar_temp + mar_depth + mar_oxy +
+  plot_annotation(tag_levels = 'A') 
+
+ggsave("figures/supp/density/marginal_effects.png", width = 6.5, height = 6.5, dpi = 600)
+```
 
 ```{r}
 knitr::knit_exit()
 ```
-
-## Now calculate the average cod density by sub-divisions and year, and compare that to the pelagic density
-
-```{r calculate cod-pelagics ratio}
-# Read the condition data which has the pelagics abundances
-# cond <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cond.csv")
-# 
-# # Add in ICES rectangle information
-# cond$ices_rect <- ices.rect2(lon = cond$lon, lat = cond$lat)
-# predcod$ices_rect <- ices.rect2(lon = predcod$lon, lat = predcod$lat) # predcod is predicted cod cpue across grid
-# 
-# # Add in ICES sub-division information
-# cond <- cond %>% 
-#   mutate(SubDiv = NA) %>% 
-#   mutate(SubDiv = ifelse(ices_rect %in% c("37G0", "37G1",
-#                                           "38G0", "38G1", 
-#                                           "39F9", "39G0", "39G1",
-#                                           "40F9", "40G0", "40G1"), "22", SubDiv)) %>% 
-#   mutate(SubDiv = ifelse(ices_rect == "40G2", "23", SubDiv)) %>% 
-#   mutate(SubDiv = ifelse(ices_rect %in% c("37G2", "37G3", "37G4",
-#                                           "38G1", "38G2", "38G3", "38G4", 
-#                                           "39G1", "39G2", "39G3", "39G4",
-#                                           "40G1"), "24", SubDiv)) %>% 
-#   mutate(SubDiv = ifelse(ices_rect %in% c("40G4",
-#                                           "37G5", "37G6", "37G7",
-#                                           "38G5", "38G6", "38G7",
-#                                           "39G5", "39G6", "39G7",
-#                                           "40G5", "40G6", "40G7",
-#                                           "41G5", "41G6", "41G7"), "25", SubDiv)) %>% 
-#   mutate(SubDiv = ifelse(ices_rect %in% c("37G8", "37G9", "37H0",
-#                                           "38G8", "38G9", "38H0",
-#                                           "39G8", "39G9", "39H0",
-#                                           "40G8", "40G9", "40H0",
-#                                           "41G8", "41G9", "41H0"), "26", SubDiv)) %>% 
-#   mutate(SubDiv = ifelse(ices_rect %in% c("42G6", "42G7",
-#                                           "43G6", "43G7",
-#                                           "44G6", "44G7", "44G8"), "27", SubDiv)) %>% 
-#   mutate(SubDiv = ifelse(ices_rect %in% c("42G8", "42G9", "42H0", "42H1", "42H2",
-#                                           "43G8", "43G9", "43H0", "43H1", "43H2",
-#                                           "44G8", "44G9", "44H0", "44H1", "44H2"), "28", SubDiv)) %>%
-#   mutate(SubDiv = ifelse(lat > 58.5 & lon > 19, "29", SubDiv)) %>%
-#   mutate(SubDiv = ifelse(lat > 57 & lat < 58.5 & lon > 19 & lon < 22, "28", SubDiv)) %>%
-#   mutate(SubDiv = ifelse(lat > 57 & lat < 58.5 & lon > 18 & lon < 22, "28", SubDiv)) %>%
-#   mutate(SubDiv = ifelse(lat > 57 & lat < 60 & lon > 16 & lon < 18, "27", SubDiv)) %>%
-#   mutate(SubDiv = ifelse(lat > 55.5 & lat < 56.5 & lon > 14 & lon < 16, "25", SubDiv))
-# 
-# # Now for predicted CPUE
-# predcod <- predcod %>% 
-#   mutate(SubDiv = NA) %>% 
-#   mutate(SubDiv = ifelse(ices_rect %in% c("37G0", "37G1",
-#                                           "38G0", "38G1", 
-#                                           "39F9", "39G0", "39G1",
-#                                           "40F9", "40G0", "40G1"), "22", SubDiv)) %>% 
-#   mutate(SubDiv = ifelse(ices_rect == "40G2", "23", SubDiv)) %>% 
-#   mutate(SubDiv = ifelse(ices_rect %in% c("37G2", "37G3", "37G4",
-#                                           "38G1", "38G2", "38G3", "38G4", 
-#                                           "39G1", "39G2", "39G3", "39G4",
-#                                           "40G1"), "24", SubDiv)) %>% 
-#   mutate(SubDiv = ifelse(ices_rect %in% c("40G4",
-#                                           "37G5", "37G6", "37G7",
-#                                           "38G5", "38G6", "38G7",
-#                                           "39G5", "39G6", "39G7",
-#                                           "40G5", "40G6", "40G7",
-#                                           "41G5", "41G6", "41G7"), "25", SubDiv)) %>% 
-#   mutate(SubDiv = ifelse(ices_rect %in% c("37G8", "37G9", "37H0",
-#                                           "38G8", "38G9", "38H0",
-#                                           "39G8", "39G9", "39H0",
-#                                           "40G8", "40G9", "40H0",
-#                                           "41G8", "41G9", "41H0"), "26", SubDiv)) %>% 
-#   mutate(SubDiv = ifelse(ices_rect %in% c("42G6", "42G7",
-#                                           "43G6", "43G7",
-#                                           "44G6", "44G7", "44G8"), "27", SubDiv)) %>% 
-#   mutate(SubDiv = ifelse(ices_rect %in% c("42G8", "42G9", "42H0", "42H1", "42H2",
-#                                           "43G8", "43G9", "43H0", "43H1", "43H2",
-#                                           "44G8", "44G9", "44H0", "44H1", "44H2"), "28", SubDiv)) %>%
-#   mutate(SubDiv = ifelse(lat > 58.5 & lon > 19, "29", SubDiv)) %>%
-#   mutate(SubDiv = ifelse(lat > 57 & lat < 58.5 & lon > 19 & lon < 22, "28", SubDiv)) %>%
-#   mutate(SubDiv = ifelse(lat > 57 & lat < 58.5 & lon > 18 & lon < 22, "28", SubDiv)) %>%
-#   mutate(SubDiv = ifelse(lat > 57 & lat < 60 & lon > 16 & lon < 18, "27", SubDiv)) %>%
-#   mutate(SubDiv = ifelse(lat > 55.5 & lat < 56.5 & lon > 14 & lon < 16, "25", SubDiv))
-# 
-# # Plot and inspect
-# ggplot(cond, aes(x = lon, y = lat, color = SubDiv)) +
-#   geom_point() +
-#   geom_sf(data = world, inherit.aes = F, size = 0.2) +
-#   coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
-#   NULL
-# 
-# ggplot(predcod, aes(x = lon, y = lat, color = SubDiv)) +
-#   geom_point() +
-#   geom_sf(data = world, inherit.aes = F, size = 0.2) +
-#   coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
-#   NULL
-# 
-# # Now calculate average sprat and herring density by sub-div
-# pelagics <- cond %>%
-#   drop_na(SubDiv, abun_spr_sd, abun_her_sd) %>% 
-#   group_by(year, SubDiv) %>%
-#   summarise(ave_abun_spr = mean(abun_spr_sd),
-#             ave_abun_her = mean(abun_her_sd)) %>%
-#   ungroup() %>% 
-#   dplyr::select(year, SubDiv, ave_abun_spr, ave_abun_her) %>% 
-#   mutate(id = paste(year, SubDiv, sep = "_"))
-# 
-# # And average CPUE
-# cod <- predcod %>%
-#   drop_na(SubDiv, est) %>% 
-#   group_by(year, SubDiv) %>%
-#   summarise(ave_cpue_cod = mean(est)) %>%
-#   ungroup() %>% 
-#   mutate(id = paste(year, SubDiv, sep = "_")) %>% 
-#   dplyr::select(id, ave_cpue_cod)
-#   
-# dat <- left_join(pelagics, cod)
-# 
-# head(dat)
-# 
-# dat <- dat %>% 
-#   mutate(ave_abun_spr_sc = ave_abun_spr,
-#          ave_abun_her_sc = ave_abun_her,
-#          ave_cpue_cod_sc = ave_cpue_cod) %>%
-#   mutate_at(c("ave_abun_spr_sc", "ave_abun_her_sc", "ave_cpue_cod_sc"), ~(scale(.) %>% as.vector))
-# 
-# dat$cod_spr_ratio <- dat$ave_cpue_cod / dat$ave_abun_spr
-# dat$cod_her_ratio <- dat$ave_cpue_cod / dat$ave_abun_her
-# 
-# dat$cod_spr_ratio_sc <- dat$ave_cpue_cod_sc / dat$ave_abun_spr_sc
-# dat$cod_her_ratio_sc <- dat$ave_cpue_cod_sc / dat$ave_abun_her_sc
-# 
-# # Non-scaled variables
-# p1 <- ggplot(dat, aes(year, log(cod_her_ratio), color = SubDiv)) +
-#   geom_point() +
-#   stat_smooth() +
-#   scale_color_brewer(palette = "Dark2") +
-#   ggtitle("Herring") +
-#   theme(aspect.ratio = 3/4)
-# 
-# # Sprat ratio
-# p2 <- ggplot(dat, aes(year, log(cod_spr_ratio), color = SubDiv)) +
-#   geom_point() +
-#   stat_smooth() +
-#   scale_color_brewer(palette = "Dark2") + 
-#   ggtitle("Sprat") +
-#   theme(aspect.ratio = 3/4)
-# 
-# p1/p2
-# 
-# # Scaled variables
-# p3 <- dat %>% filter(cod_her_ratio_sc > -10 & cod_her_ratio_sc < 10) %>% 
-#   ggplot(., aes(year, cod_her_ratio_sc, color = SubDiv, fill = SubDiv)) +
-#   geom_point() +
-#   stat_smooth(alpha = 0.2) +
-#   scale_color_brewer(palette = "Dark2") + 
-#   scale_fill_brewer(palette = "Dark2") +
-#   labs(x = "Year", y = "cod:herring ratio") +
-#   theme(aspect.ratio = 3/4) + 
-#   facet_wrap(~SubDiv, ncol = 2) +
-#   guides(color = FALSE, fill = FALSE) +
-#   NULL
-# 
-# # Sprat ratio
-# p4 <- dat %>% filter(cod_spr_ratio_sc > -10 & cod_spr_ratio_sc < 10) %>% 
-#   ggplot(., aes(year, cod_spr_ratio_sc, color = SubDiv, fill = SubDiv)) +
-#   geom_point() +
-#   stat_smooth(alpha = 0.2) +
-#   scale_color_brewer(palette = "Dark2") + 
-#   scale_fill_brewer(palette = "Dark2") +
-#   labs(x = "Year", y = "cod:sprat ratio") +
-#   theme(aspect.ratio = 3/4) + 
-#   facet_wrap(~SubDiv, ncol = 2) +
-#   guides(color = FALSE, fill = FALSE) +
-#   NULL
-# 
-# p3+p4
-# 
-# ggsave("figures/supp/density/pelagics_ratio_time_series.png", width = 6.5, height = 6.5, dpi = 600)
-# 
-# 
-# # All separate
-# # Cod
-# p5 <- ggplot(dat, aes(year, ave_cpue_cod, color = SubDiv)) +
-#   geom_point() +
-#   stat_smooth(se = FALSE) +
-#   scale_color_brewer(palette = "Dark2") +
-#   ggtitle("Cod") +
-#   theme(aspect.ratio = 3/4)
-# 
-# # Herring
-# p6 <- ggplot(dat, aes(year, ave_abun_her, color = SubDiv, fill = SubDiv)) +
-#   geom_point(size = 1.1) +
-#   stat_smooth(alpha = 0.4, size = 0.7) +
-#   scale_color_brewer(palette = "Dark2") +
-#   scale_fill_brewer(palette = "Dark2") + 
-#   theme_classic(base_size = 10) +
-#   theme(aspect.ratio = 3/4) +
-#   facet_wrap(~SubDiv, ncol = 2) +
-#   guides(color = FALSE, fill = FALSE) +
-#   labs(x = "Year", y = "Herring abundance (averaged across ICES rectangles)") +
-#   NULL
-# 
-# # Sprat ratio
-# p7 <- ggplot(dat, aes(year, ave_abun_spr, color = SubDiv, fill = SubDiv)) +
-#   geom_point(size = 1.1) +
-#   stat_smooth(alpha = 0.4, size = 0.7) +
-#   scale_color_brewer(palette = "Dark2") +
-#   scale_fill_brewer(palette = "Dark2") + 
-#   theme_classic(base_size = 10) +
-#   theme(aspect.ratio = 3/4) +
-#   facet_wrap(~SubDiv, ncol = 2) +
-#   guides(color = FALSE, fill = FALSE) + 
-#   labs(x = "Year", y = "Sprat abundance (averaged across ICES rectangles)") +
-#   NULL
-# 
-# p6 + p7 
-# 
-# ggsave("figures/supp/density/pelagics_time_series.png", width = 6.5, height = 6.5, dpi = 600)
-```
-
