@@ -947,19 +947,16 @@ ggplot(dat, aes(lon, lat, color = density_saduria)) +
 ## Add large scale variables from the prediciton grid
 
 ```{r add large scale variables}
-# The fine scale variables are matched to haul. However, the ices_rect level variables
-# and sub division averages should not be averages of the hauls in those areas, but rather
-# average prediction on those levels. To achieve that, I will join in those averages from the 
-# pred_grid:
-
-# First create ID's for joining
-dat <- dat %>% mutate(year_rect_id = paste(year, ices_rect, sep = "_"),
-                      year_sd_id = paste(year, sub_div, sep = "_"))
+# First explore what the difference is between filtering depths and oxygen within their niche rather than the total in the rectangle
 
 pred_grid1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(1_2).csv")
 pred_grid2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(2_2).csv")
 
 pred_grid <- bind_rows(pred_grid1, pred_grid2)
+ 
+# First create ID's for joining
+dat <- dat %>% mutate(year_rect_id = paste(year, ices_rect, sep = "_"),
+                      year_sd_id = paste(year, sub_div, sep = "_"))
 
 # t <- pred_grid %>% 
 #   mutate(test_id = paste(year, ices_rect)) %>% 
@@ -1008,8 +1005,7 @@ dat <- dat %>%
 
 # Trim data a little bit to not make it unnecessarily large
 dat <- dat %>%
-  dplyr::select(-IDx, -quarter, -IDx, -year_sd_id, -year_rect_id, -Fulton_K, -density_cod_data, -density_fle_data) %>% 
-  drop_na()
+  dplyr::select(-IDx, -quarter, -IDx, -year_sd_id, -year_rect_id, -Fulton_K)
 
 dat_93_06 <- dat %>% filter(year < 2007)
 dat_07_19 <- dat %>% filter(year > 2006)
@@ -1017,4 +1013,159 @@ dat_07_19 <- dat %>% filter(year > 2006)
 write.csv(dat_93_06, file = "data/for_analysis/mdat_cond_(1_2).csv", row.names = FALSE)
 write.csv(dat_07_19, file = "data/for_analysis/mdat_cond_(2_2).csv", row.names = FALSE)
 ```
+
+```{r test different ways to calculate ices_rectangle means}
+niche_rect <- pred_grid %>%
+  filter(depth < 100 & oxy > 1.5) %>%
+  group_by(ices_rect, year) %>%
+  summarise(median_depth = median(depth),
+            median_oxy = median(oxy)) %>%
+  mutate(year_rect_id = paste(year, ices_rect, sep = "_"),
+         type = "niche_data") %>%
+  ungroup()
+
+all_rect <- pred_grid %>%
+  group_by(ices_rect, year) %>%
+  summarise(median_depth = median(depth),
+            median_oxy = median(oxy)) %>%
+  mutate(year_rect_id = paste(year, ices_rect, sep = "_"),
+         type = "all_data") %>%
+  ungroup()
+
+all_dat <- bind_rows(all_rect, niche_rect)
+
+# Now add in the condition data to calculate sample size per rectangl
+# Filter
+cond1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cond_(1_2).csv")
+cond2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cond_(2_2).csv")
+
+cond <- bind_rows(cond1, cond2) %>% mutate(year_rect_id = paste(year, ices_rect, sep = "_"))
+
+# Join data for lm
+all_rect2 <- all_rect %>% dplyr::select(year_rect_id, median_depth) %>%
+  mutate(median_depth_sc = (median_depth - mean(median_depth))/sd(median_depth))
+
+niche_rect2 <- niche_rect %>% dplyr::select(year_rect_id, median_depth) %>%
+  mutate(median_depth_sc = (median_depth - mean(median_depth))/sd(median_depth))
+
+cond_all <- left_join(cond, all_rect2)
+cond_niche <- left_join(cond, niche_rect2)
+
+summary(lm(log(weight_g) ~ log(length_cm) + median_depth_sc, data = cond_all))
+summary(lm(log(weight_g) ~ log(length_cm) + median_depth_sc, data = cond_niche))
+
+t <- cond_all %>% filter(median_depth < 100)
+
+plot(cond_all$median_depth_sc)
+plot(cond_niche$median_depth_sc)
+
+
+cond2 <- cond %>%
+  group_by(year, ices_rect) %>%
+  summarise(n = n()) %>%
+  mutate(year_rect_id = paste(year, ices_rect, sep = "_")) %>%
+  ungroup() %>%
+  dplyr::select(-year, -ices_rect)
+
+cond2 %>% arrange(n) %>% as.data.frame()
+hist(cond$n)
+
+all_dat <- left_join(all_dat, cond2)
+
+hist(all_dat$n)
+
+all_dat %>% arrange(n) %>% as.data.frame()
+
+all_dat <- all_dat %>%
+  drop_na(n) %>%
+  mutate(small_sample = ifelse(n < 30, "Y", "N"))# %>% filter(small_sample == "N")
+
+# Depth
+ggplot(all_dat %>% filter(year == 1999)) +
+  geom_bar(aes(ices_rect, median_depth, fill = type), position="dodge", stat="identity") +
+  theme(axis.text.x = element_text(angle = 90)) +
+  facet_wrap(~small_sample, ncol = 1) +
+  NULL
+
+# Oxygen
+ggplot(all_dat %>% filter(year == 1999)) +
+  geom_bar(aes(ices_rect, median_oxy, fill = type), position="dodge", stat="identity") +
+  theme(axis.text.x = element_text(angle = 90)) +
+  facet_wrap(~small_sample, ncol = 1) +
+  NULL
+
+# The fine scale variables are matched to haul. However, the ices_rect level variables
+# and sub division averages should not be averages of the hauls in those areas, but rather
+# average prediction on those levels. To achieve that, I will join in those averages from the pred_grid
+```
+
+```{r test effect of cod and flounder data or model}
+d_test <- drop_na(dat) %>%
+  mutate(ln_length_cm = log(length_cm),
+         ln_weight_g = log(weight_g),
+         year_ct = year - mean(year),
+         biomass_her_sc = biomass_her,
+         biomass_her_sd_sc = biomass_her_sd,
+         biomass_spr_sc = biomass_spr,
+         biomass_spr_sd_sc = biomass_spr_sd,
+         density_cod_sc = density_cod,
+         density_cod_data_sc = density_cod_data,
+         density_cod_rec_sc = density_cod_rec,
+         density_fle_sc = density_fle,
+         density_fle_data_sc = density_fle_data,
+         density_fle_rec_sc = density_fle_rec,
+         density_saduria_sc = density_saduria,
+         density_saduria_rec_sc = density_saduria_rec,
+         depth_sc = depth,
+         depth_rec_sc = depth_rec,
+         depth_sd_sc = depth_sd,
+         oxy_sc = oxy,
+         oxy_rec_sc = oxy_rec,
+         oxy_sd_sc = oxy_sd,
+         temp_sc = temp,
+         temp_rec_sc = temp_rec,
+         temp_sd_sc = temp_sd)  %>%
+  mutate_at(c("biomass_her_sc", "biomass_her_sd_sc", "biomass_spr_sc", "biomass_spr_sd_sc",
+              "density_cod_sc", "density_cod_data_sc", "density_cod_rec_sc", 
+              "density_fle_sc", "density_fle_data_sc", "density_fle_rec_sc", 
+              "density_saduria_sc", "density_saduria_rec_sc", 
+              "depth_sc", "depth_rec_sc", "depth_sd_sc",
+              "oxy_sc", "oxy_rec_sc", "oxy_sd_sc",
+              "temp_sc", "temp_rec_sc", "temp_sd_sc"
+              ),
+            ~(scale(.) %>% as.vector)) %>% 
+  mutate(year = as.integer(year))
+
+
+m1 <- lm(ln_weight_g ~ as.factor(year) + ln_length_cm + biomass_her_sc + biomass_her_sd_sc +
+    biomass_spr_sc + biomass_spr_sd_sc +
+    density_cod_sc + 
+    density_fle_sc + 
+    density_saduria_sc + density_saduria_rec_sc + 
+    depth_sc + depth_rec_sc + 
+    oxy_sc + oxy_rec_sc +
+    temp_sc + temp_rec_sc,
+    data = d_test)
+
+summary(m1)
+
+# density_cod_sc         -0.0042855  0.0005143   -8.332  < 2e-16 ***
+# density_fle_sc          0.0020136  0.0005241    3.842 0.000122 ***
+
+m2 <- lm(ln_weight_g ~ as.factor(year) + ln_length_cm + biomass_her_sc + biomass_her_sd_sc +
+    biomass_spr_sc + biomass_spr_sd_sc +
+    density_cod_data_sc + 
+    density_fle_data_sc + 
+    density_saduria_sc + density_saduria_rec_sc + 
+    depth_sc + depth_rec_sc + 
+    oxy_sc + oxy_rec_sc +
+    temp_sc + temp_rec_sc,
+    data = d_test)
+
+summary(m2)
+
+# density_cod_data_sc    -0.0021723  0.0004714   -4.608 4.07e-06 ***
+# density_fle_data_sc     0.0009110  0.0004950    1.840 0.065723 .  
+```
+
 
