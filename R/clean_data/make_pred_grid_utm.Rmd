@@ -681,6 +681,18 @@ ggplot(pred_grid, aes(X, Y, fill = density_saduria)) +
 ## Sprat and herring biomasses
 
 ```{r sprat and herring, message=FALSE}
+theme_facet_map <- function(base_size = 10, base_family = "") {
+  theme_light(base_size = 10, base_family = "") +
+    theme(
+        axis.text.x = element_text(angle = 90),
+        axis.text = element_text(size = 6),
+        strip.text = element_text(size = 8, colour = 'gray10', margin = margin()),
+        strip.background = element_rect(fill = "gray95"),
+        legend.position = c(0.7, 0.02),
+        legend.direction = "horizontal"
+      )
+}
+
 # Read data on rectangle level
 spr <- read_xlsx("data/BIAS/N and B per Rect. 1991-2020.xlsx",
                  sheet = 4) %>%
@@ -710,6 +722,7 @@ her <- read_xlsx("data/BIAS/N and B per Rect. 1991-2020.xlsx",
 spr %>%
   mutate(lon = ices.rect(spr$ices_rect)$lon) %>%
   mutate(lat = ices.rect(spr$ices_rect)$lat) %>%
+  filter(Year > 1992 & Year < 2020) %>% 
   ggplot(., aes(lon, lat, fill = log(biomass_spr))) +
   geom_raster() +
   scale_fill_viridis() +
@@ -717,7 +730,7 @@ spr %>%
   geom_sf(data = world, inherit.aes = F, size = 0.2) +
   coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
   labs(x = "lon", y = "lat") +
-  theme(axis.text.x = element_text(angle = 90)) +
+  theme_facet_map() + 
   NULL
 
 ggsave("figures/supp/spr_distribution.png", width = 10, height = 10, dpi = 600)
@@ -725,6 +738,7 @@ ggsave("figures/supp/spr_distribution.png", width = 10, height = 10, dpi = 600)
 her %>%
   mutate(lon = ices.rect(her$ices_rect)$lon) %>%
   mutate(lat = ices.rect(her$ices_rect)$lat) %>%
+  filter(Year > 1992 & Year < 2020) %>% 
   ggplot(., aes(lon, lat, fill = log(biomass_her))) +
   geom_raster() +
   scale_fill_viridis() +
@@ -732,7 +746,7 @@ her %>%
   geom_sf(data = world, inherit.aes = F, size = 0.2) +
   coord_sf(xlim = c(xmin, xmax), ylim = c(ymin, ymax)) +
   labs(x = "lon", y = "lat") +
-  theme(axis.text.x = element_text(angle = 90)) +
+  theme_facet_map() + 
   NULL
 
 ggsave("figures/supp/her_distribution.png", width = 10, height = 10, dpi = 600)

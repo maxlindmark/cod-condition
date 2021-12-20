@@ -287,62 +287,6 @@ pred_grid %>%
 
 ```{r, include=FALSE}
 # Include some tests & calculations for the manuscript
-median(d$weight_g)
-# What does an effect size of 0.0034 mean for change in log weight and weight?
-t <- tibble(l = seq(1, 80, 0.1)) %>% 
-  mutate(w1 = 0.01*l^3,
-         log_w1 = log(w1),
-         log_w2 = log_w1*1.0034,
-         w2 = exp(log_w2),
-         perc_chang_log_w = ((log_w2-log_w1)/log_w1)*100,
-         perc_chang_w = ((w2-w1)/w1)*100) %>% 
-  as.data.frame()
-
-t %>% filter(w1 > median(0.95*d$weight_g)) %>% head(10)
-
-ggplot(t) +
-  geom_line(aes(l, w1, color = "w1")) +
-  geom_line(aes(l, w2, color = "w2"))
-
-ggplot(t) +
-  geom_line(aes(w1, perc_chang_w, color = "w1"))
-
-# Now calculate the change in weight given a decline in the intercept
-t2 <- tibble(l = seq(1, 80, 0.1)) %>% 
-  mutate(w1 = exp(-4.5)*l^2.975,
-         w2 = exp(-4.66)*l^2.975) %>% 
-  as.data.frame()
-
-pal <- brewer.pal(n = 8, name = "Dark2")[c(6,8)]
-
-p1 <- ggplot(t2) + 
-  geom_line(aes(l, w1, color = "1993"), size = 1.2, alpha = 0.8) +
-  geom_line(aes(l, w2, color = "2008"), size = 1.2, alpha = 0.8, linetype = 2) + 
-  scale_color_manual(values = pal) + 
-  labs(color = "Year", x = "Length [cm]", y = "Weight [g]") +
-  theme_light(base_size = 16) + 
-  theme(axis.text.x = element_text(angle = 0),
-        legend.position = c(0.11, 0.88),
-        legend.background = element_blank(),
-        aspect.ratio = 1) +
-  NULL
-
-p2 <- ggplot(t2) + 
-  geom_line(aes(log(l), log(w1), color = "1993"), size = 1.2, alpha = 0.8) +
-  geom_line(aes(log(l), log(w2), color = "2008"), size = 1.2, alpha = 0.8, linetype = 2) + 
-  scale_color_manual(values = pal) + 
-  labs(color = "Year", x = "Length [cm]", y = "Weight [g]") +
-  theme_light(base_size = 16) + 
-  theme(axis.text.x = element_text(angle = 0),
-        legend.position = c(0.11, 0.88),
-        legend.background = element_blank(),
-        aspect.ratio = 1) +
-  NULL
-
-p1 #+ p2
-
-ggsave("figures/lw_relationship.png", width = 6.5, height = 6.5, dpi = 600)
-
 # pred_grid_test <- pred_grid %>%
 #   mutate(oxy_cat = ifelse(oxy > 4.3, "normal", "low"),
 #          oxy_cat = ifelse(oxy < 1, "dead", oxy_cat)) %>%
@@ -360,12 +304,12 @@ ggsave("figures/lw_relationship.png", width = 6.5, height = 6.5, dpi = 600)
 #   geom_hline(yintercept = 1, col = "red") +
 #   geom_hline(yintercept = 4.3, col = "red")
 # 
-# m1 <- lm(oxy ~ depth, data = pred_grid)
-# nd <- data.frame(depth = c(40, 45, 50, 60, 70))
-# nd$pred <- predict(m1, newdata = nd)
-# nd
-# nd$pred[2] - nd$pred[1]
-# 
+m1 <- lm(oxy ~ depth, data = pred_grid)
+nd <- data.frame(depth = c(40, 45, 50, 60, 70))
+nd$pred <- predict(m1, newdata = nd)
+nd
+nd$pred[2] - nd$pred[1]
+ 
 # plot(temp ~ depth, data = pred_grid)
 # m1 <- lm(temp ~ depth, data = filter(pred_grid, depth < 100))
 # nd <- data.frame(depth = c(40, 45))
@@ -518,7 +462,7 @@ ggsave("figures/supp/condition/residuals_vs_length_and_year.png", width = 6.5, h
 # div_index <- bind_rows(avg_pred_24, avg_pred_25, avg_pred_26, avg_pred_27, avg_pred_28)
 ```
 
-## Annual indices using `get_index_sims` method to avoid slow bias correction (not done above!)
+## Annual indices using `get_index_sims` method to avoid slow bias correction
 
 ```{r sim version condition index, cache=TRUE}
 ncells <- filter(pred_grid, year == max(pred_grid$year)) %>% nrow()
@@ -546,28 +490,28 @@ ggplot(index_avg_sims, aes(y = as.factor(year), x = log(.value))) +
   coord_flip()
 
 index_avg_sims %>% 
-  filter(year %in% c(1993, 2008)) %>% 
+  filter(year %in% c(1993, 2019)) %>% 
   ggplot(., aes(as.factor(year), .value)) +
   geom_violin(width = 1.3)
 
 # Now reshape data again to calculate row-wise differences
 year_diff <- index_avg_sims %>% 
-  filter(year %in% c(1993, 2008)) %>% 
+  filter(year %in% c(1993, 2019)) %>% 
   mutate(.value = log(.value)) %>% 
   pivot_wider(names_from = year, values_from = .value) %>% 
-  mutate("2008-1993" = `2008` - `1993`) %>% 
+  mutate("2019-1993" = `2019` - `1993`) %>% 
   pivot_longer(2:4) %>% 
   ungroup()
 
 # Plot these
 p1 <- ggplot(year_diff) +
-  geom_density(data = filter(year_diff, !name == "2008-1993"),
+  geom_density(data = filter(year_diff, !name == "2019-1993"),
                aes(value, fill = name), alpha = 0.6) +
   scale_fill_brewer(palette = "Dark2") +
   coord_cartesian(expand = 0)
 
 p2 <- ggplot(year_diff) +
-  geom_density(data = filter(year_diff, name == "2008-1993"),
+  geom_density(data = filter(year_diff, name == "2019-1993"),
                aes(value), alpha = 0.6, fill = "grey") +
   geom_vline(xintercept = 0, linetype = 2) 
 
@@ -584,20 +528,21 @@ year_diff %>%
 year_diff %>% 
   group_by(name) %>% 
   pivot_wider(names_from = name, values_from = value) %>%
-  mutate(perc_change = (`2008`-`1993`)/`1993`*100) %>% 
+  mutate(perc_change = (`2019`-`1993`)/`1993`*100) %>% 
   ungroup() %>% 
   summarise(lwr2.5 = quantile(perc_change, probs = 0.025),
             median = quantile(perc_change, probs = 0.5),
             upr97.5 = quantile(perc_change, probs = 0.975))
 
-# Percent change in weight
+# Percent change in weight for a cod of length l (median length)
 b <- mfull$sd_report$par.fixed[1]
-  
+l <- median(d$length_cm)
+
 year_diff %>% 
   group_by(name) %>% 
   pivot_wider(names_from = name, values_from = value) %>%
-  mutate(w1 = exp(`1993`)*30^b, # using length = 30 here
-         w2 = exp(`2008`)*30^b, 
+  mutate(w1 = (exp(`1993`))*l^b, 
+         w2 = (exp(`2019`))*l^b, 
          perc_change = (`w2`-`w1`)/`w1`*100) %>% 
   ungroup() %>% 
   summarise(lwr2.5 = quantile(perc_change, probs = 0.025),
@@ -605,12 +550,45 @@ year_diff %>%
             upr97.5 = quantile(perc_change, probs = 0.975))
 ```
 
-## Difference in weight-at-length using sims!
+## Difference in weight-at-length
 
 ```{r weight-at-length, cache=TRUE}
+# Now calculate the change in weight given a decline in the intercept
+tw_intercept_1993 <- as.vector(mfull$sd_report$par.random[1])
+tw_intercept_2019 <- as.vector(mfull$sd_report$par.random[27])
+b <- as.vector(mfull$sd_report$par.fixed[1])
+
+t2 <- tibble(l = seq(1, 80, 0.1)) %>% 
+  mutate(w1 = exp(tw_intercept_1993)*l^b,
+         w2 = exp(tw_intercept_2019)*l^b,
+         log_w1 = log(w1),
+         log_w2 = log(w2)) %>% 
+  pivot_longer(2:5, names_to = "temp", values_to = "Weight") %>%
+  mutate(Year = ifelse(temp %in% c("w1", "log_w1"), "1993", "2019"),
+         Scale = ifelse(temp %in% c("w1", "w2"), "Arithmetic", "ln"),
+         l = ifelse(Scale == "ln", log(l), l))
+  
+pal <- brewer.pal(n = 8, name = "Dark2")[c(6,8)]
+
+ggplot(t2, aes(l, Weight, color = Year, linetype = Year)) + 
+  geom_line(size = 0.7, alpha = 0.8) +
+  scale_color_manual(values = pal) +
+  scale_linetype_manual(values = c(1, 2)) + 
+  labs(color = "Year", x = "Length [cm]", y = "Weight [g]") +
+  theme_light(base_size = 14) + 
+  theme_plot() +
+  facet_wrap(~Scale, scales = "free") +
+  theme(axis.text.x = element_text(angle = 0),
+        legend.position = "bottom",
+        legend.background = element_blank(),
+        aspect.ratio = 1) +
+  NULL
+
+ggsave("figures/supp/lw_relationship.png", width = 6.5, height = 6.5, dpi = 600)
+
+# Below I use sims
 # I could potentially use gather_sims, but spread_sims does not report the time-varying alpha... hmmm..
 # Simulate some random intercepts, calculate weight, make spaghetti plot
-
 
 # length_cm <- seq(1, 100, 1)
 # z <- 2*rep(0, length(length_cm))
@@ -622,7 +600,7 @@ year_diff %>%
 #                       density_cod_sc = z, density_cod_rec_sc = z,
 #                       density_fle_sc = z, density_fle_rec_sc = z,
 #                       density_saduria_sc = z, density_saduria_rec_sc = z,
-#                       depth_sc = z, depth_rec_sc = z, 
+#                       depth_sc = z, depth_rec_sc = z,
 #                       oxy_sc = z, oxy_rec_sc = z,
 #                       temp_sc = z, temp_rec_sc = z)
 # 
@@ -637,11 +615,35 @@ year_diff %>%
 # lw_pred_df_long <- lw_pred_df %>%
 #   pivot_longer(1:50,
 #                values_to = "ln_weight_g",
-#                names_to = "iteration") %>% 
+#                names_to = "iteration") %>%
 #   mutate(weight_g = exp(ln_weight_g))
 # 
-# ggplot(lw_pred_df_long, aes(length_cm, weight_g, group = iteration, color = factor(year))) + 
-#   geom_point(alpha = 0.1, size = 0.1)
+# lw_pred_df_long %>% filter(iteration == "X1") %>% 
+#   ggplot(., aes(length_cm, weight_g, group = iteration, color = factor(year))) +
+#   geom_line()
+# #  geom_point()
+# 
+# lw_pred_df_long %>% filter(iteration == "X1") %>% 
+#   ggplot(., aes(length_cm, weight_g, group = iteration, color = factor(year))) +
+#   geom_point()
+# 
+# lw_pred_df_long %>% filter(iteration == "X1") %>% 
+#   ggplot(., aes(length_cm, weight_g, linetype = iteration, color = factor(year))) +
+#   geom_line()
+# 
+# lw_pred_df_long %>%
+#   ggplot(., aes(length_cm, weight_g, group = interaction(year, iteration), color = factor(year))) +
+#   geom_line(alpha = 0.5)
+# 
+# lw_pred_df_long %>%
+#   group_by(year, length_cm) %>% 
+#   summarise(median = quantile(weight_g, probs = 0.5),
+#             upr97.5 = quantile(weight_g, probs = 0.975),
+#             lwr2.5 = quantile(weight_g, probs = 0.025)) %>% 
+#   ggplot(., aes(x = length_cm, ymin = lwr2.5, ymax = upr97.5, fill = factor(year))) +
+#   geom_ribbon(alpha = 0.2) + 
+#   geom_line(aes(length_cm, y = median, color = factor(year))) 
+#   NULL
 ```
 
 
@@ -684,8 +686,11 @@ div_index <- bind_rows(index_avg_24_sim, index_avg_25_sim, index_avg_26_sim, ind
 
 ```{r plot condition index and condition factor, message=FALSE}
 # Add in the Le Cren condition index for d
+mfull$sd_report$par.random[1:27]
 mean_tw_intercept <- mean(mfull$sd_report$par.random[1:27])
-d$le_cren <- d$weight_g / (exp(mean_tw_intercept)*d$length_cm^2.98)
+mean_tw_intercept # average intercept
+mfull$sd_report$par.fixed[1] # length-coefficient
+d$le_cren <- d$weight_g / (exp(mean_tw_intercept)*d$length_cm^mfull$sd_report$par.fixed[1])
 
 div_index2 <- bind_rows(mutate(div_index, sub_div = as.factor(sub_div)),
                         mutate(index_avg_sim, sub_div = as.factor("Total")))
@@ -766,24 +771,19 @@ pal <- brewer.pal(n = 8, name = "Dark2")
 
 deciles_sum <- d %>% 
   group_by(year) %>% 
-  summarise("1st" = hutils::weighted_quantile(v = le_cren, p = c(0.1)),
-            "5th (median)" = hutils::weighted_quantile(v = le_cren, p = c(0.5)),
-            "9th" = hutils::weighted_quantile(v = le_cren, p = c(0.9))) %>% 
-  ungroup() %>% 
-  pivot_longer(2:4, names_to = "Deciles", values_to = "le_cren") %>% 
-  group_by(Deciles)
+  summarise("1st" = quantile(x = le_cren, p = c(0.1)),
+            "5th (median)" = quantile(x = le_cren, p = c(0.5)),
+            "9th" = quantile(x = le_cren, p = c(0.9))) %>% 
+  ungroup() #%>% 
+  # pivot_longer(2:4, names_to = "Deciles", values_to = "le_cren") %>% 
+  # group_by(Deciles)
 
-deciles <- ggplot(deciles_sum, aes(year, le_cren, color = factor(Deciles), fill = factor(Deciles))) +
-  stat_smooth(method = "gam", formula = y~s(x, k = 3),
-              se = TRUE, show.legend = FALSE) + 
-  stat_smooth(method = "gam", formula = y~s(x, k = 3), 
-              se = FALSE) + 
-  geom_point() +
+deciles <- ggplot() +
+  geom_ribbon(data = deciles_sum, aes(x = year, ymin = `1st`, ymax = `9th`), fill = "grey90") + 
+  stat_smooth(data = deciles_sum, aes(year, `5th (median)`), method = "gam", formula = y~s(x, k = 3),
+              se = TRUE, show.legend = FALSE, color = "tomato") + 
+  geom_point(data = deciles_sum, aes(year, `5th (median)`), color = "grey30") +
   labs(x = "Year", y = "Le Cren's condition index", color = "Deciles") +
-  scale_color_manual(values = rev(pal)) +
-  scale_fill_manual(values = rev(pal)) +
-  guides(color = guide_legend(override.aes = list(fill = NA))) + 
-  theme() +
   theme(axis.title = element_text(size = 9),
         legend.position = c(0.85, 0.85),
         legend.background = element_blank(),
@@ -796,6 +796,22 @@ deciles <- ggplot(deciles_sum, aes(year, le_cren, color = factor(Deciles), fill 
                               default.unit = "inch")) + 
   NULL
   
+deciles
+
+# ggridges...
+# ggplot(deciles_sum, aes(x = le_cren, y = as.factor(year), fill = factor(stat(quantile)))) +
+#   stat_density_ridges(
+#     scale = 3,
+#     geom = "density_ridges_gradient",
+#     calc_ecdf = TRUE,
+#     alpha = 0.1,
+#     quantiles = c(0.025, 0.975)
+#   ) +
+#   scale_fill_manual(
+#     name = "Probability", values = c("grey40", "gray90", "grey40"),
+#     labels = c("(0, 0.025]", "(0.025, 0.975]", "(0.975, 1]")
+#   )
+
 cond_index + cond_slope_fig + deciles + size_dist +
   plot_annotation(tag_levels = 'A') +
   plot_layout(ncol = 2, widths = c(2, 1))

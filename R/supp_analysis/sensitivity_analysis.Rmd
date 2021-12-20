@@ -76,20 +76,17 @@ d <- d %>%
          density_saduria_rec_sc = density_saduria_rec,
          depth_sc = depth,
          depth_rec_sc = depth_rec,
-         depth_sd_sc = depth_sd,
          oxy_sc = oxy,
          oxy_rec_sc = oxy_rec,
-         oxy_sd_sc = oxy_sd,
          temp_sc = temp,
-         temp_rec_sc = temp_rec,
-         temp_sd_sc = temp_sd)  %>%
+         temp_rec_sc = temp_rec)  %>%
   mutate_at(c("biomass_her_sc", "biomass_her_sd_sc", "biomass_spr_sc", "biomass_spr_sd_sc",
               "density_cod_sc", "density_cod_rec_sc", 
               "density_fle_sc", "density_fle_rec_sc", 
               "density_saduria_sc", "density_saduria_rec_sc", 
-              "depth_sc", "depth_rec_sc", "depth_sd_sc",
-              "oxy_sc", "oxy_rec_sc", "oxy_sd_sc",
-              "temp_sc", "temp_rec_sc", "temp_sd_sc"
+              "depth_sc", "depth_rec_sc",
+              "oxy_sc", "oxy_rec_sc",
+              "temp_sc", "temp_rec_sc"
               ),
             ~(scale(.) %>% as.vector)) %>% 
   mutate(year = as.integer(year))
@@ -102,6 +99,93 @@ d <- d %>%
 d_adu <- d %>% filter(length_cm > 30)
 d_juv <- d %>% filter(length_cm < 30)
 d_25_28 <- d %>% filter(!sub_div == 24)
+
+
+d_rec <- d
+
+# For this analysis, I calculate the rectangle-level variables differently, I calculate
+# median rectangle variables using only grid points where there is sufficient cod density.
+# This means I will read in the prediction grid and simply redo the left_join
+
+pred_grid1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(1_2).csv")
+pred_grid2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(2_2).csv")
+
+pred_grid <- bind_rows(pred_grid1, pred_grid2)
+ 
+# First create ID's for joining
+d_rec <- d_rec %>% mutate(year_rect_id = paste(year, ices_rect, sep = "_"),
+                          year_sd_id = paste(year, sub_div, sep = "_"))
+
+# Re-calculate these variables (see make_pred_grid_script):
+#density_saduria_rec, density_cod_rec, density_fle_rec, depth_rec, oxy_rec, temp_rec, biomass_spr, biomass_her
+colnames(pred_grid)
+
+cutoff <- as.vector(quantile(pred_grid$density_cod,  p = 0.05))
+
+pred_grid2 <- pred_grid %>% 
+  filter(density_cod > cutoff) %>% 
+  filter(depth < 100) %>% 
+  group_by(year, ices_rect) %>% 
+  mutate(density_saduria_rec = median(density_saduria),
+         density_cod_rec = median(density_cod),
+         density_fle_rec = median(density_fle),
+         depth_rec = median(depth),
+         oxy_rec = median(oxy),
+         temp_rec = median(temp)) %>% 
+  ungroup()
+  
+# Plot in space the filtered grid
+pred_grid %>% 
+  mutate(keep = ifelse(density_cod < cutoff, 0, 1)) %>%
+  #mutate(keep = ifelse(depth > 100, 0, 1)) %>% 
+  ggplot(aes(X, Y, color = factor(keep))) + 
+  geom_point(size = 0.1) + 
+  facet_wrap(~year)
+
+# Test
+old <- pred_grid %>%
+  dplyr::select(year, ices_rect, density_saduria_rec, density_cod_rec, density_fle_rec, depth_rec, oxy_rec, temp_rec) %>% 
+  group_by(year, ices_rect) %>% 
+  summarise_all(median) %>% 
+  mutate(method = "all_data")
+
+new <- pred_grid2 %>%
+  dplyr::select(year, ices_rect, density_saduria_rec, density_cod_rec, density_fle_rec, depth_rec, oxy_rec, temp_rec) %>% 
+  group_by(year, ices_rect) %>% 
+  summarise_all(median) %>% 
+  mutate(method = "niche_data")
+
+t <- bind_rows(old, new) %>% pivot_longer(3:7, names_to = "variable", values_to = "value")
+
+ggplot(t, aes(value, fill = method)) + 
+  geom_histogram(color = NA, alpha = 0.5) + 
+  facet_grid(method~variable, scales = "free")
+
+# Take distinct year + ices_rect id's and select the variables
+pred_grid_rec_vars <- pred_grid2 %>% 
+  mutate(year_rect_id = paste(year, ices_rect, sep = "_")) %>% 
+  distinct(year_rect_id, .keep_all = TRUE) %>% 
+  dplyr::select(year_rect_id,
+                density_saduria_rec, density_cod_rec, density_fle_rec,
+                depth_rec, oxy_rec, temp_rec)
+  
+# Join!
+d_rec <- left_join(d_rec, pred_grid_rec_vars)
+
+# Now we need to scale data again
+# Calculate standardized variables
+d_rec <- d_rec %>% 
+  mutate(density_cod_rec_sc = density_cod_rec,
+         density_fle_rec_sc = density_fle_rec,
+         density_saduria_rec_sc = density_saduria_rec,
+         depth_rec_sc = depth_rec,
+         oxy_rec_sc = oxy_rec,
+         temp_rec_sc = temp_rec)  %>%
+  mutate_at(c("density_cod_rec_sc", "density_fle_rec_sc", "density_saduria_rec_sc", 
+              "depth_rec_sc", "oxy_rec_sc", "temp_rec_sc"
+              ),
+            ~(scale(.) %>% as.vector)) %>% 
+  mutate(year = as.integer(year))
 ```
 
 ## Make spde mesh
@@ -116,10 +200,14 @@ spde_juv <- make_mesh(d_juv, xy_cols = c("X", "Y"),
 spde_25_28 <- make_mesh(d_25_28, xy_cols = c("X", "Y"),
                         n_knots = 200, type = "kmeans", seed = 42)
 
+spde_rec <- make_mesh(d_rec, xy_cols = c("X", "Y"),
+                      n_knots = 200, type = "kmeans", seed = 42)
+
 # Plot
 plot(spde_adu)
 plot(spde_juv)
 plot(spde_25_28)
+plot(spde_rec)
 ```
 
 ## Full models
@@ -191,6 +279,28 @@ proc.time() - ptm
 tidy(m_25_28, conf.int = TRUE)
 ```
 
+## Different way of calculating covariates at the rectangle level
+
+```{r rectangle model test, cache=TRUE}
+ptm <- proc.time()
+m_rec <- sdmTMB(
+  formula = ln_weight_g ~ -1 + ln_length_cm + biomass_her_sc + biomass_her_sd_sc +
+    biomass_spr_sc + biomass_spr_sd_sc +
+    density_cod_sc + density_cod_rec_sc + 
+    density_fle_sc + density_fle_rec_sc + 
+    density_saduria_sc + density_saduria_rec_sc + 
+    depth_sc + depth_rec_sc + 
+    oxy_sc + oxy_rec_sc + 
+    temp_sc + temp_rec_sc, 
+  time_varying = ~ 1, data = d_rec, time = "year", mesh = spde_rec,
+  family = student(link = "identity", df = 5),
+  spatiotemporal = "AR1", spatial = "on", silent = TRUE, reml = FALSE,
+  control = sdmTMBcontrol(newton_loops = 1, eval.max = 10000, iter.max = 10000, nlminb_loops = 2))
+proc.time() - ptm
+
+tidy(m_rec, conf.int = TRUE)
+```
+
 ## Extract coefficients
 
 ```{r extract coefficients, message=FALSE}
@@ -211,6 +321,12 @@ m_25_28_est <- bind_rows(tidy(m_25_28, effects = "ran_par", conf.int = TRUE) %>%
                            filter(term %in% c("sigma_O", "sigma_E")),
                          tidy(m_25_28, effects = "fixed", conf.int = TRUE) %>%
                            filter(!term %in% c("ln_length_cm")))
+
+# Extract random and fixed coefficients from the rec model
+m_rec_est <- bind_rows(tidy(m_rec, effects = "ran_par", conf.int = TRUE) %>%
+                         filter(term %in% c("sigma_O", "sigma_E")),
+                       tidy(m_rec, effects = "fixed", conf.int = TRUE) %>%
+                         filter(!term %in% c("ln_length_cm")))
 ```
 
 ## Plot the differences in effect sizes
@@ -219,13 +335,14 @@ m_25_28_est <- bind_rows(tidy(m_25_28, effects = "ran_par", conf.int = TRUE) %>%
 m_juv_est$Model <- "< 30 cm"
 m_adu_est$Model <- "> 30 cm"
 m_25_28_est$Model <- "SubDiv 25-28"
+m_rec_est$Model <- "Rec."
 
 # Read in coefficients from the main model
 m_full <- read.csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/output/mfull_est.csv") %>%
   dplyr::select(-X) %>% 
   mutate(Model = "Full model", term = as.factor(term))
 
-plot_dat <- bind_rows(m_juv_est, m_adu_est, m_25_28_est, m_full) %>% 
+plot_dat <- bind_rows(m_juv_est, m_adu_est, m_25_28_est, m_rec_est, m_full) %>% 
   mutate(term = as.factor(term))
 
 # Plot effects
@@ -262,7 +379,7 @@ ggplot(plot_dat, aes(reorder(term, term2), estimate, color = Model)) +
         legend.position = "bottom")
   NULL
   
-ggsave("figures/supp/sensitivity_coefficients.png", width = 4.5, height = 6.5, dpi = 600)
+ggsave("figures/supp/condition/sensitivity_coefficients.png", width = 4.5, height = 6.5, dpi = 600)
 
 # Just a test to see the labels were alright
 effect_sizes <- ggplot(plot_dat, aes(reorder(term, estimate), estimate)) +
