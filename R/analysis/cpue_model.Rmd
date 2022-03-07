@@ -950,8 +950,9 @@ plot_w_oxy
 ggsave("figures/weighted_quantiles.png", width = 6.5, height = 6.5, dpi = 600)
 ```
 
-### Weighted oxygen by year and sub div
-```{r weighted oxygen by subdiv and year}
+### Weighted oxygen and depth by year and sub div
+```{r weighted oxygen depth  by subdiv and year}
+# Oxygen
 wm_oxy_sd <- predict_mcod %>%
   group_by(year, sub_div) %>%
   summarise("weighted_median" = hutils::weighted_quantile(v = oxy, w = exp(est), p = c(0.5)))
@@ -976,6 +977,31 @@ ggplot(wm_oxy_sd, aes(year, weighted_median, color = factor(sub_div))) +
   NULL
 
 ggsave("figures/supp/density/weighted_oxygen_subdiv.png", width = 6.5, height = 6.5, dpi = 600)
+
+# Depth
+wm_dep_sd <- predict_mcod %>%
+  group_by(year, sub_div) %>%
+  summarise("weighted_median" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.5)))
+
+ggplot(wm_dep_sd, aes(year, weighted_median, color = factor(sub_div))) +
+  stat_smooth(method = "gam", formula = y ~ s(x, k = 4), size = 1) +
+  geom_point(size = 2.5, alpha = 0.8) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  scale_color_brewer(palette = "Dark2") +
+  scale_fill_brewer(palette = "Dark2") +
+  guides(color = "none", fill = "none", linetype = "none") +
+  labs(y = "Depth [m]", x = "Year", color = "") +
+  theme_plot() +
+  facet_wrap(~sub_div) +
+  theme(aspect.ratio = 1,
+        axis.text.x = element_text(angle = 0),
+        legend.position = "bottom",
+        legend.key.size = unit(0.6, "cm"),
+        legend.text = element_text(size = 8),
+        plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+  NULL
+
+ggsave("figures/supp/density/weighted_depth_subdiv.png", width = 6.5, height = 6.5, dpi = 600)
 ```
 
 ### Plot biomass-weighted temperature
