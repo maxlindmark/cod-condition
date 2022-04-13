@@ -132,3 +132,26 @@ mfull_cv$sum_loglik
  
 mfull_cv$max_gradients
 ```
+
+```{r cv simple model, cache=TRUE}
+mfull2_cv <- sdmTMB_cv(
+  formula = ln_weight_g ~ -1 + ln_length_cm,
+  time_varying = ~ 1, data = d, time = "year", mesh = spde,
+  family = student(link = "identity", df = 5),
+  spatiotemporal = "AR1", spatial = "on", silent = TRUE, reml = FALSE,
+  control = sdmTMBcontrol(newton_loops = 1, eval.max = 10000, iter.max = 10000, nlminb_loops = 2),
+  k_folds = 5)
+  
+mfull2_cv$fold_elpd
+mfull2_cv$elpd
+ 
+mfull2_cv$fold_loglik
+mfull2_cv$sum_loglik
+ 
+mfull2_cv$max_gradients
+```
+
+```{r difference in elpd}
+mfull_cv$elpd - mfull2_cv$elpd
+```
+
