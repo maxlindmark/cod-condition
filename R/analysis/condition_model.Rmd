@@ -45,6 +45,7 @@ library(qwraps2)
 library(ggcorrplot)
 library(ggridges)
 #remotes::install_github("pbs-assess/sdmTMB", ref = "sim2")
+#remotes::install_github("pbs-assess/sdmTMB")
 library(sdmTMB)
 
 # To load entire cache in interactive r session, do: 
@@ -300,29 +301,17 @@ pred_grid %>%
 #   theme_light() +
 #   NULL
 
-# ggplot(pred_grid, aes(depth, oxy)) + geom_point() +
-#   geom_hline(yintercept = 1, col = "red") +
-#   geom_hline(yintercept = 4.3, col = "red")
-# 
-m1 <- lm(oxy ~ depth, data = pred_grid)
-nd <- data.frame(depth = c(40, 45, 50, 60, 70))
+pred_grid %>% 
+  filter(sub_div == 25) %>% 
+  ggplot(aes(depth, oxy)) + geom_point() +
+  geom_hline(yintercept = 4.6, col = "red") +
+  geom_vline(xintercept = 57, col = "red")
+
+m1 <- lm(oxy ~ depth, data = filter(pred_grid, sub_div == 25))
+nd <- data.frame(depth = 57)
 nd$pred <- predict(m1, newdata = nd)
 nd
 nd$pred[2] - nd$pred[1]
- 
-# plot(temp ~ depth, data = pred_grid)
-# m1 <- lm(temp ~ depth, data = filter(pred_grid, depth < 100))
-# nd <- data.frame(depth = c(40, 45))
-# nd$pred <- predict(m1, newdata = nd)
-# nd
-# nd$pred[2] - nd$pred[1]
-# 
-# pred_grid %>% 
-#   group_by(sub_div, year) %>% 
-#   summarise(mean_oxy = mean(oxy)) %>% 
-#   ungroup() %>% 
-#   ggplot(., aes(year, mean_oxy, color = sub_div)) +
-#   geom_line()
 ```
 
 ## Make spde mesh
@@ -345,20 +334,146 @@ ptm <- proc.time()
 mfull <- sdmTMB(
   formula = ln_weight_g ~ -1 + ln_length_cm + biomass_her_sc + biomass_her_sd_sc +
     biomass_spr_sc + biomass_spr_sd_sc +
-    density_cod_sc + density_cod_rec_sc + #density_cod_sd_sc +
-    density_fle_sc + density_fle_rec_sc + #density_fle_sd_sc +
-    density_saduria_sc + density_saduria_rec_sc + #density_saduria_sd_sc + 
-    depth_sc + depth_rec_sc + #depth_sd_sc +
-    oxy_sc + oxy_rec_sc + #oxy_sd_sc +
-    temp_sc + temp_rec_sc, #+ #temp_sd_sc,
+    density_cod_sc + density_cod_rec_sc + 
+    density_fle_sc + density_fle_rec_sc + 
+    density_saduria_sc + density_saduria_rec_sc + 
+    depth_sc + depth_rec_sc + 
+    oxy_sc + oxy_rec_sc + 
+    temp_sc + temp_rec_sc, 
   time_varying = ~ 1, data = d, time = "year", mesh = spde,
   family = student(link = "identity", df = 5),
-  spatiotemporal = "AR1", spatial = "on", silent = TRUE, reml = FALSE,
+  spatiotemporal = "ar1", spatial = "on", silent = TRUE, reml = FALSE,
   control = sdmTMBcontrol(newton_loops = 1, eval.max = 10000, iter.max = 10000, nlminb_loops = 2))
 proc.time() - ptm
 
 tidy(mfull, conf.int = TRUE) %>% arrange(desc(abs(estimate)))
 tidy(mfull, effects = "ran_par", conf.int = TRUE) 
+```
+
+```{r fit non_spatial full model no covars, cache=TRUE}
+mfull_non_spatial_nocovars <- sdmTMB(
+  formula = ln_weight_g ~ ln_length_cm, 
+  time_varying = NULL, data = d, time = NULL, mesh = spde,
+  family = student(link = "identity", df = 5),
+  spatiotemporal = "off", spatial = "off", silent = TRUE, reml = FALSE,
+  control = sdmTMBcontrol(newton_loops = 1, eval.max = 10000, iter.max = 10000, nlminb_loops = 2))
+
+tidy(mfull_non_spatial_nocovars)
+```
+
+```{r fit non_spatial full model, cache=TRUE}
+ptm <- proc.time()
+mfull_non_spatial <- sdmTMB(
+  formula = ln_weight_g ~ ln_length_cm + biomass_her_sc + biomass_her_sd_sc +
+    biomass_spr_sc + biomass_spr_sd_sc +
+    density_cod_sc + density_cod_rec_sc + 
+    density_fle_sc + density_fle_rec_sc + 
+    density_saduria_sc + density_saduria_rec_sc + 
+    depth_sc + depth_rec_sc + 
+    oxy_sc + oxy_rec_sc + 
+    temp_sc + temp_rec_sc, 
+  time_varying = NULL, data = d, time = NULL, mesh = spde,
+  family = student(link = "identity", df = 5),
+  spatiotemporal = "off", spatial = "off", silent = TRUE, reml = FALSE,
+  control = sdmTMBcontrol(newton_loops = 1, eval.max = 10000, iter.max = 10000, nlminb_loops = 2))
+proc.time() - ptm
+
+tidy(mfull_non_spatial, conf.int = TRUE) %>% arrange(desc(abs(estimate)))
+#tidy(mfull_non_spatial, effects = "ran_par", conf.int = TRUE) 
+
+# Calculate log(CF) = log(w) - log(w_mean)
+
+d_test <- d
+
+d_test$cf <- d_test$ln_weight_g - (-4.6593200115 + 2.9899163668*d_test$ln_length_cm)
+
+plot_map_raster +
+  geom_point(data = d_test, aes(x = X * 1000, y = Y * 1000, color = cf), size = 2) +
+  scale_colour_gradient2() +
+  facet_wrap(~ year, ncol = 5) +
+  labs(color = "residuals") +
+  NULL
+
+d_test %>% 
+  group_by(year) %>% 
+  summarise(mean_cf = mean(cf)) %>% 
+  ggplot(aes(year, mean_cf)) +
+  geom_point()
+
+# Now fit CF model instead... i.e. to the difference between non spatial pred weight and weight
+ptm <- proc.time()
+mfull_cf <- sdmTMB(
+  formula = cf ~ -1 + biomass_her_sc + biomass_her_sd_sc +
+    biomass_spr_sc + biomass_spr_sd_sc +
+    density_cod_sc + density_cod_rec_sc + 
+    density_fle_sc + density_fle_rec_sc + 
+    density_saduria_sc + density_saduria_rec_sc + 
+    depth_sc + depth_rec_sc + 
+    oxy_sc + oxy_rec_sc + 
+    temp_sc + temp_rec_sc, 
+  time_varying = ~ 1, data = d_test, time = "year", mesh = spde,
+  family = student(link = "identity", df = 5),
+  spatiotemporal = "ar1", spatial = "on", silent = TRUE, reml = FALSE,
+  control = sdmTMBcontrol(newton_loops = 1, eval.max = 10000, iter.max = 10000, nlminb_loops = 2))
+proc.time() - ptm
+
+tidy(mfull_cf, conf.int = TRUE) %>% arrange(desc(abs(estimate)))
+tidy(mfull_cf, effects = "ran_par", conf.int = TRUE) 
+```
+
+##### CALCULATE R2 OF CF MODEL!! PLOT SPATIAL PREDICTIONS! CHECK COEFFICIENTS!
+
+## Calculate approximate r^2 manually using a modifed r2.sdmTMB
+
+```{r r_sq, cache = TRUE}
+b_fe <- tidy(mfull)
+b_fe <- stats::setNames(b_fe$estimate, b_fe$term)
+
+b_fe_all <- b_fe
+X_all <- mfull$tmb_data$X_ij
+VarF_all <- var(as.vector(b_fe_all %*% t(X_all))) # variance from fixed-effects (except length)
+
+b_fe <- b_fe[!names(b_fe) %in% "ln_length_cm"] # leave out the length-coefficient
+X <- mfull$tmb_data$X_ij[, !colnames(mfull$tmb_data$X_ij) %in% "ln_length_cm"] # leave out the length data
+VarF <- var(as.vector(b_fe %*% t(X))) # variance from fixed-effects (except length)
+
+b_ran <- tidy(mfull, "ran_par")
+sigma_O <- b_ran$estimate[b_ran$term == "sigma_O"] # spatial standard deviation
+sigma_E <- b_ran$estimate[b_ran$term == "sigma_E"] # spatiotemporal standard deviation
+sigma_V <- b_ran$estimate[b_ran$term == "sigma_V"] # random walk intercept
+VarO <- sigma_O^2 # spatial variance
+VarE <- sigma_E^2 # spatiotemporal variance
+VarV <- sigma_V^2 # time-varying variance # temporary rename to tau
+
+# Calculate obs - pred
+d_r2 <- d
+d_r2$pred <- predict(mfull)
+d_r2$resid_manual <- d_r2$ln_weight_g - d_r2$pred$est
+hist(d_r2$resid_manual)
+VarR <- var(as.vector(d_r2$resid_manual)) # "residual" variance
+ 
+# Marginal R2s
+denominator <- VarF_all + VarO + VarE + VarV + VarR
+
+marg <- VarF/denominator
+marg
+cond_all <- (VarF + VarO + VarE + VarV)/denominator
+cond_all
+
+marg_o <- VarO/denominator
+marg_o
+marg_e <- VarE/denominator
+marg_e
+marg_v <- VarV/denominator
+marg_v
+
+marg + marg_o + marg_e + marg_v
+cond_all
+
+# Testing without year
+summary(lm(ln_weight_g ~ ln_length_cm, data = d))
+
+plot(d$ln_weight_g ~ d$ln_length_cm)
 ```
 
 ## Plot residuals
@@ -554,37 +669,37 @@ year_diff %>%
 
 ```{r weight-at-length, cache=TRUE}
 # Now calculate the change in weight given a decline in the intercept
-tw_intercept_1993 <- as.vector(mfull$sd_report$par.random[1])
-tw_intercept_2019 <- as.vector(mfull$sd_report$par.random[27])
-b <- as.vector(mfull$sd_report$par.fixed[1])
-
-t2 <- tibble(l = seq(1, 80, 0.1)) %>% 
-  mutate(w1 = exp(tw_intercept_1993)*l^b,
-         w2 = exp(tw_intercept_2019)*l^b,
-         log_w1 = log(w1),
-         log_w2 = log(w2)) %>% 
-  pivot_longer(2:5, names_to = "temp", values_to = "Weight") %>%
-  mutate(Year = ifelse(temp %in% c("w1", "log_w1"), "1993", "2019"),
-         Scale = ifelse(temp %in% c("w1", "w2"), "Arithmetic", "ln"),
-         l = ifelse(Scale == "ln", log(l), l))
-  
-pal <- brewer.pal(n = 8, name = "Dark2")[c(6,8)]
-
-ggplot(t2, aes(l, Weight, color = Year, linetype = Year)) + 
-  geom_line(size = 0.7, alpha = 0.8) +
-  scale_color_manual(values = pal) +
-  scale_linetype_manual(values = c(1, 2)) + 
-  labs(color = "Year", x = "Length [cm]", y = "Weight [g]") +
-  theme_light(base_size = 14) + 
-  theme_plot() +
-  facet_wrap(~Scale, scales = "free") +
-  theme(axis.text.x = element_text(angle = 0),
-        legend.position = "bottom",
-        legend.background = element_blank(),
-        aspect.ratio = 1) +
-  NULL
-
-ggsave("figures/supp/lw_relationship.png", width = 6.5, height = 6.5, dpi = 600)
+# tw_intercept_1993 <- as.vector(mfull$sd_report$par.random[1])
+# tw_intercept_2019 <- as.vector(mfull$sd_report$par.random[27])
+# b <- as.vector(mfull$sd_report$par.fixed[1])
+# 
+# t2 <- tibble(l = seq(1, 80, 0.1)) %>% 
+#   mutate(w1 = exp(tw_intercept_1993)*l^b,
+#          w2 = exp(tw_intercept_2019)*l^b,
+#          log_w1 = log(w1),
+#          log_w2 = log(w2)) %>% 
+#   pivot_longer(2:5, names_to = "temp", values_to = "Weight") %>%
+#   mutate(Year = ifelse(temp %in% c("w1", "log_w1"), "1993", "2019"),
+#          Scale = ifelse(temp %in% c("w1", "w2"), "Arithmetic", "ln"),
+#          l = ifelse(Scale == "ln", log(l), l))
+#   
+# pal <- brewer.pal(n = 8, name = "Dark2")[c(6,8)]
+# 
+# ggplot(t2, aes(l, Weight, color = Year, linetype = Year)) + 
+#   geom_line(size = 0.7, alpha = 0.8) +
+#   scale_color_manual(values = pal) +
+#   scale_linetype_manual(values = c(1, 2)) + 
+#   labs(color = "Year", x = "Length [cm]", y = "Weight [g]") +
+#   theme_light(base_size = 14) + 
+#   theme_plot() +
+#   facet_wrap(~Scale, scales = "free") +
+#   theme(axis.text.x = element_text(angle = 0),
+#         legend.position = "bottom",
+#         legend.background = element_blank(),
+#         aspect.ratio = 1) +
+#   NULL
+# 
+# ggsave("figures/supp/lw_relationship.png", width = 6.5, height = 6.5, dpi = 600)
 
 # Below I use sims
 # I could potentially use gather_sims, but spread_sims does not report the time-varying alpha... hmmm..
@@ -646,7 +761,6 @@ ggsave("figures/supp/lw_relationship.png", width = 6.5, height = 6.5, dpi = 600)
 #   NULL
 ```
 
-
 ## Simulated annual condition factor by sub-division 
 
 ```{r sim annual condition factor by sub-division, message=FALSE,cache=TRUE}
@@ -686,11 +800,11 @@ div_index <- bind_rows(index_avg_24_sim, index_avg_25_sim, index_avg_26_sim, ind
 
 ```{r plot condition index and condition factor, message=FALSE}
 # Add in the Le Cren condition index for d
-mfull$sd_report$par.random[1:27]
-mean_tw_intercept <- mean(mfull$sd_report$par.random[1:27])
-mean_tw_intercept # average intercept
-mfull$sd_report$par.fixed[1] # length-coefficient
-d$le_cren <- d$weight_g / (exp(mean_tw_intercept)*d$length_cm^mfull$sd_report$par.fixed[1])
+# mfull$sd_report$par.random[1:27]
+# mean_tw_intercept <- mean(mfull$sd_report$par.random[1:27])
+# mean_tw_intercept # average intercept
+# mfull$sd_report$par.fixed[1] # length-coefficient
+# d$le_cren <- d$weight_g / (exp(mean_tw_intercept)*d$length_cm^mfull$sd_report$par.fixed[1])
 
 div_index2 <- bind_rows(mutate(div_index, sub_div = as.factor(sub_div)),
                         mutate(index_avg_sim, sub_div = as.factor("Total")))
@@ -728,89 +842,108 @@ cond_index
 
 # Plot change in condition over size
 # Plot the slopes
-cond_year_slopes <- d %>%
-  mutate(lenCls = cut(length_cm, breaks = seq(0, 150, 10)),
-         lenCls_fct = factor(lenCls)) %>% 
-  mutate(year_ct = year - 1993) %>% 
-  split(.$lenCls_fct) %>%
-  purrr::map(~lm(le_cren ~ year_ct, data = .x)) %>%
-  purrr::map_df(broom::tidy, .id = 'lenCls_fct') %>%
-  filter(term %in% c('year_ct', "(Intercept)")) %>% 
-  dplyr::select(-c(statistic, p.value)) %>% 
-  filter(term == "year_ct")
+# cond_year_slopes <- d %>%
+#   mutate(lenCls = cut(length_cm, breaks = seq(0, 150, 10)),
+#          lenCls_fct = factor(lenCls)) %>% 
+#   mutate(year_ct = year - 1993) %>% 
+#   split(.$lenCls_fct) %>%
+#   purrr::map(~lm(le_cren ~ year_ct, data = .x)) %>%
+#   purrr::map_df(broom::tidy, .id = 'lenCls_fct') %>%
+#   filter(term %in% c('year_ct', "(Intercept)")) %>% 
+#   dplyr::select(-c(statistic, p.value)) %>% 
+#   filter(term == "year_ct")
 
-cond_slope_fig <- cond_year_slopes %>% 
-  separate(lenCls_fct, c("lwr", "upr"), sep = ",") %>%
-  separate(upr, c("upr", "scrap"), sep = "]") %>%
-  dplyr::select(-scrap) %>% 
-  mutate(upr_num = as.numeric(upr)) %>% 
-  filter(upr_num > 10 & upr_num < 80) %>% 
-  ggplot(., aes(as.factor(upr_num), estimate)) +
-  geom_hline(yintercept = 0, alpha = 0.5, linetype = 2, color = "red") +
-  geom_point(size = 1.2, position = position_dodge(width = 0.5), color = "gray40") + 
-  geom_errorbar(aes(x = as.factor(upr_num),
-                    ymax = estimate + 1.96*std.error,
-                    ymin = estimate - 1.96*std.error),
-                width = 0.3, position = position_dodge(width = 0.5), color = "gray40") +
-  labs(y = "Slope (condition index ~ year)", x = "Length-class (upper value) [cm]") +
-  theme(axis.title = element_text(size = 9)) +
-  NULL
+# Calculate sample sizes...
+# d %>%
+#   mutate(lenCls = cut(length_cm, breaks = seq(0, 150, 10))) %>% 
+#   group_by(lenCls, year) %>% 
+#   summarise(n = n()) %>% 
+#   ungroup() %>% 
+#   group_by(lenCls) %>% 
+#   summarise(mean_n = mean(n))
+# 
+# cond_slope_fig <- cond_year_slopes %>% 
+#   separate(lenCls_fct, c("lwr", "upr"), sep = ",") %>%
+#   separate(upr, c("upr", "scrap"), sep = "]") %>%
+#   dplyr::select(-scrap) %>% 
+#   mutate(upr_num = as.numeric(upr)) %>% 
+#   filter(upr_num > 10 & upr_num < 80) %>% 
+#   ggplot(., aes(as.factor(upr_num), estimate)) +
+#   geom_hline(yintercept = 0, alpha = 0.5, linetype = 2, color = "red") +
+#   geom_point(size = 1.2, position = position_dodge(width = 0.5), color = "gray40") + 
+#   geom_errorbar(aes(x = as.factor(upr_num),
+#                     ymax = estimate + 1.96*std.error,
+#                     ymin = estimate - 1.96*std.error),
+#                 width = 0.3, position = position_dodge(width = 0.5), color = "gray40") +
+#   labs(y = "Slope (condition index ~ year)", x = "Length-class (upper value) [cm]") +
+#   theme(axis.title = element_text(size = 9)) +
+#   NULL
 
-size_dist <- ggplot(d, aes(length_cm)) +
-  geom_density(alpha = 0.8, fill = "gray70", color = "gray50") +
-  coord_cartesian(expand = 0, xlim = c(14, 76), ylim = c(0, 0.031)) + 
-  scale_x_continuous(breaks = scales::pretty_breaks(n = 7)) +
-  labs(y = "Density", x = "Length-class (upper value) [cm]") +
-  theme(axis.title = element_text(size = 9)) + 
-  NULL
-
-cond_slope_fig / size_dist + plot_layout(heights = c(3, 1))
+# size_dist <- ggplot(d, aes(length_cm)) +
+#   geom_density(alpha = 0.8, fill = "gray70", color = "gray50") +
+#   coord_cartesian(expand = 0, xlim = c(14, 76), ylim = c(0, 0.031)) + 
+#   scale_x_continuous(breaks = scales::pretty_breaks(n = 7)) +
+#   labs(y = "Density", x = "Length-class (upper value) [cm]") +
+#   theme(axis.title = element_text(size = 9)) + 
+#   NULL
+# 
+# cond_slope_fig / size_dist + plot_layout(heights = c(3, 1))
 
 # Plot deciles
-pal <- brewer.pal(n = 8, name = "Dark2")
-
-deciles_sum <- d %>% 
-  group_by(year) %>% 
+# pal <- brewer.pal(n = 8, name = "Dark2")
+# 
+deciles_sum <- d %>%
+  group_by(year) %>%
   summarise("1st" = quantile(x = le_cren, p = c(0.1)),
             "5th (median)" = quantile(x = le_cren, p = c(0.5)),
-            "9th" = quantile(x = le_cren, p = c(0.9))) %>% 
-  ungroup() #%>% 
-  # pivot_longer(2:4, names_to = "Deciles", values_to = "le_cren") %>% 
+            "9th" = quantile(x = le_cren, p = c(0.9))) %>%
+  ungroup() #%>%
+  # pivot_longer(2:4, names_to = "Deciles", values_to = "le_cren") %>%
   # group_by(Deciles)
+# 
+# deciles <- ggplot() +
+#   geom_ribbon(data = deciles_sum, aes(x = year, ymin = `1st`, ymax = `9th`), fill = "grey90") + 
+#   stat_smooth(data = deciles_sum, aes(year, `5th (median)`), method = "gam", formula = y~s(x, k = 3),
+#               se = TRUE, show.legend = FALSE, color = "tomato") + 
+#   geom_point(data = deciles_sum, aes(year, `5th (median)`), color = "grey30") +
+#   labs(x = "Year", y = "Le Cren's condition index", color = "Deciles") +
+#   theme(axis.title = element_text(size = 9),
+#         legend.position = c(0.85, 0.85),
+#         legend.background = element_blank(),
+#         legend.title = element_text(size = 9),
+#         legend.spacing.x = unit(0, 'cm'),
+#         plot.margin = unit(c(0.4, 0.4, 0.4, 0), "cm")) +
+#   guides(fill = "none",
+#          color = guide_legend(keywidth = 0.1,
+#                               keyheight = 0.1, 
+#                               default.unit = "inch")) + 
+#   NULL
+#   
+# deciles
 
-deciles <- ggplot() +
-  geom_ribbon(data = deciles_sum, aes(x = year, ymin = `1st`, ymax = `9th`), fill = "grey90") + 
-  stat_smooth(data = deciles_sum, aes(year, `5th (median)`), method = "gam", formula = y~s(x, k = 3),
-              se = TRUE, show.legend = FALSE, color = "tomato") + 
-  geom_point(data = deciles_sum, aes(year, `5th (median)`), color = "grey30") +
-  labs(x = "Year", y = "Le Cren's condition index", color = "Deciles") +
-  theme(axis.title = element_text(size = 9),
-        legend.position = c(0.85, 0.85),
-        legend.background = element_blank(),
-        legend.title = element_text(size = 9),
-        legend.spacing.x = unit(0, 'cm'),
-        plot.margin = unit(c(0.4, 0.4, 0.4, 0), "cm")) +
-  guides(fill = "none",
-         color = guide_legend(keywidth = 0.1,
-                              keyheight = 0.1, 
-                              default.unit = "inch")) + 
-  NULL
-  
-deciles
+ggplot(d, aes(le_cren, as.factor(year))) +
+  geom_density_ridges()
+  # geom_density_ridges(rel_min_height = 0.01, jittered_points = TRUE,
+  #                     position = position_points_jitter(width = 0.5, height = 0),
+  #                     point_shape = "|", point_size = 2,
+  #                     alpha = 0.7)
 
 # ggridges...
-# ggplot(deciles_sum, aes(x = le_cren, y = as.factor(year), fill = factor(stat(quantile)))) +
+# ggplot(d, aes(x = le_cren, y = as.factor(year))) +
 #   stat_density_ridges(
+#     stat = "density", trim = TRUE)
+# ,
+#     trim = TRUE,
 #     scale = 3,
 #     geom = "density_ridges_gradient",
 #     calc_ecdf = TRUE,
 #     alpha = 0.1,
-#     quantiles = c(0.025, 0.975)
-#   ) +
-#   scale_fill_manual(
-#     name = "Probability", values = c("grey40", "gray90", "grey40"),
-#     labels = c("(0, 0.025]", "(0.025, 0.975]", "(0.975, 1]")
-#   )
+#     quantiles = c(0.25, 0.5, 0.75))
+  # ) +
+  # scale_fill_manual(
+  #   name = "Probability", values = c("grey40", "gray90", "grey40"),
+  #   labels = c("(0, 0.025]", "(0.025, 0.975]", "(0.975, 1]")
+  # )
 
 cond_index + cond_slope_fig + deciles + size_dist +
   plot_annotation(tag_levels = 'A') +
