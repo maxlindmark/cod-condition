@@ -205,6 +205,16 @@ bits_hh <- bits_hh %>%
 ```{r, message=FALSE}
 bits_hh <- bits_hh %>% 
   mutate(haul.id = paste(Year, Quarter, Country, Ship3, Gear, StNo, HaulNo, sep = ":")) 
+
+bits_hh %>% 
+  distinct(haul.id, .keep_all = TRUE) %>% 
+  group_by(Month) %>% 
+  summarise(n = n()) %>% 
+  ungroup() %>% 
+  mutate((prop = n / sum(n)) * 100)
+              
+  
+
 ```
 
 ### Clean DATRAS EXCHANGE data
