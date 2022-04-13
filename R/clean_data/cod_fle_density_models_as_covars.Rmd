@@ -24,6 +24,7 @@ knitr::opts_chunk$set(
 In this script, I fit simplified models to density data so that I can predict densities on the condition data and pred grid
 
 ## Load libraries
+
 ```{r, message=FALSE}
 rm(list = ls())
 
@@ -107,6 +108,24 @@ ggplot(d) +
   facet_wrap(~sub_div)
 ```
 
+## Load prediction grid
+
+```{r pred grid}
+pred_grid1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(1_2).csv")
+pred_grid <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(2_2).csv")
+
+pred_grid <- bind_rows(pred_grid1, pred_grid)
+
+# Standardize data with respect to prediction grid:
+pred_grid <- pred_grid %>%
+  mutate(year = as.integer(year)) %>% 
+  filter(year %in% c(unique(d$year))) %>% 
+  mutate(depth_sc = (depth - mean(d$depth))/sd(d$depth),
+         temp_sc = (temp - mean(d$temp))/sd(d$temp),
+         oxy_sc = (oxy - mean(d$oxy))/sd(d$oxy)) %>% # Need to scale these to the mean and sd in the data!
+  drop_na(oxy, depth, temp)
+```
+
 ## Make mesh
 
 ```{r make mesh}
@@ -156,6 +175,130 @@ saveRDS(mfle, "output/mfle.rds")
 ```
 
 ## Now that the models have been fit, I can create the `pred_gid` (make_pred_grid_utm.R)
+
+## [Extra for bentfish - calculate biomass index per subdivision]
+
+```{r calculate indexes, cachce=TRUE}
+### Cod
+# SD 24
+preds_cod24_sim <- predict(mcod, newdata = filter(pred_grid, sub_div == 24), nsim = 100)
+
+# SD 25
+preds_cod25_sim <- predict(mcod, newdata = filter(pred_grid, sub_div == 25), nsim = 100)
+
+# SD 26
+preds_cod26_sim <- predict(mcod, newdata = filter(pred_grid, sub_div == 26), nsim = 100)
+
+# SD 27
+preds_cod27_sim <- predict(mcod, newdata = filter(pred_grid, sub_div == 27), nsim = 100)
+
+# SD 28
+preds_cod28_sim <- predict(mcod, newdata = filter(pred_grid, sub_div == 28), nsim = 100)
+
+# Now calculate the CPUE index (average)
+index24_cod_sim <- get_index_sims(preds_cod24_sim, area = rep(2*2, nrow(preds_cod24_sim)))
+index25_cod_sim <- get_index_sims(preds_cod25_sim, area = rep(2*2, nrow(preds_cod25_sim)))
+index26_cod_sim <- get_index_sims(preds_cod26_sim, area = rep(2*2, nrow(preds_cod26_sim)))
+index27_cod_sim <- get_index_sims(preds_cod27_sim, area = rep(2*2, nrow(preds_cod27_sim)))
+index28_cod_sim <- get_index_sims(preds_cod28_sim, area = rep(2*2, nrow(preds_cod28_sim)))
+
+# Add some columns
+index24_cod_sim <- index24_cod_sim %>% mutate(sub_div = "24", species = "cod")
+index25_cod_sim <- index25_cod_sim %>% mutate(sub_div = "25", species = "cod")
+index26_cod_sim <- index26_cod_sim %>% mutate(sub_div = "26", species = "cod")
+index27_cod_sim <- index27_cod_sim %>% mutate(sub_div = "27", species = "cod")
+index28_cod_sim <- index28_cod_sim %>% mutate(sub_div = "28", species = "cod")
+
+
+### Flounder
+# SD 24
+preds_fle24_sim <- predict(mfle, newdata = filter(pred_grid, sub_div == 24), nsim = 100)
+
+# SD 25
+preds_fle25_sim <- predict(mfle, newdata = filter(pred_grid, sub_div == 25), nsim = 100)
+
+# SD 26
+preds_fle26_sim <- predict(mfle, newdata = filter(pred_grid, sub_div == 26), nsim = 100)
+
+# SD 27
+preds_fle27_sim <- predict(mfle, newdata = filter(pred_grid, sub_div == 27), nsim = 100)
+
+# SD 28
+preds_fle28_sim <- predict(mfle, newdata = filter(pred_grid, sub_div == 28), nsim = 100)
+
+# Now calculate the CPUE index (average)
+index24_fle_sim <- get_index_sims(preds_fle24_sim, area = rep(2*2, nrow(preds_fle24_sim)))
+index25_fle_sim <- get_index_sims(preds_fle25_sim, area = rep(2*2, nrow(preds_fle25_sim)))
+index26_fle_sim <- get_index_sims(preds_fle26_sim, area = rep(2*2, nrow(preds_fle26_sim)))
+index27_fle_sim <- get_index_sims(preds_fle27_sim, area = rep(2*2, nrow(preds_fle27_sim)))
+index28_fle_sim <- get_index_sims(preds_fle28_sim, area = rep(2*2, nrow(preds_fle28_sim)))
+
+# Add some columns
+index24_fle_sim <- index24_fle_sim %>% mutate(sub_div = "24", species = "fle")
+index25_fle_sim <- index25_fle_sim %>% mutate(sub_div = "25", species = "fle")
+index26_fle_sim <- index26_fle_sim %>% mutate(sub_div = "26", species = "fle")
+index27_fle_sim <- index27_fle_sim %>% mutate(sub_div = "27", species = "fle")
+index28_fle_sim <- index28_fle_sim %>% mutate(sub_div = "28", species = "fle")
+
+div_index_sim <- bind_rows(index24_cod_sim, index25_cod_sim, index26_cod_sim, index27_cod_sim, index28_cod_sim,
+                           index24_fle_sim, index25_fle_sim, index26_fle_sim, index27_fle_sim, index28_fle_sim) %>% 
+  mutate(est_t = est/1000, lwr_t = lwr/1000, upr_t = upr/1000) # convert to tonnes 
+```
+
+Plot the index and save as csv
+
+```{r plot and save index}
+ggplot(div_index_sim, aes(year, est_t, color = sub_div)) +
+  geom_line() +
+  facet_wrap(~species, scales = "free") +
+  geom_ribbon(aes(year, ymin = lwr_t, ymax = upr_t, fill = sub_div), alpha = 0.2) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  scale_color_brewer(palette = "Dark2") +
+  scale_fill_brewer(palette = "Dark2", name = "ICES subdivision") +
+  guides(color = "none") + 
+  labs(x = "Year", y = "Tonnes", fill = "Sub Divisions") +
+  theme(axis.text.x = element_text(angle = 90),
+        legend.position = "bottom",
+        legend.key.height = unit(0.2, "cm"),
+        legend.key.width = unit(0.2, "cm"),
+        legend.background = element_blank(),
+        plot.margin = unit(c(0, 0.25, 0.15, 0), "cm")) +
+  NULL
+
+ggplot(div_index_sim, aes(year, est_t, color = sub_div)) +
+  geom_line() +
+  facet_wrap(~species, scales = "free") +
+  #geom_ribbon(aes(year, ymin = lwr_t, ymax = upr_t, fill = sub_div), alpha = 0.2) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  scale_color_brewer(palette = "Dark2") +
+  scale_fill_brewer(palette = "Dark2", name = "ICES subdivision") +
+  guides(color = "none") + 
+  labs(x = "Year", y = "Tonnes", fill = "Sub Divisions") +
+  theme(axis.text.x = element_text(angle = 90),
+        legend.position = "bottom",
+        legend.key.height = unit(0.2, "cm"),
+        legend.key.width = unit(0.2, "cm"),
+        legend.background = element_blank(),
+        plot.margin = unit(c(0, 0.25, 0.15, 0), "cm")) +
+  NULL
+
+ggplot(div_index_sim, aes(year, est_t, color = species)) +
+  geom_line() +
+  facet_wrap(~sub_div, scales = "free") +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  scale_color_brewer(palette = "Dark2") +
+  scale_fill_brewer(palette = "Dark2", name = "ICES subdivision") +
+  labs(x = "Year", y = "Tonnes", fill = "Sub Divisions") +
+  theme(axis.text.x = element_text(angle = 90),
+        legend.position = "bottom",
+        legend.key.height = unit(0.2, "cm"),
+        legend.key.width = unit(0.2, "cm"),
+        legend.background = element_blank(),
+        plot.margin = unit(c(0, 0.25, 0.15, 0), "cm")) +
+  NULL
+
+write.csv(div_index_sim, "cod_fle_index.csv")
+```
 
 ```{r}
 knitr::knit_exit()
