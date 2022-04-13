@@ -1015,20 +1015,46 @@ pred_grid %>%
 ggsave("figures/supp/env_oxy.png", width = 6.5, height = 6.5, dpi = 600)
 
 # Oxygen vs year and sd
+theme_plot <- function(base_size = 10, base_family = "") {
+  theme_light(base_size = 10, base_family = "") +
+    theme(
+      axis.text.x = element_text(angle = 90),
+      axis.text = element_text(size = 8),
+      legend.text = element_text(size = 8),
+      legend.title = element_text(size = 8),
+      legend.position = "bottom",
+      legend.key.height = unit(0.2, "cm"),
+      legend.margin = margin(0, 0, 0, 0),
+      legend.box.margin = margin(-5, -5, -5, -5),
+      strip.text = element_text(size = 8, colour = 'gray10', margin = margin()),
+      strip.background = element_rect(fill = "grey95")
+      )
+}
+
 pred_grid %>% 
   drop_na(oxy, sub_div) %>% 
   filter(!sub_div == 22) %>% 
   group_by(year, sub_div) %>% 
   summarise(mean_oxy = mean(oxy),
             sd_oxy = sd(oxy)) %>% 
-  ggplot(., aes(year, mean_oxy)) +
+  ggplot(., aes(year, mean_oxy, color = sub_div, fill = sub_div)) +
   geom_point() + 
   facet_wrap(~ sub_div) +
   # geom_errorbar(aes(x = year, ymin = mean_oxy - sd_oxy, ymax = mean_oxy + sd_oxy, width = 0),
   #               alpha = 0.5) + 
-  stat_smooth(method = "gam", formula = y ~ s(x, k = 3), color = "tomato") +
+  stat_smooth(method = "gam", formula = y ~ s(x, k = 3)) +
   labs(y = "Mean 02 [ml/L]", x = "Year") +  
-  labs(y = expression(paste("Mean O" [2], " [ml/L]", sep = "")), x = "Year")
+  labs(y = expression(paste("Mean O" [2], " [ml/L]", sep = "")), x = "Year") +
+  scale_color_brewer(palette = "Dark2") +
+  scale_fill_brewer(palette = "Dark2") +
+  theme_plot() +
+  theme(aspect.ratio = 1,
+        axis.text.x = element_text(angle = 0),
+        legend.position = "bottom",
+        legend.key.size = unit(0.6, "cm"),
+        legend.text = element_text(size = 8),
+        plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+  NULL
 
 ggsave("figures/supp/env_oxy_sd.png", width = 6.5, height = 6.5, dpi = 600)
 
