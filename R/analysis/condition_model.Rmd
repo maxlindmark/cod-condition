@@ -284,6 +284,15 @@ unique(is.na(pred_grid))
 pred_grid %>% 
   drop_na(biomass_spr_sc, biomass_spr_sd_sc, biomass_her_sc, biomass_her_sd_sc) %>% 
   ggplot(., aes(X, Y)) + geom_point(size = 0.1) + facet_wrap(~year)
+
+pred_grid %>% 
+  filter(sub_div == 25) %>% 
+  ggplot(aes(oxy, depth)) + 
+  facet_wrap(~sub_div, scales = "free") +
+  geom_point() + 
+  stat_smooth() + 
+  coord_cartesian(ylim = c(40, 45),
+                  xlim = c(6.6, 7))
 ```
 
 ```{r, include=FALSE}
