@@ -56,6 +56,7 @@ SISP7 BITS 2017.pdf
 /data/DATRAS_exchange
 /data/from_mich
 /data/from_ale
+/data/geomar_oxy_from_ale
 /data/OCEANOGRAPHY
 /data/NEMO_Nordic_SCOBI
 /data/depth_geo_tif
@@ -79,6 +80,9 @@ Checklist for cod_density project - Google Docs
 /figures/supp/temp_rasters/
 /figures/supp/cpue_oxygen_rasters/
 /figures/supp/cpue_temp_rasters/
+
+# Exploring convergence html markdown
+/R/supp_analysis/converge_tests_condition_model_cf.html
 
 # Meeting slides
 /meetings
