@@ -1044,7 +1044,7 @@ all_rect <- pred_grid %>%
 
 all_dat <- bind_rows(all_rect, niche_rect)
 
-# Now add in the condition data to calculate sample size per rectangl
+# Now add in the condition data to calculate sample size per rectangle
 # Filter
 cond1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cond_(1_2).csv")
 cond2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cond_(2_2).csv")
@@ -1069,7 +1069,6 @@ t <- cond_all %>% filter(median_depth < 100)
 plot(cond_all$median_depth_sc)
 plot(cond_niche$median_depth_sc)
 
-
 cond2 <- cond %>%
   group_by(year, ices_rect) %>%
   summarise(n = n()) %>%
@@ -1078,7 +1077,6 @@ cond2 <- cond %>%
   dplyr::select(-year, -ices_rect)
 
 cond2 %>% arrange(n) %>% as.data.frame()
-hist(cond$n)
 
 all_dat <- left_join(all_dat, cond2)
 
@@ -1159,8 +1157,8 @@ m1 <- lm(ln_weight_g ~ as.factor(year) + ln_length_cm + biomass_her_sc + biomass
 
 summary(m1)
 
-# density_cod_sc         -0.0042855  0.0005143   -8.332  < 2e-16 ***
-# density_fle_sc          0.0020136  0.0005241    3.842 0.000122 ***
+# density_cod_sc         -0.0038978  0.0005076   -7.678 1.63e-14 ***
+# density_fle_sc          0.0015849  0.0005212    3.041 0.002362 ** 
 
 m2 <- lm(ln_weight_g ~ as.factor(year) + ln_length_cm + biomass_her_sc + biomass_her_sd_sc +
     biomass_spr_sc + biomass_spr_sd_sc +

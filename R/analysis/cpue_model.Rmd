@@ -1,6 +1,6 @@
 ---
 title: "Cod density in relation to environmental variables"
-author: "Max Lindmark, Sean Andersson, Michele Casini"
+author: "Max Lindmark, Sean Andersson, Mayya Gogina and Michele Casini"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
   html_document:
@@ -187,28 +187,47 @@ dev.off()
 # Depth spline + oxy spline
 # Takes about 30 minutes
 m <- sdmTMB(density ~ 0 + as.factor(year) + s(depth_sc) + s(oxy_sc) + s(temp_sc),
-            data = d, mesh = spde, family = tweedie(link = "log"),
-            spatiotemporal = "AR1", spatial = "on", time = "year",
-            reml = FALSE, control = sdmTMBcontrol(newton_steps = 1))
+            data = d,
+            mesh = spde,
+            family = tweedie(link = "log"),
+            spatiotemporal = "AR1",
+            spatial = "on",
+            time = "year",
+            reml = FALSE,
+            control = sdmTMBcontrol(newton_steps = 1))
 
 tidy(m, conf.int = TRUE)
+```
+
+# Sanity check
+
+```{r, cache = TRUE}
+sanity(m)
+
+m_1 <- run_extra_optimization(m, nlminb_loops = 0, newton_loops = 1)
+
+sanity(m_1)
 ```
 
 ## Check QQ plot and residuals
 
 ```{r qqplot and resid, results='hide', cache=TRUE, message=FALSE}
-d$residualsm <- residuals(m)
+mcmc_res <- residuals(m_1, type = "mle-mcmc", mcmc_iter = 5000, mcmc_warmup = 2000,
+                      stan_args = list(control = list(max_treedepth = 11)))
 
 png(file = "figures/supp/density/qq.png", units = "in", width = 6.5, height = 6.5, res = 300)
-qqnorm(d$residualsm); abline(a = 0, b = 1)
+qqnorm(mcmc_res);qqline(mcmc_res)
 dev.off()
 
+d$residuals <- mcmc_res[, 1]
+```
+
+```{r residuals on map, results='hide', cache=TRUE, message=FALSE}
 # Residuals on map
 plot_map_raster +
-  geom_point(data = d, aes(x = X * 1000, y = Y * 1000, color = residualsm)) +
+  geom_point(data = d, aes(x = X * 1000, y = Y * 1000, color = residuals)) +
   scale_colour_gradient2() +
   facet_wrap(~ year, ncol = 5) +
-  labs(color = "residuals") +
   theme(strip.text = element_text(size = 8, colour = 'black', margin = margin()),
         strip.background = element_rect(fill = "grey90"))
 
@@ -218,13 +237,13 @@ ggsave("figures/supp/density/spatial_resid.png", width = 6.5, height = 6.5, dpi 
 ## Check the AR1 parameter (`rho` is `ar_phi` on the -1 to 1 scale):
 
 ```{r check AR1 estimate}
-tidy(m, effects = "ran_pars", conf.int = TRUE) %>% filter(term == "rho")
+tidy(m_1, effects = "ran_pars", conf.int = TRUE)
 ```
 
 ## Predict on grid
 
 ```{r predict, cache=TRUE}
-predict_mcod <- predict(m, newdata = pred_grid)
+predict_mcod <- predict(m_1, newdata = pred_grid)
 
 # Save prediction as csv (smaller than the model object...)
 write.csv(predict_mcod, "output/predict_mcod_density.csv")
@@ -264,122 +283,10 @@ plot_map_raster +
 ggsave("figures/supp/density/omega_s_map.png", width = 6.5, height = 6.5, dpi = 600)
 ```
 
-## Get the annual index
-
-```{r cpue index, message=FALSE, cache=TRUE}
-# # From these models, predict annual cpue index
-# # Make a new prediction this time without the deep areas! For the previous plot, I predict first then make NA 
-# # to make them more visible on the map. Here I don't want them to be included in the index-calculation
-# 
-# # First, get an index for average density (which we can compare with data)
-# ncells <- filter(pred_grid, year == max(pred_grid$year)) %>% nrow()
-# 
-# # Total prediction 
-# preds_cod_ave <- predict(m, newdata = pred_grid, return_tmb_object = TRUE, area = 1/ncells)
-# 
-# # Now get the total index by specifying the area of a grid cell
-# # Total prediction 
-# preds_cod <- predict(m, newdata = pred_grid, return_tmb_object = TRUE, area = 2*2)
-# 
-# # Total prediction (omitting SD 24!)
-# preds_cod25_28 <- predict(m, newdata = filter(pred_grid, !sub_div == 24),
-#                           return_tmb_object = TRUE, area = 2*2)
-# 
-# # SD 24-25
-# preds_cod24_25 <- predict(m, newdata = filter(pred_grid, sub_div %in% c(24, 25)),
-#                           return_tmb_object = TRUE, area = 2*2)
-# 
-# # SD 24
-# preds_cod24 <- predict(m, newdata = filter(pred_grid, sub_div == 24),
-#                        return_tmb_object = TRUE, area = 2*2)
-# 
-# # SD 25
-# preds_cod25 <- predict(m, newdata = filter(pred_grid, sub_div == 25),
-#                        return_tmb_object = TRUE, area = 2*2)
-# 
-# # SD 26
-# preds_cod26 <- predict(m, newdata = filter(pred_grid, sub_div == 26),
-#                        return_tmb_object = TRUE, area = 2*2)
-# 
-# # SD 27
-# preds_cod27 <- predict(m, newdata = filter(pred_grid, sub_div == 27),
-#                        return_tmb_object = TRUE, area = 2*2)
-# 
-# # SD 28
-# preds_cod28 <- predict(m, newdata = filter(pred_grid, sub_div == 28),
-#                        return_tmb_object = TRUE, area = 2*2)
-# 
-# # Now calculate the CPUE index (average)
-# index_ave <- get_index(preds_cod_ave, bias_correct = FALSE)
-# index <- get_index(preds_cod, bias_correct = FALSE)
-# index24_25 <- get_index(preds_cod24_25, bias_correct = FALSE)
-# index25_28 <- get_index(preds_cod25_28, bias_correct = FALSE)
-# index24 <- get_index(preds_cod24, bias_correct = FALSE)
-# index25 <- get_index(preds_cod25, bias_correct = FALSE)
-# index26 <- get_index(preds_cod26, bias_correct = FALSE)
-# index27 <- get_index(preds_cod27, bias_correct = FALSE)
-# index28 <- get_index(preds_cod28, bias_correct = FALSE)
-# 
-# # By sub divisions
-# index <- index %>% mutate(sub_div = "Total")
-# index24 <- index24 %>% mutate(sub_div = "24")
-# index25 <- index25 %>% mutate(sub_div = "25")
-# index26 <- index26 %>% mutate(sub_div = "26")
-# index27 <- index27 %>% mutate(sub_div = "27")
-# index28 <- index28 %>% mutate(sub_div = "28")
-# 
-# div_index <- bind_rows(index, index24, index25, index26, index27, index28)
-```
-
-## Compare average in data with get index function
-
-```{r plot indices, message=FALSE, cache=TRUE}
-# # Comparing to average cpue in data
-# d_sum <- d %>% 
-#   ungroup() %>% 
-#   group_by(year) %>%
-#   summarise(mean_density = mean(density),
-#             tot_density = sum(density))
-# 
-# index_ave %>%
-#   ggplot(., aes(year, est)) +
-#   geom_line() + 
-#   geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.4) +
-#   theme(axis.text.x = element_text(angle = 30),
-#         legend.position = c(0.8, 0.8)) +
-#   scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
-#   labs(x = "Year", y = expression(paste("Density [kg/", km^2, "]", sep = ""))) +
-#   NULL
-# 
-# # E-mail method from Sean - results in the same estimated average... 
-# # ... and both are comparable to the average cpue in the data
-# get_average_log_density <- function(obj, level = 0.95, ...)  {
-#   sdmTMB:::get_generic(obj, value_name = "link_total",
-#     bias_correct = FALSE, level = level, trans = I, ...)
-# }
-# 
-# avg <- get_average_log_density(preds_cod_ave)
-# 
-# d_sum <- d %>%
-#   ungroup() %>%
-#   group_by(year) %>%
-#   summarise(mean_density = mean(density))
-# 
-# avg %>%
-#   ggplot(., aes(year, exp(est))) +
-#   geom_line() +
-#   geom_ribbon(aes(ymin = exp(lwr), ymax = exp(upr)), alpha = 0.4) +
-#   geom_point(data = d_sum, aes(year, mean_density)) +
-#   geom_line(data = d_sum, aes(year, mean_density), linetype = 2) +
-#   labs(x = "Year", y = expression(paste("Density [kg/", km^2, "]", sep = ""))) +
-#   geom_point(data = index_ave, aes(year, est), color = "red", inherit.aes = FALSE) + # The get_index method
-#   NULL
-```
-
 ## Annual indices using `get_index_sims` method to avoid slow bias correction (not done above!)
 
 ```{r pred cod sim, cache=TRUE}
-# preds_cod_sim <- predict(m, newdata = pred_grid, sims = 100)
+# preds_cod_sim <- predict(m_1, newdata = pred_grid, sims = 100)
 # x <- get_index_sims(preds_cod_ave_sim, area = rep(2*2, nrow(preds_cod_ave_sim)))
 # 
 # ggplot(x, aes(year, est/1000, ymin = lwr/1000, ymax = upr/1000)) +
@@ -392,28 +299,28 @@ ggsave("figures/supp/density/omega_s_map.png", width = 6.5, height = 6.5, dpi = 
 ###
 # Now get the total index by specifying the area of a grid cell
 # Total prediction 
-preds_cod_sim <- predict(m, newdata = pred_grid, sims = 100)
+preds_cod_sim <- predict(m_1, newdata = pred_grid, sims = 100)
 
 # Total prediction (omitting SD 24!)
-preds_cod25_28_sim <- predict(m, newdata = filter(pred_grid, !sub_div == 24), sims = 100)
+preds_cod25_28_sim <- predict(m_1, newdata = filter(pred_grid, !sub_div == 24), sims = 100)
 
 # SD 24-25
-preds_cod24_25_sim <- predict(m, newdata = filter(pred_grid, sub_div %in% c(24, 25)), sims = 100)
+preds_cod24_25_sim <- predict(m_1, newdata = filter(pred_grid, sub_div %in% c(24, 25)), sims = 100)
 
 # SD 24
-preds_cod24_sim <- predict(m, newdata = filter(pred_grid, sub_div == 24), sims = 100)
+preds_cod24_sim <- predict(m_1, newdata = filter(pred_grid, sub_div == 24), sims = 100)
 
 # SD 25
-preds_cod25_sim <- predict(m, newdata = filter(pred_grid, sub_div == 25), sims = 100)
+preds_cod25_sim <- predict(m_1, newdata = filter(pred_grid, sub_div == 25), sims = 100)
 
 # SD 26
-preds_cod26_sim <- predict(m, newdata = filter(pred_grid, sub_div == 26), sims = 100)
+preds_cod26_sim <- predict(m_1, newdata = filter(pred_grid, sub_div == 26), sims = 100)
 
 # SD 27
-preds_cod27_sim <- predict(m, newdata = filter(pred_grid, sub_div == 27), sims = 100)
+preds_cod27_sim <- predict(m_1, newdata = filter(pred_grid, sub_div == 27), sims = 100)
 
 # SD 28
-preds_cod28_sim <- predict(m, newdata = filter(pred_grid, sub_div == 28), sims = 100)
+preds_cod28_sim <- predict(m_1, newdata = filter(pred_grid, sub_div == 28), sims = 100)
 
 # Now calculate the CPUE index (average)
 index_sim <- get_index_sims(preds_cod_sim, area = rep(2*2, nrow(preds_cod_sim)))
@@ -443,7 +350,7 @@ div_index_sim <- bind_rows(index_sim, index24_sim, index25_sim, index26_sim, ind
 ncells_sub <- filter(pred_grid, year == max(pred_grid$year) & depth > 20 & depth < 120) %>% nrow()
 pred_grid_sub <- filter(pred_grid, depth > 20 & depth < 120)
 
-pred_avg_sim_sub <- predict(m, newdata = pred_grid_sub, nsim = 100)
+pred_avg_sim_sub <- predict(m_1, newdata = pred_grid_sub, nsim = 100)
 
 index_avg_sim_sub <- get_index_sims(pred_avg_sim_sub, area = rep(2*2, nrow(pred_avg_sim_sub)))
 
@@ -528,226 +435,11 @@ plot_map_raster +
 ggsave("figures/supp/density/all_years_condition_map_covars.png", width = 6.5, height = 6.5, dpi = 600)
 ```
 
-## Asymmetrical alpha overlap index with saduria and sprat
+## Sprat trends by sub division
 
 ```{r Asymmetrical alpha plots, message=FALSE}
-# Define plotting theme for main plot
-# theme_plot2 <- function(base_size = 8, base_family = "") {
-#   theme_light(base_size = 8, base_family = "") +
-#     theme(
-#       axis.text.x = element_text(angle = 90),
-#       axis.text = element_text(size = 6),
-#       legend.text = element_text(size = 6),
-#       legend.title = element_text(size = 6),
-#       legend.position = "bottom",
-#       legend.key.height = unit(0.2, "cm"),
-#       legend.margin = margin(0, 0, 0, 0),
-#       legend.box.margin = margin(-5, -5, -5, -5),
-#       strip.text = element_text(size = 8, colour = 'gray10', margin = margin()),
-#       strip.background = element_rect(fill = "grey95")
-#       )
-# }
-# 
-# plot_map_raster_labels2 <- 
-#   plot_map_raster + 
-#   annotate("text", label = "Sweden", x = xmin2 + 0.25*xrange, y = ymin2 + 0.8*yrange, color = "black", size = 1.2) +
-#   annotate("text", label = "Denmark", x = xmin2 + 0.029*xrange, y = ymin2 + 0.43*yrange, color = "black", size = 1.2, angle = 75) +
-#   annotate("text", label = "Germany", x = xmin2 + 0.07*xrange, y = ymin2 + 0.025*yrange, color = "black", size = 1.2) +
-#   annotate("text", label = "Poland", x = xmin2 + 0.55*xrange, y = ymin2 + 0.1*yrange, color = "black", size = 1.2) +
-#   annotate("text", label = "Russia", x = xmin2 + 0.95*xrange, y = ymin2 + 0.2*yrange, color = "black", size = 1.2) +
-#   annotate("text", label = "Lithuania", x = xmin2 + 1*xrange, y = ymin2 + 0.47*yrange, color = "black", size = 1.2, angle = 75) +
-#   annotate("text", label = "Latvia", x = xmin2 + 0.99*xrange, y = ymin2 + 0.68*yrange, color = "black", size = 1.2, angle = 75)
-# 
-# # Calculate "Asymmetrical alpha" overlap of cod and saduria (Carrol et al 202)
-# predict_mcod_sad <- predict_mcod %>% 
-#   filter(!sub_div == 24) %>% # Filter sub division 24 where there are no saduria anyway...
-#   drop_na(est) %>% 
-#   drop_na(density_saduria) %>%
-#   group_by(year) %>% 
-#   mutate(p_pred = exp(est) / sum(exp(est)),
-#          p_prey = density_saduria / sum(density_saduria)) %>% 
-#   summarise(numerator = sum(p_pred * p_prey),
-#             denominator = sqrt(sum(p_prey*p_prey)),
-#             index = numerator/denominator) %>%
-#   ungroup()
-# 
-# sad_overlap <- ggplot(predict_mcod_sad) +
-#   geom_point(aes(year, index), size = 1.3, color = "gray30") +
-#   stat_smooth(aes(year, index), method = "gam", formula = y ~ s(x, k = 3),
-#               color = "tomato", size = 0.6) +
-#   theme_plot2() +
-#   labs(x = "Year") +
-#   labs(y = "Saduria overlap index") + 
-#   theme(plot.margin = unit(c(0.2, 0.4, 0.2, 0.2), "cm"),
-#         aspect.ratio = 1,
-#         axis.text.x = element_text(angle = 0)) +
-#   NULL
-# 
-# sad_map <- plot_map_raster_labels2 +
-#   geom_raster(data = filter(predict_mcod, year == "1999"), aes(x = X * 1000, y = Y * 1000, fill = density_saduria)) +
-#   scale_fill_viridis(option = "C") +
-#   labs(fill = "Saduria\ndensity") +
-#   theme_plot2() +
-#   theme(plot.margin = unit(c(0.2, 0.4, 0.2, 0.2), "cm"),
-#         legend.position = "bottom",
-#         legend.key.size = unit(0.6, "cm"),
-#         legend.text = element_text(size = 4.5)) +
-#   NULL
-# 
-# # Ices rectangle-level sprat overlap index
-# # First we need to summarize cod densities per rectangle
-# # predict_mcod %>% group_by(year, ices_rect) %>% summarise(n = n()) %>% ungroup() %>% distinct()
-# predict_mcod %>% drop_na(biomass_spr) %>% group_by(year, ices_rect) %>% distinct(biomass_spr)
-# predict_mcod %>% group_by(year, ices_rect) %>% distinct(est) %>% as.data.frame()
-# predict_mcod %>% drop_na(biomass_spr) %>% distinct(year, ices_rect) %>% nrow()
-# 
-# predict_mcod_rec <- predict_mcod %>% 
-#   drop_na(biomass_spr) %>% 
-#   group_by(year, ices_rect) %>% 
-#   summarise(est_sum = sum(exp(est))) %>% 
-#   ungroup()
-# 
-# # Get unique rectangle by year
-# predict_mcod_rec %>% group_by(year, ices_rect) %>% distinct(est_sum)
-# 
-# predict_mcod_rec_spr <- predict_mcod %>% 
-#   drop_na(biomass_spr) %>% 
-#   group_by(year, ices_rect) %>% 
-#   distinct(biomass_spr) %>% 
-#   ungroup()
-#   
-# # Join the cod and sprat df's
-# cod_sprat_rec_overlap_df <- left_join(predict_mcod_rec, predict_mcod_rec_spr)
-# 
-# # Calculate the overlap index
-# cod_sprat_rec_overlap_df <- cod_sprat_rec_overlap_df %>% 
-#   group_by(year) %>% 
-#   mutate(p_pred = est_sum / sum(est_sum),
-#          p_prey = biomass_spr / sum(biomass_spr)) %>% 
-#   summarise(numerator = sum(p_pred * p_prey),
-#             denominator = sqrt(sum(p_prey*p_prey)),
-#             index = numerator/denominator) %>%
-#   dplyr::select(year, index) %>% 
-#   ungroup() %>% 
-#   mutate(Scale = "ICES Rectangle")
-# 
-# # Plot
-# spr_overlap_rec <- ggplot(cod_sprat_rec_overlap_df, aes(year, index)) + 
-#   geom_point(aes(year, index), size = 1.3, color = "gray30") +
-#   stat_smooth(aes(year, index), method = "gam", formula = y ~ s(x, k = 3),
-#               color = "tomato", size = 0.6) +
-#   theme_plot2() +
-#   labs(y = "Sprat overlap index (rec)", x = "Year") + 
-#   theme(plot.margin = unit(c(0.2, 0.4, 0.2, 0.2), "cm"),
-#         legend.position = "bottom",
-#         aspect.ratio = 1,
-#         axis.text.x = element_text(angle = 0))
-#   
-# spr_overlap_rec
-# 
-# spr_map_rec <- plot_map_raster_labels2 +
-#   geom_raster(data = filter(predict_mcod, year == "1999"), aes(x = X * 1000, y = Y * 1000, fill = biomass_spr)) +
-#   scale_fill_viridis(option = "B") +
-#   labs(fill = "Sprat\nbiomass") +
-#   theme_plot2() +
-#   theme(plot.margin = unit(c(0.2, 0.4, 0.2, 0.2), "cm"),
-#         legend.position = "bottom",
-#         legend.key.size = unit(0.6, "cm"),
-#         legend.text = element_text(size = 4.5)) +
-#   NULL
-# 
-# Ices sub division sprat overlap index
-predict_mcod_sd <- predict_mcod %>%
-  drop_na(biomass_spr) %>%
-  group_by(year, sub_div) %>%
-  summarise(est_sum = sum(exp(est))) %>%
-  ungroup()
-
-predict_mcod_sd_spr <- predict_mcod %>%
-  drop_na(biomass_spr) %>%
-  #group_by(year, sub_div) %>%
-  distinct(year, sub_div, biomass_spr_sd) %>% # do not use distinct here FIX HERE
-  ungroup()
-
-# Join the df's
-cod_sprat_sd_overlap_df <- left_join(predict_mcod_sd, predict_mcod_sd_spr)
-
-cod_sprat_sd_overlap_df %>%
-  group_by(year) %>%
-  mutate(cod_prop = est_sum / sum(est_sum),
-         spr_prop = biomass_spr_sd / sum(biomass_spr_sd)) %>%
-  pivot_longer(5:6, names_to = "species", values_to = "biomass") %>%
-  ggplot(aes(year, biomass, fill = species)) +
-  geom_bar(stat = "identity") +
-  facet_wrap(~sub_div)
-
-# cod_sprat_sd_overlap_df <- cod_sprat_sd_overlap_df %>%
-#   group_by(year) %>%
-#   mutate(p_pred = est_sum / sum(est_sum),
-#          p_prey = biomass_spr_sd / sum(biomass_spr_sd)) %>%
-#   summarise(numerator = sum(p_pred * p_prey),
-#             denominator = sqrt(sum(p_prey*p_prey)),
-#             index = numerator/denominator) %>%
-#   dplyr::select(year, index) %>%
-#   ungroup() %>%
-#   dplyr::select(year, index) %>%
-#   mutate(Scale = "ICES Sub division")
-
-### Test dummy overlap index in 2x2
-# data.frame(i = 1:4,
-#            prey = c(2,1,4,0),
-#            pred = c(2,10,1,2)) %>%
-#   mutate(spatial_overlap = ifelse(prey == 0, 0 , 1),
-#          ratio = prey/pred,
-#          p_pred = pred / sum(pred),
-#          p_prey = prey / sum(prey)) %>%
-#   summarise(mean_ratio = mean(ratio),
-#             spatial_overlap = mean(spatial_overlap),
-#             numerator = sum(p_pred * p_prey),
-#             denominator = sqrt(sum(p_prey*p_prey)),
-#             index = numerator/denominator)
-
-# # Plot
-# ggplot(data2, aes(x=time, y=percentage, fill=group)) +
-#     geom_area(alpha=0.6 , size=1, colour="black")
-
-precent_df <- cod_sprat_sd_overlap_df %>%
-  drop_na(biomass_spr_sd) %>%
-  group_by(year) %>%
-  mutate(sprat_prop = biomass_spr_sd / sum(biomass_spr_sd),
-         cod_prop = est_sum / sum(est_sum)) %>%
-  ungroup() %>%
-  group_by(year) %>%
-  mutate(unique_sds = n_distinct(sub_div)) %>%
-  ungroup()
-# 
-# precent_df %>%
-#   filter(unique_sds == max(unique_sds)) %>%
-#   ggplot(aes(x = as.numeric(year), y = sprat_prop, fill = factor(sub_div), color = factor(sub_div))) +
-#   geom_area(alpha = 0.6) +
-#   geom_area(alpha = 0.6, fill = NA) +
-#   scale_color_brewer(palette = "Dark2") +
-#   scale_fill_brewer(palette = "Dark2") +
-#   scale_x_continuous(breaks = scales::pretty_breaks(n = 50)) +
-#   theme_minimal() +
-#   theme(axis.text.x = element_text(angle = 90)) +
-#   NULL
-
-precent_df %>%
-  filter(unique_sds == max(unique_sds)) %>%
-  ggplot(aes(x = as.numeric(year), y = biomass_spr_sd, fill = factor(sub_div), color = factor(sub_div))) +
-  geom_area(alpha = 0.6) +
-  geom_area(alpha = 0.6, fill = NA) +
-  scale_color_brewer(palette = "Dark2") +
-  scale_fill_brewer(palette = "Dark2") +
-  scale_x_continuous(breaks = scales::pretty_breaks(n = 50)) +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 90)) +
-  NULL
-
-# Rate of decline of sprat by sd
-precent_df %>%
-  filter(unique_sds == max(unique_sds)) %>%
+# Temporal trends of sprat by sd
+pred_grid %>%
   ggplot(aes(x = year, y = biomass_spr_sd, color = factor(sub_div))) +
   stat_smooth(method = "gam", formula = y ~ s(x, k = 4), size = 1) +
   geom_point(size = 2.5, alpha = 0.8) +
@@ -767,48 +459,6 @@ precent_df %>%
   NULL
 
 ggsave("figures/supp/sprat_subdiv.png", width = 6.5, height = 6.5, dpi = 600)
-
-
-# precent_df %>%
-#   filter(unique_sds == max(unique_sds)) %>%
-#   ggplot(aes(x = as.numeric(year), y = est_sum, fill = factor(sub_div), color = factor(sub_div))) +
-#   geom_area(alpha = 0.6) +
-#   geom_area(alpha = 0.6, fill = NA) +
-#   scale_color_brewer(palette = "Dark2") +
-#   scale_fill_brewer(palette = "Dark2") +
-#   scale_x_continuous(breaks = scales::pretty_breaks(n = 50)) +
-#   theme_minimal() +
-#   theme(axis.text.x = element_text(angle = 90)) +
-#   NULL
-
-
-# precent_df %>% 
-#   filter(unique_sds == max(unique_sds)) %>% 
-#   pivot_longer(5:6, names_to = "species", values_to = "prop") %>% 
-#   ggplot(aes(fill = factor(sub_div), y = prop, x = year)) + 
-#   geom_bar(position = "fill", stat = "identity", width = 1, alpha = 0.8) +
-#   scale_fill_brewer(palette = "Dark2") +
-#   theme_minimal() +
-#   facet_wrap(~species, ncol = 1) +  
-#   NULL
-# 
-# spr_overlap_sd
-# 
-# spr_map_sd <- plot_map_raster_labels2 +
-#   geom_raster(data = filter(predict_mcod, year == "1999"), aes(x = X * 1000, y = Y * 1000, fill = biomass_spr_sd)) +
-#   scale_fill_viridis(option = "B") +
-#   labs(fill = "Sprat\nbiomass") +
-#   theme_plot2() +
-#   theme(plot.margin = unit(c(0.2, 0.4, 0.2, 0.2), "cm"),
-#         legend.position = "bottom",
-#         legend.key.size = unit(0.6, "cm"),
-#         legend.text = element_text(size = 4.5)) +
-#   NULL
-# 
-# ((sad_map / spr_map_rec / spr_map_sd) | (sad_overlap / spr_overlap_rec / spr_overlap_sd)) +
-#   plot_annotation(tag_levels = 'A') 
-# 
-# ggsave("figures/overlap_spr_sad.png", width = 4.5, height = 6, dpi = 600)
 ```
 
 ## Biomass weighted quantiles of depth and oxygen
@@ -824,7 +474,7 @@ bathy_plot <- plot_map_raster_labels +
         plot.margin = unit(c(0, 0, 0, 0), "cm")) +
   NULL
   
-# Now calculate deciles of the biomass-weighted values
+# Now calculate quantiles of the biomass-weighted values
 pal <- c(rev(brewer.pal(n = 8, name = "Dark2")), "gray20")
 
 wm_depth <- predict_mcod %>%
@@ -867,15 +517,6 @@ oxy_plot <- plot_map_raster_labels +
   NULL
 
 # Plot biomass-weighted oxygen
-annual_oxy <- pred_grid %>%
-  drop_na(oxy) %>%
-  group_by(year) %>%
-  summarize(median_oxy = median(oxy)) %>%
-  ungroup() %>% 
-  rename("oxy" = "median_oxy") %>% 
-  mutate(series = "Median (env.)",
-         oxy_ct = oxy - mean(oxy))
-  
 # Weighted total
 wm_oxy <- predict_mcod %>%
   group_by(year) %>%
@@ -889,6 +530,23 @@ wm_oxy <- predict_mcod %>%
   mutate(oxy_ct = oxy - mean(oxy)) %>%
   ungroup()
 
+
+# Find which depths to calculate average oxygen on
+
+wm_depth %>% filter(series == "1st quartile") %>% summarise(mean_depth = mean(depth))
+wm_depth %>% filter(series == "3rd quartile") %>% summarise(mean_depth = mean(depth))
+
+annual_oxy <- pred_grid %>%
+  drop_na(oxy) %>%
+  filter(depth > 29 & depth < 61) %>% ###
+  #filter(depth > 40 & depth < 60) %>% ###
+  group_by(year) %>%
+  summarize(median_oxy = median(oxy)) %>%
+  ungroup() %>% 
+  rename("oxy" = "median_oxy") %>% 
+  mutate(series = "Median (env.)",
+         oxy_ct = oxy - mean(oxy))
+  
 oxygen_series <- bind_rows(wm_oxy, annual_oxy)
 
 plot_w_oxy <-
@@ -917,6 +575,29 @@ plot_w_oxy
   plot_annotation(tag_levels = 'A') 
 
 ggsave("figures/weighted_quantiles.png", width = 6.5, height = 6.5, dpi = 600)
+
+# Now see how the weighted mean oxygen differs from the average oxygen at the range of depths used by cod
+wm_depth %>% group_by(series) %>% summarise(mean_depth = mean(depth))
+
+wm_oxy2 <- wm_oxy %>% filter(series == "Median") %>% mutate(series = "Biomass-weighted")
+
+pred_grid_ave_oxy <- pred_grid %>%
+  filter(depth < 60 & depth > 30) %>% 
+  group_by(year) %>% 
+  summarise(oxy = mean(oxy)) %>% 
+  mutate(series = "Mean oxygen at depth 30-60 m")
+
+combi <- bind_rows(wm_oxy2, pred_grid_ave_oxy)
+
+ggplot(combi, aes(year, oxy, color = series)) +
+  geom_point() +
+  labs(y = expression(paste("O" [2], " [ml/L]", sep = "")), x = "Year",
+       color = "") +
+  scale_color_manual(values = pal[c(1,3)], name = "") +
+  stat_smooth(method = "lm") +
+  theme_plot()
+
+ggsave("figures/supp/density/weighted_oxy_vs_depth_oxy.png", width = 6.5, height = 6.5, dpi = 600)
 ```
 
 ### Weighted oxygen and depth by year and sub div
@@ -948,29 +629,38 @@ ggplot(wm_oxy_sd, aes(year, weighted_median, color = factor(sub_div))) +
 
 ggsave("figures/supp/density/weighted_oxygen_subdiv.png", width = 6.5, height = 6.5, dpi = 600)
 
+# # Calculate weighted mean and quantiles for sd 25 only 
+predict_mcod %>%
+  filter(sub_div == 25 & year >= 2015) %>%
+  #group_by(year) %>%
+  summarise("Median" = hutils::weighted_quantile(v = oxy, w = exp(est), p = c(0.5)),
+            "1st quartile" = hutils::weighted_quantile(v = oxy, w = exp(est), p = c(0.25)),
+            "3rd quartile" = hutils::weighted_quantile(v = oxy, w = exp(est), p = c(0.75))) %>%
+  as.data.frame()
+
 # Now compare delta change in oxygen with delta change in condition
-cond_delta_sd <- read.csv("div_index_delta_cond.csv") %>%
-  mutate(sub_div = as.character(sub_div)) %>% 
-  dplyr::select(-X) %>% 
+cond_delta_sd <- read.csv("output/div_index_delta_cond.csv") %>%
+  mutate(sub_div = as.character(sub_div)) %>%
+  dplyr::select(-X) %>%
   filter(!sub_div == "Total")
 
-wm_oxy_sd_delta <- wm_oxy_sd %>% 
-  group_by(sub_div) %>% 
-  filter(year %in% c(1993, 1994, 1995, 2017, 2018, 2019)) %>% 
-  dplyr::select(year, weighted_median, sub_div) %>% 
-  pivot_wider(1:3, names_from = year, values_from = weighted_median) %>% 
+wm_oxy_sd_delta <- wm_oxy_sd %>%
+  group_by(sub_div) %>%
+  filter(year %in% c(1993, 1994, 1995, 2017, 2018, 2019)) %>%
+  dplyr::select(year, weighted_median, sub_div) %>%
+  pivot_wider(1:3, names_from = year, values_from = weighted_median) %>%
   mutate(start_oxy = mean(`1993`, `1994`, `1995`),
          end_oxy = mean(`2017`, `2018`, `2019`),
-         delta_oxy = end_oxy - start_oxy) %>% 
-  ungroup() %>% 
-  dplyr::select(sub_div, delta_oxy) %>% 
+         delta_oxy = end_oxy - start_oxy) %>%
+  ungroup() %>%
+  dplyr::select(sub_div, delta_oxy) %>%
   mutate(sub_div = as.character(sub_div))
-  
+
 
 delta_dat <- cond_delta_sd %>% left_join(wm_oxy_sd_delta)
 
 ggplot(delta_dat, aes(delta_oxy, delta_cond, color = sub_div)) +
-  geom_point(size = 3) + 
+  geom_point(size = 3) +
   # geom_vline(xintercept = 0, color = "red", linetype = 2) +
   # geom_hline(yintercept = 0, color = "red", linetype = 2)
   NULL
@@ -1222,27 +912,9 @@ mean_oxy_temp %>%
         aspect.ratio = 1) +
   NULL
 
-# mean_oxy_temp %>% 
-#   filter(variable == "Temperature",
-#          year %in% c(1994, 2019)) %>% 
-#   pivot_wider(year)
-#   ggplot(aes(year, value, color = species, linetype = species, size = species)) + 
-#   geom_point(size = 2.3, alpha = 0.5) +
-#   guides(size = "none", linetype = "none") +
-#   scale_linetype_manual(values = c(1,2,1,1,1)) +
-#   scale_size_manual(values = c(1,2.3,1,1,1)) +
-#   scale_color_manual(values = palz, name = "") + 
-#   stat_smooth(method = "gam", formula = y ~ s(x, k = 3), se = FALSE) +
-#   labs(x = "Year", y = "Temperature [°C]") + 
-#   theme(legend.position = "bottom",
-#         aspect.ratio = 1) +
-#   NULL
-
 ggsave("figures/supp/density/weighted_mean_temp_species.png", width = 6.5, height = 8.5, dpi = 600)
 
-
 # Now do flounder
-
 ggplot(filter(coord_data, !year == 1993), aes(wlon, wlat, color = year)) + 
   facet_wrap(~species, scales = "free") +
   geom_point() +
@@ -1372,7 +1044,7 @@ nd_oxy <- nd_oxy %>%
          temp_sc = 0)
 
 # Predict
-p_margin_oxy <- predict(m, newdata = nd_oxy, se_fit = TRUE, re_form = NA)
+p_margin_oxy <- predict(m_1, newdata = nd_oxy, se_fit = TRUE, re_form = NA)
 
 mar_oxy <- ggplot(p_margin_oxy, aes(oxy, exp(est),
   ymin = exp(est) - 1.96 * exp(est_se), ymax = exp(est) + 1.96 * exp(est_se))) +
@@ -1396,7 +1068,7 @@ nd_dep <- nd_dep %>%
          temp_sc = 0)
 
 # Predict
-p_margin_dep <- predict(m, newdata = nd_dep, se_fit = TRUE, re_form = NA)
+p_margin_dep <- predict(m_1, newdata = nd_dep, se_fit = TRUE, re_form = NA)
 
 mar_depth <- ggplot(p_margin_dep, aes(depth, exp(est),
   ymin = exp(est) - 1.96 * exp(est_se), ymax = exp(est) + 1.96 * exp(est_se))) +
@@ -1420,7 +1092,7 @@ nd_temp <- nd_temp %>%
          temp_sc = (temp - mean(temp))/sd(temp))
 
 # Predict
-p_margin_temp <- predict(m, newdata = nd_temp, se_fit = TRUE, re_form = NA)
+p_margin_temp <- predict(m_1, newdata = nd_temp, se_fit = TRUE, re_form = NA)
 
 mar_temp <- ggplot(p_margin_temp, aes(temp, exp(est),
   ymin = exp(est) - 1.96 * exp(est_se), ymax = exp(est) + 1.96 * exp(est_se))) +

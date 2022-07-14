@@ -116,7 +116,7 @@ pred_grid <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_
 
 pred_grid <- bind_rows(pred_grid1, pred_grid)
 
-# Standardize data with respect to prediction grid:
+# Standardize data with respect to data
 pred_grid <- pred_grid %>%
   mutate(year = as.integer(year)) %>% 
   filter(year %in% c(unique(d$year))) %>% 
@@ -131,7 +131,7 @@ pred_grid <- pred_grid %>%
 ```{r make mesh}
 # Make mesh:
 spde <- make_mesh(d, xy_cols = c("X", "Y"),
-                  n_knots = 150, 
+                  n_knots = 200, 
                   type = "kmeans", seed = 42)
 
 plot(spde)
@@ -143,35 +143,71 @@ plot(spde)
 # Depth spline + oxy spline
 # Cod model
 mcod <- sdmTMB(density_cod ~ 0 + as.factor(year) + s(depth_sc),
-               data = d, mesh = spde, family = tweedie(link = "log"),
-               spatiotemporal = "AR1", spatial = "on", time = "year",
-               reml = FALSE, control = sdmTMBcontrol(newton_steps = 1))
+               data = d,
+               mesh = spde, family = tweedie(link = "log"),
+               spatiotemporal = "AR1",
+               spatial = "on",
+               time = "year",
+               reml = FALSE,
+               control = sdmTMBcontrol(newton_steps = 1))
 
 tidy(mcod, conf.int = TRUE)
+```
 
-# Check residuals of models
-d$residualsmcod <- residuals(mcod)
-qqnorm(d$residualsmcod); abline(a = 0, b = 1)
+```{r, check convergence of cod model}
+sanity(mcod)
+```
 
+```{r, run extra optimization for cod, cache=TRUE}
+mcod_1 <- run_extra_optimization(mcod, nlminb_loops = 1, newton_loops = 1)
+
+sanity(mcod_1)
+```
+
+```{r, MCMC residuals of cod model}
+mcmc_res <- residuals(mcod, type = "mle-mcmc", mcmc_iter = 201, mcmc_warmup = 200)
+
+qqnorm(mcmc_res);qqline(mcmc_res)
+```
+
+```{r save cod model}
 # Save model (so that I can add density predictions to the pred grid for condition)
-saveRDS(mcod, "output/mcod.rds")
+saveRDS(mcod_1, "output/mcod.rds")
 ```
 
 ```{r fit fle models, cache=TRUE}
 # Fit flounder model
 mfle <- sdmTMB(density_fle ~ 0 + as.factor(year) + s(depth_sc),
-               data = d, mesh = spde, family = tweedie(link = "log"),
-               spatiotemporal = "AR1", spatial = "on", time = "year",
-               reml = FALSE, control = sdmTMBcontrol(newton_steps = 1))
+               data = d,
+               mesh = spde,
+               family = tweedie(link = "log"),
+               spatiotemporal = "AR1",
+               spatial = "on",
+               time = "year",
+               reml = FALSE,
+               control = sdmTMBcontrol(newton_steps = 1))
 
 tidy(mfle, conf.int = TRUE)
+```
 
-# Check residuals of models
-d$residualsmfle <- residuals(mfle)
-qqnorm(d$residualsmfle); abline(a = 0, b = 1)
+```{r, check convergence of flounder model}
+sanity(mfle)
+```
 
+```{r, run extra optimization for flounder, cache=TRUE}
+mfle_1 <- run_extra_optimization(mfle, nlminb_loops = 1, newton_loops = 1)
+sanity(mfle_1)
+```
+
+```{r, MCMC residuals of flounder model}
+mcmc_res_fle <- residuals(mfle_1, type = "mle-mcmc", mcmc_iter = 201, mcmc_warmup = 200)
+
+qqnorm(mcmc_res_fle);qqline(mcmc_res_fle)
+```
+
+```{r save flounder model}
 # Save model (so that I can add density predictions to the pred grid for condition)
-saveRDS(mfle, "output/mfle.rds")
+saveRDS(mfle_1, "output/mfle.rds")
 ```
 
 ## Now that the models have been fit, I can create the `pred_gid` (make_pred_grid_utm.R)
@@ -181,19 +217,19 @@ saveRDS(mfle, "output/mfle.rds")
 ```{r calculate indexes, cachce=TRUE}
 ### Cod
 # SD 24
-preds_cod24_sim <- predict(mcod, newdata = filter(pred_grid, sub_div == 24), nsim = 100)
+preds_cod24_sim <- predict(mcod_1, newdata = filter(pred_grid, sub_div == 24), nsim = 100)
 
 # SD 25
-preds_cod25_sim <- predict(mcod, newdata = filter(pred_grid, sub_div == 25), nsim = 100)
+preds_cod25_sim <- predict(mcod_1, newdata = filter(pred_grid, sub_div == 25), nsim = 100)
 
 # SD 26
-preds_cod26_sim <- predict(mcod, newdata = filter(pred_grid, sub_div == 26), nsim = 100)
+preds_cod26_sim <- predict(mcod_1, newdata = filter(pred_grid, sub_div == 26), nsim = 100)
 
 # SD 27
-preds_cod27_sim <- predict(mcod, newdata = filter(pred_grid, sub_div == 27), nsim = 100)
+preds_cod27_sim <- predict(mcod_1, newdata = filter(pred_grid, sub_div == 27), nsim = 100)
 
 # SD 28
-preds_cod28_sim <- predict(mcod, newdata = filter(pred_grid, sub_div == 28), nsim = 100)
+preds_cod28_sim <- predict(mcod_1, newdata = filter(pred_grid, sub_div == 28), nsim = 100)
 
 # Now calculate the CPUE index (average)
 index24_cod_sim <- get_index_sims(preds_cod24_sim, area = rep(2*2, nrow(preds_cod24_sim)))
@@ -212,19 +248,19 @@ index28_cod_sim <- index28_cod_sim %>% mutate(sub_div = "28", species = "cod")
 
 ### Flounder
 # SD 24
-preds_fle24_sim <- predict(mfle, newdata = filter(pred_grid, sub_div == 24), nsim = 100)
+preds_fle24_sim <- predict(mfle_1, newdata = filter(pred_grid, sub_div == 24), nsim = 100)
 
 # SD 25
-preds_fle25_sim <- predict(mfle, newdata = filter(pred_grid, sub_div == 25), nsim = 100)
+preds_fle25_sim <- predict(mfle_1, newdata = filter(pred_grid, sub_div == 25), nsim = 100)
 
 # SD 26
-preds_fle26_sim <- predict(mfle, newdata = filter(pred_grid, sub_div == 26), nsim = 100)
+preds_fle26_sim <- predict(mfle_1, newdata = filter(pred_grid, sub_div == 26), nsim = 100)
 
 # SD 27
-preds_fle27_sim <- predict(mfle, newdata = filter(pred_grid, sub_div == 27), nsim = 100)
+preds_fle27_sim <- predict(mfle_1, newdata = filter(pred_grid, sub_div == 27), nsim = 100)
 
 # SD 28
-preds_fle28_sim <- predict(mfle, newdata = filter(pred_grid, sub_div == 28), nsim = 100)
+preds_fle28_sim <- predict(mfle_1, newdata = filter(pred_grid, sub_div == 28), nsim = 100)
 
 # Now calculate the CPUE index (average)
 index24_fle_sim <- get_index_sims(preds_fle24_sim, area = rep(2*2, nrow(preds_fle24_sim)))
@@ -297,7 +333,7 @@ ggplot(div_index_sim, aes(year, est_t, color = species)) +
         plot.margin = unit(c(0, 0.25, 0.15, 0), "cm")) +
   NULL
 
-write.csv(div_index_sim, "cod_fle_index.csv")
+write.csv(div_index_sim, "output/cod_fle_index.csv")
 ```
 
 ```{r}

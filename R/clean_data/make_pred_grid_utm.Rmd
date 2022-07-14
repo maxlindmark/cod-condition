@@ -136,6 +136,8 @@ utm_coords$depth <- extract(projected_raster, utm_coords[, 1:2])
 max(utm_coords$depth)
 min(utm_coords$depth)
 
+hist(utm_coords$depth)
+
 # Convert to depth (instead of elevation)
 ggplot(utm_coords, aes(depth)) + geom_histogram()
 utm_coords$depth <- utm_coords$depth - max(utm_coords$depth)
