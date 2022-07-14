@@ -79,7 +79,8 @@ d <- d %>%
          oxy_sc = oxy,
          oxy_rec_sc = oxy_rec,
          temp_sc = temp,
-         temp_rec_sc = temp_rec)  %>%
+         temp_rec_sc = temp_rec,
+         year_f = as.factor(year))  %>%
   mutate_at(c("biomass_her_sc", "biomass_her_sd_sc", "biomass_spr_sc", "biomass_spr_sd_sc",
               "density_cod_sc", "density_cod_rec_sc", 
               "density_fle_sc", "density_fle_rec_sc", 
@@ -92,6 +93,41 @@ d <- d %>%
   mutate(year = as.integer(year))
 ```
 
+## Fit non-spatial model to calculate Le Cren's condition factor
+
+```{r first fit non_spatial model without covariates, cache=TRUE, fig.show='hide'}
+spde <- make_mesh(d, xy_cols = c("X", "Y"),
+                  n_knots = 150, type = "kmeans", seed = 42)
+
+ptm <- proc.time()
+mnull <- sdmTMB(
+  formula = ln_weight_g ~ ln_length_cm,
+  data = d,
+  time = NULL,
+  mesh = spde,
+  family = student(link = "identity", df = 5),
+  spatiotemporal = "off",
+  spatial = "off",
+  silent = TRUE,
+  reml = FALSE
+  )
+proc.time() - ptm
+
+# Extract average a and b across the total dataset
+a <- tidy(mnull)[1, "estimate"]
+b <- tidy(mnull)[2, "estimate"]
+a
+b
+d$weight_g_avg_pred <- exp(a)*d$length_cm^b
+
+plot(d$weight_g ~ d$length_cm)
+plot(d$weight_g_avg_pred ~ d$length_cm)
+plot(d$weight_g_avg_pred ~ d$weight_g); abline(a = 0, b = 1, col = "red")
+
+d$le_cren <- d$weight_g / d$weight_g_avg_pred
+hist(d$le_cren)
+```
+
 ## Subset data
 
 ```{r subset data}
@@ -99,7 +135,6 @@ d <- d %>%
 d_adu <- d %>% filter(length_cm > 30)
 d_juv <- d %>% filter(length_cm < 30)
 d_25_28 <- d %>% filter(!sub_div == 24)
-
 
 d_rec <- d
 
@@ -192,16 +227,16 @@ d_rec <- d_rec %>%
 
 ```{r make spde mesh, results='hide', message=FALSE}
 spde_adu <- make_mesh(d_adu, xy_cols = c("X", "Y"),
-                      n_knots = 200, type = "kmeans", seed = 42)
+                      n_knots = 150, type = "kmeans", seed = 42)
 
 spde_juv <- make_mesh(d_juv, xy_cols = c("X", "Y"),
-                      n_knots = 200, type = "kmeans", seed = 42)
+                      n_knots = 150, type = "kmeans", seed = 42)
 
 spde_25_28 <- make_mesh(d_25_28, xy_cols = c("X", "Y"),
-                        n_knots = 200, type = "kmeans", seed = 42)
+                        n_knots = 150, type = "kmeans", seed = 42)
 
 spde_rec <- make_mesh(d_rec, xy_cols = c("X", "Y"),
-                      n_knots = 200, type = "kmeans", seed = 42)
+                      n_knots = 150, type = "kmeans", seed = 42)
 
 # Plot
 plot(spde_adu)
@@ -217,7 +252,7 @@ plot(spde_rec)
 # Mature cod sizes
 ptm <- proc.time()
 m_adu <- sdmTMB(
-  formula = ln_weight_g ~ -1 + ln_length_cm + biomass_her_sc + biomass_her_sd_sc +
+  formula = le_cren ~ -1 + year_f + biomass_her_sc + biomass_her_sd_sc +
     biomass_spr_sc + biomass_spr_sd_sc +
     density_cod_sc + density_cod_rec_sc +
     density_fle_sc + density_fle_rec_sc +
@@ -225,13 +260,23 @@ m_adu <- sdmTMB(
     depth_sc + depth_rec_sc +
     oxy_sc + oxy_rec_sc +
     temp_sc + temp_rec_sc, 
-  time_varying = ~ 1, data = d_adu, time = "year", mesh = spde_adu,
+  data = d_adu,
+  time = "year",
+  mesh = spde_adu,
   family = student(link = "identity", df = 5),
-  spatiotemporal = "AR1", spatial = "on", silent = TRUE, reml = FALSE,
-  control = sdmTMBcontrol(newton_loops = 1, eval.max = 10000, iter.max = 10000, nlminb_loops = 2))
+  spatiotemporal = "iid",
+  spatial = "on",
+  silent = TRUE,
+  reml = FALSE,
+  control = sdmTMBcontrol(newton_loops = 1)
+  )
 proc.time() - ptm
 
 tidy(m_adu, conf.int = TRUE)
+```
+
+```{r sanity check adult model}
+sanity(m_adu)
 ```
 
 ### Juveniles
@@ -240,7 +285,7 @@ tidy(m_adu, conf.int = TRUE)
 # Immature cod sizes
 ptm <- proc.time()
 m_juv <- sdmTMB(
-  formula = ln_weight_g ~ -1 + ln_length_cm + biomass_her_sc + biomass_her_sd_sc +
+  formula = le_cren ~ -1 + year_f + biomass_her_sc + biomass_her_sd_sc +
     biomass_spr_sc + biomass_spr_sd_sc +
     density_cod_sc + density_cod_rec_sc + 
     density_fle_sc + density_fle_rec_sc + 
@@ -248,13 +293,23 @@ m_juv <- sdmTMB(
     depth_sc + depth_rec_sc + 
     oxy_sc + oxy_rec_sc + 
     temp_sc + temp_rec_sc, 
-  time_varying = ~ 1, data = d_juv, time = "year", mesh = spde_juv,
+  data = d_juv,
+  time = "year",
+  mesh = spde_juv,
   family = student(link = "identity", df = 5),
-  spatiotemporal = "AR1", spatial = "on", silent = TRUE, reml = FALSE,
-  control = sdmTMBcontrol(newton_loops = 1, eval.max = 10000, iter.max = 10000, nlminb_loops = 2))
+  spatiotemporal = "iid",
+  spatial = "on",
+  silent = TRUE,
+  reml = FALSE,
+  control = sdmTMBcontrol(newton_loops = 1)
+  )
 proc.time() - ptm
 
 tidy(m_juv, conf.int = TRUE)
+```
+
+```{r sanity check juvenile model}
+sanity(m_juv)
 ```
 
 ### Omit SD 24
@@ -262,7 +317,7 @@ tidy(m_juv, conf.int = TRUE)
 ```{r omit sd 24, cache=TRUE}
 ptm <- proc.time()
 m_25_28 <- sdmTMB(
-  formula = ln_weight_g ~ -1 + ln_length_cm + biomass_her_sc + biomass_her_sd_sc +
+  formula = le_cren ~ -1 + year_f + biomass_her_sc + biomass_her_sd_sc +
     biomass_spr_sc + biomass_spr_sd_sc +
     density_cod_sc + density_cod_rec_sc + 
     density_fle_sc + density_fle_rec_sc + 
@@ -270,13 +325,23 @@ m_25_28 <- sdmTMB(
     depth_sc + depth_rec_sc + 
     oxy_sc + oxy_rec_sc + 
     temp_sc + temp_rec_sc, 
-  time_varying = ~ 1, data = d_25_28, time = "year", mesh = spde_25_28,
+  data = d_25_28,
+  time = "year",
+  mesh = spde_25_28,
   family = student(link = "identity", df = 5),
-  spatiotemporal = "AR1", spatial = "on", silent = TRUE, reml = FALSE,
-  control = sdmTMBcontrol(newton_loops = 1, eval.max = 10000, iter.max = 10000, nlminb_loops = 2))
+  spatiotemporal = "iid",
+  spatial = "on",
+  silent = TRUE,
+  reml = FALSE,
+  control = sdmTMBcontrol(newton_loops = 1)
+  )
 proc.time() - ptm
 
 tidy(m_25_28, conf.int = TRUE)
+```
+
+```{r sanity check area model}
+sanity(m_25_28)
 ```
 
 ## Different way of calculating covariates at the rectangle level
@@ -284,7 +349,7 @@ tidy(m_25_28, conf.int = TRUE)
 ```{r rectangle model test, cache=TRUE}
 ptm <- proc.time()
 m_rec <- sdmTMB(
-  formula = ln_weight_g ~ -1 + ln_length_cm + biomass_her_sc + biomass_her_sd_sc +
+  formula = le_cren ~ -1 + year_f + biomass_her_sc + biomass_her_sd_sc +
     biomass_spr_sc + biomass_spr_sd_sc +
     density_cod_sc + density_cod_rec_sc + 
     density_fle_sc + density_fle_rec_sc + 
@@ -292,13 +357,23 @@ m_rec <- sdmTMB(
     depth_sc + depth_rec_sc + 
     oxy_sc + oxy_rec_sc + 
     temp_sc + temp_rec_sc, 
-  time_varying = ~ 1, data = d_rec, time = "year", mesh = spde_rec,
+  data = d_rec,
+  time = "year",
+  mesh = spde_rec,
   family = student(link = "identity", df = 5),
-  spatiotemporal = "AR1", spatial = "on", silent = TRUE, reml = FALSE,
-  control = sdmTMBcontrol(newton_loops = 1, eval.max = 10000, iter.max = 10000, nlminb_loops = 2))
+  spatiotemporal = "iid",
+  spatial = "on",
+  silent = TRUE,
+  reml = FALSE,
+  control = sdmTMBcontrol(newton_loops = 1)
+  )
 proc.time() - ptm
 
 tidy(m_rec, conf.int = TRUE)
+```
+
+```{r sanity check rec mean values models}
+sanity(m_rec)
 ```
 
 ## Extract coefficients
@@ -307,26 +382,26 @@ tidy(m_rec, conf.int = TRUE)
 # Extract random and fixed coefficients from the adult model
 m_adu_est <- bind_rows(tidy(m_adu, effects = "ran_par", conf.int = TRUE) %>%
                          filter(term %in% c("sigma_O", "sigma_E")),
-                       tidy(m_adu, effects = "fixed", conf.int = TRUE) %>%
-                         filter(!term %in% c("ln_length_cm"))) 
+                       tidy(m_adu, effects = "fixed", conf.int = TRUE) %>% 
+                         filter(!grepl('year', term)))
 
 # Extract random and fixed coefficients from the juvenile model
 m_juv_est <- bind_rows(tidy(m_juv, effects = "ran_par", conf.int = TRUE) %>%
                          filter(term %in% c("sigma_O", "sigma_E")),
-                       tidy(m_juv, effects = "fixed", conf.int = TRUE) %>%
-                         filter(!term %in% c("ln_length_cm")))
+                       tidy(m_juv, effects = "fixed", conf.int = TRUE) %>% 
+                         filter(!grepl('year', term)))
 
 # Extract random and fixed coefficients from the sd25+ model
 m_25_28_est <- bind_rows(tidy(m_25_28, effects = "ran_par", conf.int = TRUE) %>%
                            filter(term %in% c("sigma_O", "sigma_E")),
-                         tidy(m_25_28, effects = "fixed", conf.int = TRUE) %>%
-                           filter(!term %in% c("ln_length_cm")))
+                         tidy(m_25_28, effects = "fixed", conf.int = TRUE) %>% 
+                         filter(!grepl('year', term)))
 
 # Extract random and fixed coefficients from the rec model
 m_rec_est <- bind_rows(tidy(m_rec, effects = "ran_par", conf.int = TRUE) %>%
                          filter(term %in% c("sigma_O", "sigma_E")),
-                       tidy(m_rec, effects = "fixed", conf.int = TRUE) %>%
-                         filter(!term %in% c("ln_length_cm")))
+                       tidy(m_rec, effects = "fixed", conf.int = TRUE) %>% 
+                         filter(!grepl('year', term)))
 ```
 
 ## Plot the differences in effect sizes
@@ -346,7 +421,7 @@ plot_dat <- bind_rows(m_juv_est, m_adu_est, m_25_28_est, m_rec_est, m_full) %>%
   mutate(term = as.factor(term))
 
 # Plot effects
-ggplot(plot_dat, aes(reorder(term, term2), estimate, color = Model)) +
+ggplot(plot_dat, aes(term, estimate, color = Model)) +
   geom_hline(yintercept = 0, linetype = 2, color = "gray40", alpha = 0.5) +
   geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2,
                 position = position_dodge(width = 0.7), alpha = 0.6) +
@@ -376,7 +451,7 @@ ggplot(plot_dat, aes(reorder(term, term2), estimate, color = Model)) +
   coord_flip() +
   guides(color = guide_legend(ncol = 2)) +
   theme(plot.margin = unit(c(0.4, 0.4, 0.4, 0), "cm"),
-        legend.position = "bottom")
+        legend.position = "bottom") +
   NULL
   
 ggsave("figures/supp/condition/sensitivity_coefficients.png", width = 4.5, height = 6.5, dpi = 600)
