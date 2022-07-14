@@ -1,0 +1,308 @@
+---
+title: "Oxygen model comparison"
+author: "Max Lindmark"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+  df_print: paged
+pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+  
+```{r setup, include = FALSE, cache=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 12,
+  fig.asp = 0.618,
+  fig.align ='center'
+)
+```
+
+## Intro
+Compare weighted oxygen estimates from NEMO-NORDIC SCOBY and the GEOMAR model
+
+```{r, load cache}
+# qwraps2::lazyload_cache_dir(path = "R/supp_analysis/oxygen_model_comparison_cache/html")
+```
+
+```{r, load libraries and data}
+library(tidyverse)
+library(magrittr )
+library(tidylog)
+library(sdmTMB)
+library(raster)
+library(sf)
+library(rnaturalearth)
+library(patchwork)
+library(hutils)
+library(RColorBrewer)
+```
+
+```{r, read and clean data}
+# Define plotting theme for main plot
+theme_plot <- function(base_size = 10, base_family = "") {
+  theme_light(base_size = 10, base_family = "") +
+    theme(
+      axis.text.x = element_text(angle = 90),
+      axis.text = element_text(size = 8),
+      legend.text = element_text(size = 8),
+      legend.title = element_text(size = 8),
+      legend.position = "bottom",
+      legend.key.height = unit(0.2, "cm"),
+      legend.margin = margin(0, 0, 0, 0),
+      legend.box.margin = margin(-5, -5, -5, -5),
+      strip.text = element_text(size = 8, colour = 'gray10', margin = margin()),
+      strip.background = element_rect(fill = "grey95")
+      )
+}
+# To read Ale's multiple files, set wd there temporarily
+setwd("/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/cod_condition/data/geomar_oxy_from_ale/")
+getwd()
+
+filenames <- list.files(pattern="*.csv")
+
+geomar <- purrr::map_df(filenames, 
+                            ~read.csv(.x, stringsAsFactors = FALSE) %>% mutate(filename = .x))
+
+setwd("/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/cod_condition")
+
+# Tidy up data
+geomar_25 <- geomar %>% 
+  separate(filename,  
+           into = c("source", "year"),
+           sep = c(7, 11)) %>% 
+  filter(lat < 56.5 & lon < 22 & lon > 15) %>% 
+  mutate(year = as.numeric(year)) %>% 
+  filter(year > 1992) %>% 
+  drop_na(month_10, month_11, month_12) %>% 
+  mutate(sum_oxy = month_10 + month_11 + month_12,
+         oxy = sum_oxy / 3) %>% 
+  dplyr::select(year, lat, lon, oxy) %>% 
+  ungroup() %>% 
+  mutate(source = "geomar",
+         year = as.numeric(year))
+
+# Get in UTM coords
+# Function to go from lat long to UTM
+LongLatToUTM <- function(x, y, zone){
+  xy <- data.frame(ID = 1:length(x), X = x, Y = y)
+  coordinates(xy) <- c("X", "Y")
+  proj4string(xy) <- CRS("+proj=longlat +datum=WGS84")  ## for example
+  res <- spTransform(xy, CRS(paste("+proj=utm +zone=",zone," ellps=WGS84",sep='')))
+  return(as.data.frame(res))
+}
+
+geomar_25 <- geomar_25 %>% mutate(X = LongLatToUTM(geomar_25$lon, geomar_25$lat, 33)$X,
+                                  Y = LongLatToUTM(geomar_25$lon, geomar_25$lat, 33)$Y)
+
+
+# Get in depth there...
+# Now we need to add depth
+west <- raster("data/depth_geo_tif/D5_2018_rgb-1.tif")
+#plot(west)
+
+east <- raster("data/depth_geo_tif/D6_2018_rgb-1.tif")
+#plot(east)
+
+dep_rast <- raster::merge(west, east)
+#plot(dep_rast)
+
+# Do that by extracting depths of the pred grid
+utm_coords <- geomar_25 %>% dplyr::select(X, Y)
+
+# Reproject the raster to fit the UTM pred grid...
+# Define spatial reference 
+sr <- "+proj=utm +zone=33  +datum=WGS84 +units=m " 
+
+# Project Raster... This takes some time
+projected_raster <- projectRaster(dep_rast, crs = sr)
+
+utm_coords$depth <- extract(projected_raster, utm_coords[, 1:2])
+max(utm_coords$depth)
+min(utm_coords$depth)
+
+hist(utm_coords$depth)
+
+# Convert to depth (instead of elevation)
+ggplot(utm_coords, aes(depth)) + geom_histogram()
+utm_coords$depth <- utm_coords$depth - max(utm_coords$depth)
+ggplot(utm_coords, aes(depth)) + geom_histogram()
+
+max(utm_coords$depth)
+df <- utm_coords %>% mutate(depth = depth*-1)
+
+# nrow(utm_coords)
+# nrow(df)
+# nrow(geomar_25)
+
+geomar_25$depth <- df$depth
+
+p1 <- ggplot(geomar_25, aes(X, Y, color = depth)) +
+  geom_point()
+
+# Compare with the pred grid
+# Get wd to be project home again
+setwd("/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/cod_condition/")
+
+# Read in prediction grid
+pred_grid1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(1_2).csv")
+pred_grid2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(2_2).csv")
+
+pred_grid <- bind_rows(pred_grid1, pred_grid2)
+
+pred_grid_25 <- pred_grid %>% 
+  filter(lat < 56.5 & lon < 22 & lon > 15) %>% 
+  filter(year < 2017)
+
+p2 <- ggplot(pred_grid_25, aes(X, Y, color = depth)) +
+  geom_point(size = 2.5)
+
+p1 + p2
+
+# Plot oxygen data from the two sources
+p3 <- ggplot(geomar_25, aes(X, Y, color = oxy)) +
+  facet_wrap(~year) +
+  geom_point(size = 2.5)
+
+p4 <- ggplot(pred_grid_25, aes(X, Y, color = oxy)) +
+  facet_wrap(~year) +
+  geom_point(size = 2.5)
+
+p3 + p4
+
+ggplot() +
+  geom_density(data = pred_grid_25, aes(oxy, fill = "NEMO"), alpha = 0.5) +
+  geom_density(data = geomar_25, aes(oxy, fill = "geomar"), alpha = 0.5)
+```
+
+## Read in cpue data so we can refit 
+
+## Predict biomass density onto the different grids 
+```{r predict density on grid, cache=TRUE}
+# Standardize the grids with respect to t+he mean in the data
+density <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cpue_q_1_4.csv") %>%
+  filter(quarter == 4) %>%
+  filter(year > 1992 & year < 2017) %>% 
+  mutate(depth_sc = (depth - mean(depth))/sd(depth))
+
+# We need to scale the grid with respect to the mean and sd in the data to it was fitted to
+density_mean_depth <- mean(density$depth)
+density_sd_depth <- sd(density$depth)
+
+# Scale depth in the pred grid
+pred_grid_25 <- pred_grid_25 %>%
+  mutate(depth_sc = (depth - density_mean_depth) / density_sd_depth)
+
+# Scale depth in the pred grid
+geomar_25 <- geomar_25 %>%
+  mutate(depth_sc = (depth - density_mean_depth) / density_sd_depth)
+
+# Fit density model, depth spline + oxy spline
+# Make mesh:
+spde <- make_mesh(density, xy_cols = c("X", "Y"),
+                  n_knots = 150, 
+                  type = "kmeans", seed = 42)
+
+mcod <- sdmTMB(density ~ 0 + as.factor(year) + s(depth_sc),
+               data = density,
+               mesh = spde,
+               family = tweedie(link = "log"),
+               spatiotemporal = "AR1",
+               spatial = "on",
+               time = "year",
+               reml = FALSE,
+               control = sdmTMBcontrol(nlminb_loops = 0, newton_loops = 1))
+
+tidy(mcod, conf.int = TRUE)
+```
+
+```{r sanity check}
+sanity(mcod)
+```
+
+```{r, predict, cache=TRUE}
+# Predict!
+sort(unique(density$year))
+sort(unique(pred_grid_25$year))
+sort(unique(geomar_25$year))
+
+cpue_cod_predgrid <- predict(mcod, newdata = pred_grid_25)
+cpue_cod_geomar <- predict(mcod, newdata = geomar_25)
+```
+
+```{r, calculate weighted quantiles}
+pal <- c(rev(brewer.pal(n = 8, name = "Dark2")), "gray20")
+
+# Calculate median in pred grids based on depth
+annual_oxy_pred_grid <- pred_grid_25 %>%
+  drop_na(oxy) %>%
+  filter(depth > 29 & depth < 61) %>% ###
+  group_by(year) %>%
+  summarize(median_oxy = median(oxy)) %>%
+  ungroup() %>% 
+  rename("oxy" = "median_oxy") %>% 
+  mutate(series = "Median (env.)",
+         source = "pred_grid")
+
+annual_oxy_geomar <- geomar_25 %>%
+  drop_na(oxy) %>%
+  filter(depth > 29 & depth < 61) %>% ###
+  group_by(year) %>%
+  summarize(median_oxy = median(oxy)) %>%
+  ungroup() %>% 
+  rename("oxy" = "median_oxy") %>% 
+  mutate(series = "Median (env.)",
+         source = "geomar")
+
+# Weighted total
+wm_oxy_pred_grid <- cpue_cod_predgrid %>%
+  group_by(year) %>%
+  summarise("Median (weighted)" = hutils::weighted_quantile(v = oxy, w = exp(est), p = c(0.5)),
+            "1st quartile" = hutils::weighted_quantile(v = oxy, w = exp(est), p = c(0.25)),
+            "3rd quartile" = hutils::weighted_quantile(v = oxy, w = exp(est), p = c(0.75))) %>% 
+  pivot_longer(cols = c("Median (weighted)", "1st quartile", "3rd quartile"),
+               names_to = "series", values_to = "oxy") %>% 
+  ungroup() %>% 
+  mutate(source = "pred_grid")
+  
+wm_oxy_geomar <- cpue_cod_geomar %>%
+  group_by(year) %>%
+  summarise("Median (weighted)" = hutils::weighted_quantile(v = oxy, w = exp(est), p = c(0.5)),
+            "1st quartile" = hutils::weighted_quantile(v = oxy, w = exp(est), p = c(0.25)),
+            "3rd quartile" = hutils::weighted_quantile(v = oxy, w = exp(est), p = c(0.75))) %>% 
+  pivot_longer(cols = c("Median (weighted)", "1st quartile", "3rd quartile"),
+               names_to = "series", values_to = "oxy") %>% 
+  ungroup() %>% 
+  mutate(source = "geomar")
+
+oxygen_series <- bind_rows(wm_oxy_pred_grid, wm_oxy_geomar, annual_oxy_geomar, annual_oxy_pred_grid) %>% 
+  filter(series %in% c("Median (weighted)", "Median (env.)"))
+
+# Now plot
+oxygen_series %>% 
+  mutate(source = ifelse(source == "geomar", "GEOMAR", "NEMO-NORDIC-SCOBI")) %>% 
+  ggplot(aes(year, oxy, color = source, linetype = series)) +
+  stat_smooth(method = "gam", formula = y ~ s(x, k = 4), se = FALSE, size = 1) +
+  geom_point(size = 1.5, alpha = 0.8) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  scale_color_manual(values = pal) +
+  scale_fill_manual(values = pal) +
+  guides(linetype = guide_legend(override.aes = list(color = "gray10"))) +
+  labs(y = expression(paste("O" [2], " [ml/L]", sep = "")), x = "Year",
+       color = "", linetype = "") +
+  theme_plot() +
+  theme(aspect.ratio = 1,
+        axis.text.x = element_text(angle = 0)) +
+  NULL
+
+ggsave("figures/supp/density/weighted_oxygen_comparison.png", width = 6.5, height = 6.5, dpi = 600)
+```
+
+
+
+
+
+
+
