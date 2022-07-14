@@ -1,0 +1,504 @@
+---
+title: "Comparing oxygen data and NEMO NORDIC SCOBI at depth"
+author: "Max Lindmark"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+  df_print: paged
+pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+  
+```{r setup, include = FALSE, cache=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 12,
+  fig.asp = 0.618,
+  fig.align ='center'
+)
+```
+
+# Intro
+Load libraries
+
+```{r lib, message=FALSE}
+# Load libraries, install if needed
+library(tidyverse); theme_set(theme_light(base_size = 11))
+library(readxl)
+library(tidylog)
+library(RCurl)
+library(viridis)
+library(RColorBrewer)
+library(patchwork)
+library(janitor)
+```
+
+```{r pressure, echo=FALSE, fig.cap="A caption", out.width = '100%'}
+knitr::include_graphics("/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/cod_condition/data/OCEANOGRAPHY/oxygen_data_download.png")
+```
+
+```{r read in ices data}
+ices <- read.delim("/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/cod_condition/data/OCEANOGRAPHY/Ocean_d1f9ae38-9a6d-44d4-aee1-8b3ab7b582d7/8e079dde-5c00-4f61-a79c-2f8f1de63c56.txt")
+
+glimpse(ices)
+
+# Filter the data
+ices <- ices %>% 
+  drop_na(Dissolved.Oxygen..ml.l.) %>% 
+  filter(Month %in% c(10, 11, 12)) %>% 
+  mutate(id = paste(Year, Month, Day, Hour,
+                    Latitude..degrees_north.,
+                    Longitude..degrees_east., sep = "_")) %>% # make ID to select the deepest sample per ID (location)
+  group_by(id) %>% 
+  mutate(deepest_sample = ifelse(Depth..m. ==  max(Depth..m.), "Y", "N")) %>% 
+  ungroup()
+
+test <- ices %>%
+  filter(id %in% head(unique(ices$id))) %>%
+  dplyr::select(id, Year, Month, Day, Hour,
+                Latitude..degrees_north., Longitude..degrees_east.,
+                Depth..m., Bot..Depth..m., Dissolved.Oxygen..ml.l., deepest_sample)
+
+ices2 <- ices %>% filter(deepest_sample == "Y")
+  
+# Now read in the NEMO NORDIC DATA
+pred_grid1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(1_2).csv")
+pred_grid <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(2_2).csv")
+
+pred_grid <- bind_rows(pred_grid1, pred_grid)
+```
+
+#### Now calculate the mean oxygen at depths between 40 and 60 metres using this ICES data and the nemo-nordic model
+
+```{r calculate mean oxygen at depth}
+pred_grid_sum <- pred_grid %>% 
+  filter(sub_div == 25) %>% 
+  group_by(year) %>% 
+  summarise(mean_oxy = mean(oxy)) %>% 
+  mutate(source = "NEMO NORDIC") %>% 
+  ungroup()
+
+ices2_sum <- ices2 %>% 
+  filter(Depth..m. > 40 & Depth..m. < 60) %>% 
+  group_by(Year) %>%
+  summarise(mean_oxy = mean(Dissolved.Oxygen..ml.l.)) %>% 
+  ungroup() %>% 
+  mutate(source = "ICES deepest samples only") %>% 
+  rename("year" = "Year")
+
+ices_sum <- ices %>% 
+  filter(Depth..m. > 40 & Depth..m. < 60) %>% 
+  group_by(Year) %>%
+  summarise(mean_oxy = mean(Dissolved.Oxygen..ml.l.)) %>% 
+  ungroup() %>% 
+  mutate(source = "ICES all samples per location") %>% 
+  rename("year" = "Year")
+```
+
+#### Now combine all data and plot
+
+```{r now combine all data and plot}
+oxydat <- bind_rows(pred_grid_sum, ices2_sum, ices_sum)
+
+ggplot(oxydat, aes(year, mean_oxy, color = source)) +
+  geom_point() + 
+  scale_color_brewer(palette = "Dark2") + 
+  stat_smooth(method = "lm", se = FALSE)
+```
+
+#### Very large differences in trends over time! Why is this? Could it be due to the varying spatial coverage over time in the data? 
+
+```{r ices data maps}
+ices %>% filter(Depth..m. > 40 & Depth..m. < 60) %>% 
+  ggplot(aes(Longitude..degrees_east., Latitude..degrees_north., color = Dissolved.Oxygen..ml.l.)) +
+  facet_wrap(~Year) + 
+  geom_point() +
+  ggtitle("All data") + 
+  theme(axis.text.x = element_text(angle = 90))
+  
+ices2 %>% filter(Depth..m. > 40 & Depth..m. < 60) %>% 
+  ggplot(aes(Longitude..degrees_east., Latitude..degrees_north., color = Dissolved.Oxygen..ml.l.)) +
+  facet_wrap(~Year) + 
+  geom_point() +
+  ggtitle("Deepest data") + 
+  theme(axis.text.x = element_text(angle = 90))
+```
+
+#### See if there is a similar trend within a specific can ICES rectangle with good coverage (if not, maybe due to varying spatial coverage)
+
+```{r}
+library(mapplots)
+
+# Assign ICES rectangle to the ICES oxygen data
+ices2$ices_rec <- mapplots::ices.rect2(ices2$Longitude..degrees_east., ices2$Latitude..degrees_north.)
+
+# Now see which rectangles have good sample sizes
+ices2 %>% 
+  filter(Depth..m. > 40 & Depth..m. < 60) %>% 
+  group_by(Year, ices_rec) %>% 
+  summarise(n = n()) %>% 
+  ggplot(aes(Year, n, fill = ices_rec)) +
+  facet_wrap(~ices_rec) +
+  geom_bar(stat = "identity")
+  
+# Ok, do the same average oxygen calculation but only on select ices rectangles with good temporal coverage (first check on map)
+ices2 %>% filter(Depth..m. > 40 & Depth..m. < 60 & ices_rec %in% c("39G3")) %>% 
+  ggplot(aes(Longitude..degrees_east., Latitude..degrees_north., color = Dissolved.Oxygen..ml.l.)) +
+  facet_wrap(~Year) + 
+  geom_point() +
+  ggtitle("Deepest data - specific ices rec's") + 
+  theme(axis.text.x = element_text(angle = 90))
+
+# Try an even smaller filter: see sample size by station
+ices2 %>% 
+  filter(Depth..m. > 40 & Depth..m. < 60) %>% 
+  group_by(Station) %>% 
+  summarise(n = n()) %>% 
+  arrange(desc(n))
+
+# Filter only stations with more than 6 samples
+ices2_station <- ices2 %>% 
+  filter(Depth..m. > 40 & Depth..m. < 60) %>% 
+  group_by(Station) %>% 
+  mutate(n = n()) %>% 
+  filter(n > 6)
+
+ices2_station %>% 
+  ggplot(aes(Longitude..degrees_east., Latitude..degrees_north., color = Dissolved.Oxygen..ml.l.)) +
+  facet_wrap(~Year) + 
+  geom_point() +
+  ggtitle("Deepest data - specific stations") + 
+  theme(axis.text.x = element_text(angle = 90))
+
+# Summarize average oxygen for the ices_recs and station subsamples and add to the summarised data
+ices2_sum_icesrec <- ices2 %>% 
+  filter(Depth..m. > 40 & Depth..m. < 60 & ices_rec %in% c("39G3")) %>% 
+  group_by(Year) %>%
+  summarise(mean_oxy = mean(Dissolved.Oxygen..ml.l.)) %>% 
+  ungroup() %>% 
+  mutate(source = "ICES all samples per location\nspecific rectangles") %>% 
+  rename("year" = "Year")
+
+ices2_sum_station <- ices2_station %>% 
+  group_by(Year) %>%
+  summarise(mean_oxy = mean(Dissolved.Oxygen..ml.l.)) %>% 
+  ungroup() %>% 
+  mutate(source = "ICES all samples per location\nspecific stations") %>% 
+  rename("year" = "Year")
+
+oxydat2 <- bind_rows(oxydat, ices2_sum_icesrec, ices2_sum_station)
+
+ggplot(oxydat2, aes(year, mean_oxy, color = source)) +
+  geom_point() + 
+  scale_color_brewer(palette = "Dark2") + 
+  stat_smooth(method = "lm", se = FALSE)
+```
+
+#### Still no difference - still negative slope in that specific rectangle (and in Stations that have been sampled for 8 years). Does the depth change in 40-60 interval in the ICES data?
+
+```{r check depth over time}
+ices2_sum2_bottom_test <- ices2 %>% 
+  filter(Depth..m. > 40 & Depth..m. < 60) %>% 
+  group_by(Year) %>%
+  summarise(mean_oxy = mean(Dissolved.Oxygen..ml.l.),
+            mean_depth = mean(Depth..m.)) %>% 
+  ungroup()
+
+# Plot and test
+ggplot(ices2_sum2_bottom_test, aes(Year, mean_depth)) + 
+  geom_point() +
+  stat_smooth(method = "lm")
+```
+
+#### Ok, mean depth is deeper in the samples over time, this will affect the average oxygen. How much?
+
+```{r depth oxy lm}
+ices2 %>% 
+  filter(Depth..m. > 40 & Depth..m. < 60) %>% 
+  ggplot(aes(Depth..m., Dissolved.Oxygen..ml.l.)) + 
+  geom_point()
+
+ices2_lm_dat <- ices2 %>% filter(Depth..m. > 40 & Depth..m. < 60)
+  
+ices2_lm <- lm(Dissolved.Oxygen..ml.l. ~ Depth..m., data = ices2_lm_dat)
+
+# What is the difference in oxygen due to depth alone? Predict oxygen at depth = 46.25 and depth = 48.75
+
+predict(ices2_lm, newdata = data.frame(Depth..m. = c(46.25, 48.75)))
+```
+
+#### The difference in depth alone in the ICES data within the interval 40-60 m is causing a change in oxygen of 0.3 ml/L. It's an effect, but can't explain all. What is the difference between depth and bottom depth?
+
+```{r distance to bottom depth}
+ices2 %>% 
+  drop_na(Bot..Depth..m.) %>% 
+  mutate(distance_to_bottom = Bot..Depth..m. - Depth..m.) %>% 
+  ggplot(aes(distance_to_bottom)) +
+  geom_histogram()
+  
+# Plot these samples on map:
+ices2 %>% 
+  drop_na(Bot..Depth..m.) %>% 
+  mutate(distance_to_bottom = Bot..Depth..m. - Depth..m.) %>% 
+  filter(Depth..m. > 40 & Depth..m. < 60 & distance_to_bottom < 3) %>% 
+  ggplot(aes(Longitude..degrees_east., Latitude..degrees_north., color = Dissolved.Oxygen..ml.l.)) +
+  facet_wrap(~Year) + 
+  geom_point() +
+  ggtitle("Deepest data - specific stations") + 
+  theme(axis.text.x = element_text(angle = 90))
+```
+
+#### Ok, now see if there's a trend in oxygen using samples near the bottom depth. This is what NEMO NORDIC predicts
+
+```{r}
+ices2_sum_sea_bottom <- ices2 %>% 
+  drop_na(Bot..Depth..m.) %>% 
+  mutate(distance_to_bottom = Bot..Depth..m. - Depth..m.) %>% 
+  filter(Depth..m. > 40 & Depth..m. < 60 & distance_to_bottom < 3) %>% 
+  group_by(Year) %>%
+  summarise(mean_oxy = mean(Dissolved.Oxygen..ml.l.)) %>% 
+  ungroup() %>% 
+  mutate(source = "ICES all samples per location\n sea bottom") %>% 
+  rename("year" = "Year")
+
+oxydat3 <- bind_rows(oxydat2, ices2_sum_sea_bottom)
+
+ggplot(oxydat3, aes(year, mean_oxy, color = source)) +
+  geom_point() + 
+  scale_color_brewer(palette = "Dark2") + 
+  stat_smooth(method = "lm", se = FALSE)
+```
+
+#### Conclusion: using the ICES data, we find only a very weak negative slope of oxygen at interquartile depth of cod when we use oxygen measurements at the sea bottom. This is the main difference, more than the variying spatial coverage and uncertain means of the oxygen data. 
+
+## edit: now test how well nearest data point match the model prediction
+
+```{r match nearest data points}
+# Make ID
+glimpse(ices2)
+
+ices2_match <- ices2 %>% 
+  mutate(distance_to_bottom = Bot..Depth..m. - Depth..m.) %>% 
+  filter(distance_to_bottom < 5) %>% 
+  rename("year" = "Year",
+         "lat" = "Latitude..degrees_north.",
+         "lon" = "Longitude..degrees_east.",
+         "oxy" = "Dissolved.Oxygen..ml.l.") %>% 
+  dplyr::select(year, lat, lon, oxy) %>% 
+  mutate(ID_oxy = paste(year, lon, lat, sep = "_"))
+
+ices2_match
+
+ggplot(ices2, aes(Month)) + 
+  geom_histogram()
+
+ices2 %>% 
+  mutate(distance_to_bottom = Bot..Depth..m. - Depth..m.) %>% 
+  filter(distance_to_bottom < 5) %>% 
+  ggplot(aes(Month, Dissolved.Oxygen..ml.l.)) + 
+  geom_point() + 
+  stat_smooth(method = "lm")
+
+ggplot(ices2, aes(Month, Dissolved.Oxygen..ml.l.)) + 
+  geom_point() + 
+  stat_smooth(method = "lm")
+
+ices2_lm <- ices2 %>% 
+  mutate(distance_to_bottom = Bot..Depth..m. - Depth..m.) %>% 
+  filter(distance_to_bottom < 5)
+
+summary(lm(Dissolved.Oxygen..ml.l. ~ 0 + factor(Month), data = ices2_lm))
+
+
+pred_grid2 <- pred_grid %>%
+  mutate(ID_oxy = paste(year, lon, lat, sep = "_")) %>% 
+  filter(sub_div == 25) %>% 
+  dplyr::select(year, lat, lon, oxy) %>% 
+  filter(year %in% unique(ices2_match$year))
+
+# Now match
+# General area boundaries
+xmin <- min(pred_grid2$lon)
+xmax <- max(pred_grid2$lon)
+ymin <- min(pred_grid2$lat)
+ymax <- max(pred_grid2$lat)
+
+data_list <- list()
+
+library(raster)
+
+for (i in sort(unique(ices2_match$year))) {
+  
+  temp_cond <- subset(ices2_match, year == i)
+  temp_oxy <- subset(pred_grid2, year == i)
+  
+  dd <- pointDistance(temp_cond[, 3:2], temp_oxy[, 3:2], lonlat = TRUE, allpairs = FALSE)
+  ii <- apply(dd, 1, which.min)
+  
+  temp_cond$oxy_model = temp_oxy$oxy[ii]
+  
+  temp_cond$distance = dd[cbind(1:nrow(dd), ii)]
+  
+  data_list[[i]] <- temp_cond
+  
+  # Illustrate
+  mypath <- file.path("figures/supp/oxy_data_model_comparison",
+                      paste(unique(temp_cond$year), ".jpg", sep = ""))
+  
+  png(file = mypath)
+  
+  plot(temp_cond[, 3:2], col = "blue", pch = 20, main = i,
+       xlim = c(xmin, xmax), ylim = c(ymin, ymax))
+  points(temp_oxy[, 3:2], col = "red", pch = 20)
+  
+  for (j in 1:(nrow(temp_cond))) {
+    k <- temp_oxy$oxy == temp_cond$oxy_model[j]
+    
+    x0 <- as.numeric(temp_cond[j, 3])
+    y0 <- as.numeric(temp_cond[j, 2])
+    
+    # Get the index of the vector that is closest by taking the minimum absolute difference
+    # Else I get random long errors if the oxygen level is the same (length > 1 in the arrow index)
+    
+    x1 <- as.numeric(temp_oxy[k, 3][which.min(abs(x0 - temp_oxy[k, 3]))])
+    y1 <- as.numeric(temp_oxy[k, 2][which.min(abs(y0 - temp_oxy[k, 2]))])
+    
+    arrows(x0 = x0, y0 = y0, x1 = x1, y1 = y1, length = .1)
+  }
+  
+  dev.off()
+  
+}
+
+# Rename model and data here, do for all years from the data list.. see
+
+full_dat <- dplyr::bind_rows(data_list)
+
+# Plot
+hist(full_dat$distance)
+
+hist(filter(full_dat, distance < 500)$distance)
+
+full_dat %>%
+  filter(distance < 500) %>% 
+  ggplot(aes(oxy, oxy_model, color = factor(year))) +
+  geom_point() +
+  geom_abline(color = "red")
+
+full_dat %>%
+  filter(distance < 1000) %>% 
+  ggplot(aes(oxy, oxy_model)) +
+  geom_point() +
+  geom_abline(color = "red") +
+  facet_wrap(~year) + 
+  xlim(-3, 9) + 
+  ylim(-3, 9)
+
+full_dat %>%
+  filter(distance < 1000) %>% 
+  ggplot(aes(oxy, oxy_model)) +
+  geom_point() +
+  geom_abline(color = "red") +
+  xlim(-3, 9) + 
+  ylim(-3, 9)
+
+full_dat %>%
+  filter(distance < 10000) %>% 
+  ggplot(aes(oxy, oxy_model)) +
+  geom_point() +
+  geom_abline(color = "red") +
+  facet_wrap(~year) + 
+  xlim(-3, 9) + 
+  ylim(-3, 9)
+
+full_dat %>%
+  filter(distance < 10000) %>% 
+  ggplot() +
+  geom_histogram(aes(oxy, fill = "oxy"), alpha = 0.5) +
+  geom_histogram(aes(oxy_model, fill = "oxy_model"), alpha = 0.5) +
+  facet_wrap(~year)
+
+full_dat %>%
+  filter(distance < 3000) %>% 
+  mutate(oxy_diff = oxy - oxy_model) %>% 
+  ggplot(aes(distance, oxy_diff)) +
+  geom_point() +
+#  geom_abline(color = "red") +
+  geom_hline(yintercept = 0) +
+  facet_wrap(~year)
+
+full_dat %>%
+  filter(distance < 3000) %>% 
+  mutate(oxy_diff = oxy - oxy_model) %>% 
+  ggplot(aes(oxy_diff)) + 
+  geom_histogram() +
+  geom_vline(xintercept = 0, color = "red") +
+  coord_cartesian(expand = 0) +
+  NULL
+
+full_dat %>%
+  filter(distance < 3000) %>% 
+  pivot_longer(c(4, 6)) %>% 
+  filter(value > 1) %>%
+  ggplot(aes(name, value, fill = name, color = name)) +
+  geom_boxplot(alpha = 0.1) + 
+  geom_jitter(height = 0, shape = 21, color = "black")
+
+full_dat %>%
+  filter(distance < 3000) %>% 
+  pivot_longer(c(4, 6)) %>% 
+  filter(value > 1) %>% 
+  group_by(name) %>% 
+  summarise(mean = mean(value))
+
+lm_dat <- full_dat %>%
+  filter(distance < 1000) %>% 
+  pivot_longer(c(4, 6))
+
+summary(lm(value ~ name, data = lm_dat))
+
+# Now plot depth map, cod density map and oxygen station locations
+full_dat 
+
+LongLatToUTM <- function(x, y, zone){
+  xy <- data.frame(ID = 1:length(x), X = x, Y = y)
+  coordinates(xy) <- c("X", "Y")
+  proj4string(xy) <- CRS("+proj=longlat +datum=WGS84")  ## for example
+  res <- spTransform(xy, CRS(paste("+proj=utm +zone=",zone," ellps=WGS84",sep='')))
+  return(as.data.frame(res))
+}
+
+utm_coords <- LongLatToUTM(full_dat$lon, full_dat$lat, 33)
+
+full_dat$X <- utm_coords$X
+full_dat$Y <- utm_coords$Y
+
+pred_grid %>% 
+  filter(sub_div == 25) %>% 
+  ggplot(aes(X, Y, fill = depth)) +
+  geom_raster() + 
+  geom_point(data = full_dat, aes(X/1000, Y/1000), inherit.aes = FALSE) + 
+  facet_wrap(~year)
+  
+pred_grid %>% 
+  filter(sub_div == 25) %>% 
+  ggplot(aes(X, Y, fill = density_cod)) +
+  geom_raster() + 
+  geom_point(data = full_dat, aes(X/1000, Y/1000), inherit.aes = FALSE) + 
+  facet_wrap(~year)
+
+pred_grid %>% 
+  filter(sub_div == 25) %>% 
+  ggplot(aes(X, Y, fill = depth)) +
+  geom_raster() + 
+  geom_point(data = full_dat, aes(X/1000, Y/1000), inherit.aes = FALSE)
+  
+pred_grid %>% 
+  filter(sub_div == 25) %>% 
+  ggplot(aes(X, Y, fill = log(density_cod))) +
+  geom_raster() + 
+  geom_point(data = full_dat, aes(X/1000, Y/1000), inherit.aes = FALSE)
+```
+
