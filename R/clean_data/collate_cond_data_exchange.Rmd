@@ -895,7 +895,7 @@ density <- density %>% filter(quarter == 4)
 mcod <- readRDS("output/mcod.rds")
 mfle <- readRDS("output/mfle.rds")
 
-# We need to scale the grid with respect to the mean and sd in the data to it was fitted to
+# We need to scale data with respect to the mean and sd in the data to it was fitted to (cpue data)
 density_mean_depth <- mean(density$depth)
 density_sd_depth <- sd(density$depth)
 
@@ -989,7 +989,7 @@ pred_grid_rec_vars <- pred_grid %>%
                 depth_rec, oxy_rec, temp_rec, biomass_spr, biomass_her)
   
 # Join!
-dat <- left_join(dat, pred_grid_rec_vars)
+dat2 <- left_join(dat, pred_grid_rec_vars)
 
 # Take distinct year + sub_div id's and select the variables
 pred_grid_sd_vars <- pred_grid %>% 
@@ -1023,7 +1023,7 @@ dat_07_19 <- dat %>% filter(year > 2006)
 write.csv(dat_93_06, file = "data/for_analysis/mdat_cond_(1_2).csv", row.names = FALSE)
 write.csv(dat_07_19, file = "data/for_analysis/mdat_cond_(2_2).csv", row.names = FALSE)
 ```
-
+                             
 ```{r test different ways to calculate ices_rectangle means}
 niche_rect <- pred_grid %>%
   filter(depth < 100 & oxy > 1.5) %>%
@@ -1106,6 +1106,11 @@ ggplot(all_dat %>% filter(year == 1999)) +
 # and sub division averages should not be averages of the hauls in those areas, but rather
 # average prediction on those levels. To achieve that, I will join in those averages from the pred_grid
 ```
+
+```{r}
+knitr::knit_exit()
+```
+
 
 ```{r test effect of cod and flounder data or model}
 d_test <- drop_na(dat) %>%

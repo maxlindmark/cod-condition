@@ -982,7 +982,6 @@ pred_grid <- pred_grid %>%
 
 ```{r save}
 # Remove variables and save
-
 pred_grid <- pred_grid %>% dplyr::select(-deep, -subdiv, -subdiv2, -IDr, -ID_sd_year,
                                          -depth_sc)
 
