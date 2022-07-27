@@ -989,7 +989,7 @@ pred_grid_rec_vars <- pred_grid %>%
                 depth_rec, oxy_rec, temp_rec, biomass_spr, biomass_her)
   
 # Join!
-dat2 <- left_join(dat, pred_grid_rec_vars)
+dat <- left_join(dat, pred_grid_rec_vars)
 
 # Take distinct year + sub_div id's and select the variables
 pred_grid_sd_vars <- pred_grid %>% 
