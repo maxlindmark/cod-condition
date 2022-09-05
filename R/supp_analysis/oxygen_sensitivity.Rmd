@@ -1,0 +1,262 @@
+---
+title: "Sensitivity of weighted oxygen estimates"
+author: "Max Lindmark"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+  df_print: paged
+pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+  
+```{r setup, include = FALSE, cache=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 12,
+  fig.asp = 0.618,
+  fig.align ='center'
+)
+```
+
+# Intro
+Load libraries
+
+```{r lib, message=FALSE}
+# Load libraries, install if needed
+library(tidyverse); theme_set(theme_light(base_size = 11))
+library(readxl)
+library(tidylog)
+library(RCurl)
+library(viridis)
+library(RColorBrewer)
+library(patchwork)
+library(janitor)
+
+# To load entire cache in interactive r session, do: 
+qwraps2::lazyload_cache_dir(path = "R/analysis/cpue_model_cache/html")
+```
+
+## Read the prediction grids
+
+```{r read and process prediction grid, message=FALSE, warning=FALSE}
+pred_grid1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(1_2).csv")
+pred_grid <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(2_2).csv")
+
+pred_grid <- bind_rows(pred_grid1, pred_grid)
+
+# Standardize data with respect to prediction grid:
+pred_grid <- pred_grid %>%
+  mutate(year = as.integer(year)) %>% 
+  filter(year %in% c(unique(d$year))) %>% 
+  mutate(depth_sc = (depth - mean(d$depth))/sd(d$depth),
+         temp_sc = (temp - mean(d$temp))/sd(d$temp),
+         oxy_sc = (oxy - mean(d$oxy))/sd(d$oxy)) %>% # Need to scale these to the mean and sd in the data!
+  drop_na(oxy, depth, temp)
+```
+
+# Compare weighted oxygen estimates
+### Here I want to calculate oxygen levels based on the depth distribution of cod, to see if it is the depth of cod or oxygen in environment that makes the predictions different.
+
+```{r sensitivity analysis}
+# Compare mean and median density in sd 25
+pred_grid_sd25 <- pred_grid %>% filter(sub_div == 25)
+
+predict_mcod %>%
+  filter(sub_div == 25) %>% 
+  group_by(year) %>%
+  summarise(median = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.5)),
+            mean = weighted.mean(depth, w = exp(est))) %>% 
+  pivot_longer(cols = c(2,3),
+               names_to = "method", values_to = "depth") %>% 
+  ungroup() %>% 
+  ggplot(aes(year, depth, color = method)) + 
+  geom_point() + 
+  geom_line() +
+  scale_y_reverse() + 
+  stat_smooth(method = "lm")
+```
+
+### We use median depths, which are shallower. Could that explain the differences in oxygen-at-depth? Next see what the predicted oxygen is if I'd calculated these based on weighted mean depth as well.
+
+```{r pred oxy on mean depth}
+depth_df <- predict_mcod %>%
+  filter(sub_div == 25) %>% 
+  group_by(year) %>%
+  summarise(median = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.5)),
+            mean = weighted.mean(depth, w = exp(est))) %>% 
+  pivot_longer(cols = c(2,3),
+               names_to = "method", values_to = "depth") 
+
+depth_df
+
+# Fit oxygen-depth model and use that to predict oxygen on the average annual depths
+plot(oxy ~ depth, data = pred_grid_sd25)
+pred_grid_sd25$depth_sq <- pred_grid_sd25$depth*pred_grid_sd25$depth
+
+dep_oxy <- lm(oxy ~ depth + depth_sq, data = pred_grid_sd25)
+
+#abline(x = pred_grid_sd25$depth, y = predict(dep_oxy, newdata = pred_grid_sd25))
+
+summary(dep_oxy)
+
+depth_df$pred_oxy <- predict(dep_oxy, newdata = depth_df)
+
+ggplot(depth_df, aes(year, pred_oxy, color = method)) + 
+  geom_point() + 
+  geom_line() +
+  stat_smooth(method = "lm")
+```
+
+### This is not low enough. It starts similar but Mich's goes to ~4. Much steeper slope. Is it because Mich used different depths? We calculate it as weighted average (mean or median), but I think Ale (2019) calculates it as the average of percentage-of-population-at-5m-depth-stratum (not sure exactly how). Anyway, can we reproduce the steep decline in oxygen if we use those depths and not ours?
+
+```{r}
+# These are digitized from plot 4a using web-plot digitizer
+mich_depth_dat <- 
+  data.frame(year = c(1994,1996,1997,1999,2000,2001,2003,2004,2006,2007,2008,2010,2011,2013,2015,2016,2017),
+             depth = c(45.5, 46.1, 45.9, 47.1,47.5,49.3,50.2,50.9,52.8,52.3,53,53.4,53.7,52.6,52.6,52.1,51.3)) %>% 
+  mutate(depth_sq = depth*depth)
+
+# Predict the oxygen at those depths using the oxygen~depth model from the pred grid
+mich_depth_dat$pred <- predict(dep_oxy, newdata = mich_depth_dat)
+
+ggplot(mich_depth_dat, aes(year, pred)) + 
+  geom_point() + 
+  geom_line() +
+  stat_smooth(method = "lm")
+```
+
+### This is roughly the same steepnes of the oxygen decline as when I use my depths (6.1 -> 5.5 vs 5.7 -> 5 in using Mich's depth). The steepnes is not as big as in Mich's paper, which predicts both higher oxygen in the beginning and lower oxygen at the end (from 6.7 to 4 between 1993-2018).
+
+### Using my data (SMHI SCOBI NORDIC model), how much deeper do cod have to go to get such a decline in oxygen based on depth only?
+
+```{r depths leading to fast decline in oxy}
+test_df <- data.frame(depth = c(37, 64))
+
+predict(dep_oxy, newdata = test_df)
+```
+
+### So, with the predicted grid oxygen and depth relationship in my data, cod need to go from 37 to 64 m to get the same change in oxygen as mich finds.
+
+### Now we need to explore the oxygen data, because we know the differences in depth estimates of the population cannot reproduce the steepnes of the oxygen decline.
+
+### First, see if I can reproduce Brander (2020) data fig 2a
+
+```{r brander data}
+# Brander data
+
+# Also digitized from web-plot digitizer
+brand <- data.frame(depth_interval = rep(c("(20,40]", "(40,60]", "(60,80]", "(80,100]"), each = 3),
+                    month = rep(c(10, 11, 12), 4),
+                    oxygen = c(6.29, 6.99, 7.82, 4.16, 4.48, 5.7, 2.78, 2.25, 3.31, 1.17, 0.86, 1.40))
+  
+ggplot(brand, aes(factor(month), oxygen, color = depth_interval)) + 
+  geom_point() +
+  ggtitle("average oxygen by month")
+  
+#  Take average 
+brand_sum <- brand %>%
+  group_by(depth_interval) %>%
+  summarise(mean_oxy = mean(oxygen)) %>%
+  mutate(series = "brander")
+
+pred_grid_sd25 %>%
+  mutate(depth_interval = cut(depth, breaks = c(20, 40, 60, 80, 100))) %>% 
+  drop_na(depth_interval) %>% 
+  ggplot(aes(depth_interval, depth)) + 
+  geom_point()
+
+pred_grid_sum <- pred_grid_sd25 %>%
+  mutate(depth_interval = cut(depth, breaks = c(20, 40, 60, 80, 100))) %>% 
+  group_by(depth_interval) %>% 
+  summarize(mean_oxy = mean(oxy)) %>% 
+  mutate(series = "pred_grid")
+  
+comb_dat <- bind_rows(brand_sum, pred_grid_sum) %>% drop_na()
+
+ggplot(comb_dat, aes(depth_interval, mean_oxy, color = series)) +
+  geom_point(size = 3) +
+  ggtitle("average oxygen q4")
+```
+
+### Quite similar except 40-60 interval (most important). It differs with about 1 ml/L, rest is very similar.
+
+### Now calculate mean oxygen in pred grid in interquartile range
+
+```{r mean oxy in IQR}
+# Brander annual average
+brander_annual_df <- data.frame(year = c(1991, 1992, 1993, 1994, 1995, 1997,2002, 2004,2005,2006,2007,2008,
+                                         2009,2012,2013, 2014, 2015, 2016, 2017, 2018),
+                                mean_oxy = c(4.1, 3.7, 5.35, 5.34, 5.1, 6, 4.6, 4.02, 5.52, 4.5, 4.8, 4, 4.6, 
+                                        5.7, 5.1, 4.8, 4.9, 3.8, 4.5, 4.34),
+                                series = rep("Brander annual", 20))
+
+
+pred_grid_q4 <- pred_grid_sd25 %>%
+  filter(depth > 50 & depth < 65) %>% 
+  group_by(year) %>% 
+  summarise(mean_oxy = mean(oxy)) %>% 
+  mutate(series = "pred_grid_q4")
+  
+brand_pred_comp <- bind_rows(brander_annual_df, pred_grid_q4)
+  
+ggplot(brand_pred_comp, aes(year, mean_oxy, color = series)) + 
+  geom_point() + 
+  geom_line() +
+  stat_smooth(method = "lm")
+
+# Is it significant?
+brand_pred_comp
+
+summary(lm(mean_oxy ~ year, data = filter(brand_pred_comp, series == "Brander annual")))
+
+# Not significant
+```
+
+### The pred grid estimate is slightly higher. Note also that pred grid is q4 also and Brander is all years. However, according to the Brander data, the average in q4 is quite similar to the annual average (roughly equal number of months with average oxygen-at-depth above and below month 11.)
+
+### So, the difference is not in the depth distribution of cod, and it's not in the smhi model data, because it fits quite well with ICES data in Brander. Specially, the trend is not very different, which is what has been the main issue (Brander data declines with 0.5, but not significant).
+
+# In summary:
+### I can't reproduce the rate of change in Casini Biogeo. My depths are not as deep, but I can't reproduce their oxygen change even with their depths and my oxygen data (they need to go from 37 to 61 meters).
+
+### My oxygen data though can largely reproduce Brander ICES data. Brander ICES data can't either reproduce Casini, because the rate of change in oxygen at the cod depth does not decline so much after 1990s.
+
+### So what drives the steep decline in Mich's paper? Basically going from ~6 to ~4 ml/L with a depth change of about 5 metres. Since the depth change is similar, it must be that the the difference is what those 5 metres does for the depth. I.e., oxygen must decline more rapidly with depth and/or over time. Since the oxygen at depth does not change dramatically over time in ICES data (Brander) nor in my modelled SMHI data, I suspect the data used in Casini has a steeper decline in oxygen with depth.
+
+```{r depth oxy test}
+# Lastly, plot some depth oxygen interactions to show why we shouldn't calculate oxygen based on depth. I.e., below 70 meteres, 
+
+# High variability in the oxy-depth relationship
+ggplot(pred_grid_sd25, aes(depth, oxy)) + 
+  geom_point()
+
+ggplot(d, aes(depth, density)) + 
+  geom_point()
+
+ggplot(d, aes(oxy, density)) + 
+  geom_point()
+
+summary(lm(density ~ oxy*depth, data = d))
+```
+
+
+p.s. how was depth at 4.3 ml calculated? predicted depth where mean oxygen is 4.3?
+
+Is the difference then in the metric "depth at oxygen = 4.3"? I don't understand how it has been calculated, but to me it sounds like a model of depth ~ year, and then the predicted depth where oxygen is 4.3. I fit a model like that below:
+
+```{r test depth change at 4.3 ml/L}
+# Fit model of depth 
+depth_at_oxy <- lm(depth ~ oxy*year, data = pred_grid_sd25)
+
+new_dat_oxy <- data.frame(oxy = rep(4.3, length(unique(pred_grid_sd25$year))),
+                          year = sort(unique(pred_grid_sd25$year)))
+
+new_dat_oxy$pred <- predict(depth_at_oxy, newdata = new_dat_oxy)
+
+ggplot(new_dat_oxy, aes(year, factor(pred))) +
+  geom_point()
+```
+
+The predicted depth where oxygen is 4.3 decrease from 58.8 to 58.1, i.e. 0.7m, not 10 metres.

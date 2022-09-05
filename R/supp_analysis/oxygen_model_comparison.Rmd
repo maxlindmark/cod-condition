@@ -57,8 +57,9 @@ theme_plot <- function(base_size = 10, base_family = "") {
       strip.background = element_rect(fill = "grey95")
       )
 }
+
 # To read Ale's multiple files, set wd there temporarily
-setwd("/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/cod_condition/data/geomar_oxy_from_ale/")
+setwd("/Users/maxlindmark/Dropbox/Max work/R/cod_condition/data/geomar_oxy_from_ale/")
 getwd()
 
 filenames <- list.files(pattern="*.csv")
@@ -66,7 +67,7 @@ filenames <- list.files(pattern="*.csv")
 geomar <- purrr::map_df(filenames, 
                             ~read.csv(.x, stringsAsFactors = FALSE) %>% mutate(filename = .x))
 
-setwd("/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/cod_condition")
+setwd("/Users/maxlindmark/Dropbox/Max work/R/cod_condition")
 
 # Tidy up data
 geomar_25 <- geomar %>% 
@@ -143,8 +144,6 @@ p1 <- ggplot(geomar_25, aes(X, Y, color = depth)) +
   geom_point()
 
 # Compare with the pred grid
-# Get wd to be project home again
-setwd("/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/cod_condition/")
 
 # Read in prediction grid
 pred_grid1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(1_2).csv")
@@ -175,9 +174,13 @@ p3 + p4
 ggplot() +
   geom_density(data = pred_grid_25, aes(oxy, fill = "NEMO"), alpha = 0.5) +
   geom_density(data = geomar_25, aes(oxy, fill = "geomar"), alpha = 0.5)
-```
 
-## Read in cpue data so we can refit 
+# Plot oxygen vs depth for geomar model
+geomar_25 %>% 
+  filter(depth > 40 & depth < 60) %>% 
+  ggplot(aes(depth, oxy)) +
+  geom_point(alpha = 0.2)
+```
 
 ## Predict biomass density onto the different grids 
 ```{r predict density on grid, cache=TRUE}
