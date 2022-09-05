@@ -1,6 +1,8 @@
-# Evaluating drivers of spatiotemporal changes in the condition of Eastern Baltic cod
+# Evaluating drivers of spatiotemporal individual condition of a bottom-associated marine fish
 
 This repo contains R code for analyzing individual-level condition of cod and to contrast the ability, or parsimony, of different variables to explain variation in cod condition, each linked to specific hypothesis proposed in the literature.
+
+[bioRxiv preprint](https://www.biorxiv.org/content/10.1101/2022.04.19.488709v1)
 
 We use Spatiotemporal linear mixed-effects models and a predictive-modeling framework within the R package [sdmTMB](https://github.com/pbs-assess/sdmTMB). This repository contains all data and code used for analyses and figures from Lindmark et al (20XX).
 
