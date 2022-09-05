@@ -964,6 +964,9 @@ pred_grid2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod
 
 pred_grid <- bind_rows(pred_grid1, pred_grid2)
  
+unique(is.na(pred_grid$density_cod))
+unique(is.na(pred_grid$density_cod_rec))
+
 # First create ID's for joining
 dat <- dat %>% mutate(year_rect_id = paste(year, ices_rect, sep = "_"),
                       year_sd_id = paste(year, sub_div, sep = "_"))
@@ -987,9 +990,18 @@ pred_grid_rec_vars <- pred_grid %>%
   dplyr::select(year_rect_id,
                 density_saduria_rec, density_cod_rec, density_fle_rec,
                 depth_rec, oxy_rec, temp_rec, biomass_spr, biomass_her)
-  
+
+unique(is.na(pred_grid_rec_vars$density_cod_rec))  
+
 # Join!
 dat <- left_join(dat, pred_grid_rec_vars)
+
+unique(is.na(dat$density_cod_rec))  
+
+# t <- dat %>% drop_na(density_cod_rec)
+# t <- dat %>% drop_na(biomass_her)
+# t <- dat %>% drop_na(density_saduria_rec, density_cod_rec, density_fle_rec,
+#                      depth_rec, oxy_rec, temp_rec, biomass_spr, biomass_her)
 
 # Take distinct year + sub_div id's and select the variables
 pred_grid_sd_vars <- pred_grid %>% 
@@ -1001,6 +1013,13 @@ pred_grid_sd_vars <- pred_grid %>%
 
 # Join!
 dat <- left_join(dat, pred_grid_sd_vars)
+
+t <- dat %>% drop_na(density_cod_rec)
+t <- dat %>% drop_na(biomass_her)
+t <- dat %>% drop_na(density_saduria_rec, density_cod_rec, density_fle_rec,
+                     depth_rec, oxy_rec, temp_rec, biomass_spr, biomass_her,
+                     density_saduria_sd, density_cod_sd, density_fle_sd, 
+                     depth_sd, oxy_sd, temp_sd, biomass_spr_sd, biomass_her_sd)
 ```
 
 ## Save data
@@ -1023,7 +1042,11 @@ dat_07_19 <- dat %>% filter(year > 2006)
 write.csv(dat_93_06, file = "data/for_analysis/mdat_cond_(1_2).csv", row.names = FALSE)
 write.csv(dat_07_19, file = "data/for_analysis/mdat_cond_(2_2).csv", row.names = FALSE)
 ```
-                             
+                           
+```{r}
+knitr::knit_exit()
+```
+
 ```{r test different ways to calculate ices_rectangle means}
 niche_rect <- pred_grid %>%
   filter(depth < 100 & oxy > 1.5) %>%
@@ -1106,11 +1129,6 @@ ggplot(all_dat %>% filter(year == 1999)) +
 # and sub division averages should not be averages of the hauls in those areas, but rather
 # average prediction on those levels. To achieve that, I will join in those averages from the pred_grid
 ```
-
-```{r}
-knitr::knit_exit()
-```
-
 
 ```{r test effect of cod and flounder data or model}
 d_test <- drop_na(dat) %>%
