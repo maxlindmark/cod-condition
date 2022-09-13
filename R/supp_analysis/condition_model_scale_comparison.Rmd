@@ -148,6 +148,8 @@ d_sum <- d_sum %>%
   drop_na(tot_sprat) %>% 
   mutate(tot_sprat_sc = (tot_sprat - mean(tot_sprat)) / sd(tot_sprat))
 
+sd(d_sum$tot_sprat)
+
 # From mich residual plots it seems 1 value per year
 m <- gam(mean_fulton ~ 1+ s(tot_sprat_sc, k = 4), data = d_sum)
 
@@ -158,7 +160,7 @@ plot.gam(m, shift = 1)
 m2 <- lm(mean_fulton ~ 1 + tot_sprat_sc, data = d_sum)
 summary(m2)
 
-# Ok, effect size of ~0.5 now. That means a 5% change in condition per 1 sd change in sprat
+# Ok, effect size of ~0.05 now. That means a 5% change in condition per 1 sd change in sprat
 sd(d_sum$tot_sprat) / 1000
 
 sprat_tot %>% 

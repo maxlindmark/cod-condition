@@ -441,7 +441,7 @@ ggplot(plot_dat, aes(reorder(term, term2), estimate, color = Model)) +
         legend.position = "bottom") +
   NULL
   
-ggsave("figures/supp/condition/sensitivity_coefficients_v2.png", width = 4.5, height = 6.5, dpi = 600)
+ggsave("figures/supp/condition/sensitivity_coefficients.png", width = 4.5, height = 6.5, dpi = 600)
 
 # Just a test to see the labels were alright
 effect_sizes <- ggplot(plot_dat, aes(reorder(term, estimate), estimate)) +

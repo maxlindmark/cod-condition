@@ -5,6 +5,7 @@ date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
   html_document:
     df_print: paged
+    code_folding: hide
   pdf_document: default
 editor_options: 
   chunk_output_type: console
@@ -51,7 +52,7 @@ library(sdmTMB)
 # qwraps2::lazyload_cache_dir(path = "R/analysis/condition_model_cf_cache/html")
 ```
 
-## For maps
+## Code for map plots
 
 ```{r read coastline data, message=FALSE, warning=FALSE, fig.show='hide'}
 # Specify map ranges
@@ -127,7 +128,7 @@ plot_map_raster_labels <-
 
 ## Read data
 
-```{r read and process data, message=FALSE, warning=FALSE}
+```{r read and process data, message=FALSE, warning=FALSE, fig.show='hide'}
 # Read the split files and join them
 d1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cond_(1_2).csv")
 d2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cond_(2_2).csv")
@@ -309,19 +310,6 @@ pred_grid %>%
 
 ```{r, include=FALSE}
 # Include some tests & calculations for the manuscript
-# pred_grid_test <- pred_grid %>%
-#   mutate(oxy_cat = ifelse(oxy > 4.3, "normal", "low"),
-#          oxy_cat = ifelse(oxy < 1, "dead", oxy_cat)) %>%
-#   filter(year %in% c(1993, 2018))
-#  
-# plot_map_raster +
-#   geom_raster(data = pred_grid_test,
-#               aes(x = X * 1000, y = Y * 1000, fill = oxy_cat)) +
-#   facet_wrap(~ year) +
-#   scale_fill_manual(values = c("black", "gray70", "skyblue")) +
-#   theme_light() +
-#   NULL
-
 pred_grid %>% 
   filter(depth > 40 & depth < 60) %>% 
   ggplot(aes(depth, oxy)) +
@@ -354,7 +342,7 @@ dev.off()
 ```
 
 ## Fit models
-### First fit a non spatial model to get the average length weight relationship. The main model's response variable is the difference in observed vs this predicted average weight.
+### Non spatial model to get the average length weight relationship. The main model's response variable is the ratio of the observed vs this predicted average weight.
 
 ```{r first fit non_spatial model without covariates, cache=TRUE, fig.show='hide'}
 ptm <- proc.time()
@@ -387,12 +375,11 @@ d$log_le_cren <- log(d$le_cren)
 hist(d$le_cren)
 ```
 
-### Fit the condition model without covariates
+### Compare breakpoint vs linear oxygen effect in simplified model
 
-```{r fit spatial model without covariates to see how it compares, cache=TRUE}
-ptm <- proc.time()
-mnull_spatial <- sdmTMB(
-  formula = log_le_cren ~ -1 + year_f,
+```{r breakpoint vs linear oxygen effect simple model, cache=TRUE, fig.show='hide'}
+mnull_oxy_bp <- sdmTMB(
+  formula = log_le_cren ~ -1 + year_f + breakpt(oxy_sc) + oxy_rec_sc,
   time_varying = NULL,
   data = d,
   time = "year",
@@ -403,19 +390,51 @@ mnull_spatial <- sdmTMB(
   silent = TRUE,
   reml = FALSE,
   control = sdmTMBcontrol(newton_loops = 1))
-proc.time() - ptm
 
-# Extract average a and b across the total dataset
-# a <- tidy(mnull_spatial, conf.int = TRUE)[1, "estimate"]
-# b <- tidy(mnull_spatial)[2, "estimate"]
+mnull_oxy <- sdmTMB(
+  formula = log_le_cren ~ -1 + year_f + oxy_sc + oxy_rec_sc,
+  time_varying = NULL,
+  data = d,
+  time = "year",
+  mesh = spde,
+  family = student(link = "identity", df = 5), 
+  spatiotemporal = "iid",
+  spatial = "on",
+  silent = TRUE,
+  reml = FALSE,
+  control = sdmTMBcontrol(newton_loops = 1))
+
+AIC(mnull_oxy_bp, mnull_oxy)
+min(AIC(mnull_oxy_bp), AIC(mnull_oxy)) 
+
+sanity(mnull_oxy_bp)
+sanity(mnull_oxy)
+
+tidy(mnull_oxy)
+tidy(mnull_oxy_bp)
+
+nd_bp_simple <- data.frame(
+  oxy_sc = seq(min(d$oxy_sc), max(d$oxy_sc), length.out = 100), 
+  year = 2019L,
+  year_f = as.factor(2019),
+  oxy_rec_sc = 0
+)
+
+p_bp_simple <- predict(mnull_oxy_bp, newdata = nd_bp_simple,
+                       se_fit = TRUE, re_form = NA, xy_cols = c("X", "Y"))
+
+ggplot(p_bp_simple, aes(oxy_sc, est, 
+  ymin = est - 1.96 * est_se, 
+  ymax = est + 1.96 * est_se)) +
+  geom_line() + geom_ribbon(alpha = 0.4)
+
+ggplot(d, aes(oxy_sc, oxy)) + 
+  geom_point() + 
+  geom_hline(yintercept = (1.0700*sd(d$oxy)) + mean(d$oxy)) +
+  geom_vline(xintercept = 1.0700)
 ```
 
-```{r check model convergence spatial null model}
-# Check model convergence
-sanity(mnull_spatial)
-```
-
-### This is the main model
+### Fit main model
 
 ```{r spatiotemporal le cren model, cache=TRUE}
 ptm <- proc.time()
@@ -449,69 +468,6 @@ tidy(mfull, effects = "ran_par", conf.int = TRUE)
 sanity(mfull)
 ```
 
-```{r spatiotemporal le cren model with breakpoint oxygen, cache=TRUE}
-ptm <- proc.time()
-mfull_threshold <- sdmTMB(
-  formula = log_le_cren ~ -1 + year_f + biomass_her_sc + biomass_her_sd_sc +
-    biomass_spr_sc + biomass_spr_sd_sc +
-    density_cod_sc + density_cod_rec_sc + 
-    density_fle_sc + density_fle_rec_sc + 
-    density_saduria_sc + density_saduria_rec_sc + 
-    depth_sc + depth_rec_sc + 
-    breakpt(oxy_sc) + oxy_rec_sc + # breakpoint model
-    temp_sc + temp_rec_sc,
-    data = d,
-  time = "year",
-  mesh = spde, 
-  family = student(link = "identity", df = 5),
-  spatiotemporal = "iid",
-  spatial = "on",
-  silent = TRUE,
-  reml = FALSE,
-  control = sdmTMBcontrol(newton_loops = 1)
-  )
-proc.time() - ptm
-```
-
-```{r check model convergence bp model}
-# Check model convergence
-sanity(mfull_threshold)
-```
-
-```{r visualize breakpoint}
-nd_bp <- data.frame(
-  oxy_sc = seq(min(d$oxy_sc), max(d$oxy_sc), length.out = 100), 
-  year = 2019L,
-  year_f = as.factor(2019),
-  biomass_her_sc = 0,
-  biomass_her_sd_sc = 0,
-  biomass_spr_sc = 0,
-  biomass_spr_sd_sc = 0,
-  density_cod_sc = 0, 
-  density_cod_rec_sc = 0, 
-  density_fle_sc = 0,
-  density_fle_rec_sc = 0, 
-  density_saduria_sc = 0,
-  density_saduria_rec_sc = 0, 
-  depth_sc = 0,
-  depth_rec_sc = 0, 
-  oxy_rec_sc = 0,
-  temp_sc = 0,
-  temp_rec_sc = 0
-)
-
-p_bp <- predict(mfull_threshold, newdata = nd_bp, se_fit = TRUE, re_form = NA, xy_cols = c("X", "Y"))
-
-ggplot(p_bp, aes(oxy_sc, est, 
-  ymin = est - 1.96 * est_se, 
-  ymax = est + 1.96 * est_se)) +
-  geom_line() + geom_ribbon(alpha = 0.4)
-```
-
-```{r compare aic}
-AIC(mfull, mfull_threshold)
-```
-
 ```{r qqplot and resid, results='hide', cache=TRUE, message=FALSE}
 mcmc_res <- residuals(mfull, type = "mle-mcmc", mcmc_iter = 5000, mcmc_warmup = 2000)
 
@@ -542,7 +498,7 @@ VarE <- sigma_E^2 # spatiotemporal variance
 d_r2 <- d
 d_r2$pred <- predict(mfull)
 d_r2$resid_manual <- d_r2$le_cren - d_r2$pred$est
-hist(d_r2$resid_manual)
+#hist(d_r2$resid_manual)
 
 VarR <- var(as.vector(d_r2$resid_manual)) # "residual" variance
 
@@ -564,9 +520,9 @@ out <- data.frame(
 out
 
 # What if I skip the year effect?
-b_fe2 <- tidy(mfull)
+b_fe2 <- tidy(mfull) %>% filter(!grepl('year', term))
 b_fe2 <- stats::setNames(b_fe2$estimate, b_fe2$term)
-b_fe2 <- b_fe2[28:43] # skip year coefficients
+
 X2 <- mfull$tmb_data$X_ij
 X2 <- matrix(unlist(X2), ncol = length(b_fe))[, 28:43] # skip year columns
 VarF2 <- var(as.vector(b_fe2 %*% t(X2))) # variance from fixed-effects
@@ -606,7 +562,7 @@ ggplot(d, aes(year, length_cm, z = residuals)) +
   stat_summary_2d(bins = 40) +
   scale_fill_gradient2()
 
-ggsave("figures/supp/condition/residuals_vs_length_and_year2.png", width = 6.5, height = 6.5, dpi = 600)
+# ggsave("figures/supp/condition/residuals_vs_length_and_year2.png", width = 6.5, height = 6.5, dpi = 600)
 ```
 
 ## Annual index using `get_index_sims` method to avoid slow bias correction
@@ -621,7 +577,11 @@ index_avg_sims <- get_index_sims(pred_avg_sim, area = rep(1/ncells, nrow(pred_av
                                  return_sims = TRUE) # This is for calculation on samples!
 
 write.csv(index_avg_sim, "output/index_avg_sim.csv")
+```
 
+Evaluate sensitivity to using a pred grid with a subset excluding low density areas
+
+```{r sim version condition index subset pred grid, cache=TRUE, fig.show='hide'}
 # Now do the same but excluding the areas not sampled in the pred grid
 ncells_sub <- filter(pred_grid, year == max(pred_grid$year) & depth > 20 & depth < 120) %>% nrow()
 pred_grid_sub <- filter(pred_grid, depth > 20 & depth < 120)
@@ -654,10 +614,10 @@ ggplot(index_avg_sims, aes(y = as.factor(year), x = .value)) +
                                quantile_lines = TRUE, quantiles = 0.5) + 
   coord_flip()
 
-index_avg_sims %>% 
-  filter(year %in% c(1993, 2019)) %>% 
-  ggplot(., aes(as.factor(year), .value)) +
-  geom_violin(width = 1.3)
+# index_avg_sims %>% 
+#   filter(year %in% c(1993, 2019)) %>% 
+#   ggplot(., aes(as.factor(year), .value)) +
+#   geom_violin(width = 1.3)
 
 # Now reshape data again to calculate row-wise differences
 year_diff <- index_avg_sims %>% 
@@ -735,16 +695,9 @@ index_avg_28_sim <- index_avg_28_sim %>% mutate(sub_div = 28)
 div_index <- bind_rows(index_avg_24_sim, index_avg_25_sim, index_avg_26_sim, index_avg_27_sim, index_avg_28_sim)
 ```
 
-## Condition factor, condition vs length, quantiles and size-distribution and cv
+## Condition factor over time and individual distributions
 
 ```{r plot condition index and condition factor, message=FALSE}
-# Add in the Le Cren condition index for d
-# mfull$sd_report$par.random[1:27]
-# mean_tw_intercept <- mean(mfull$sd_report$par.random[1:27])
-# mean_tw_intercept # average intercept
-# mfull$sd_report$par.fixed[1] # length-coefficient
-# d$le_cren <- d$weight_g / (exp(mean_tw_intercept)*d$length_cm^mfull$sd_report$par.fixed[1])
-
 div_index2 <- bind_rows(mutate(div_index, sub_div = as.factor(sub_div)),
                         mutate(index_avg_sim, sub_div = as.factor("Total")))
 
@@ -764,18 +717,11 @@ cond_index <- ggplot(div_index2, aes(year, est, color = sub_div, linetype = sub_
                 aes(x = year, ymax = upr, ymin = lwr),
                 width = 0, alpha = 0.8, color = "gray1", size = 0.7) +
   theme(axis.title = element_text(size = 9),
-        #legend.position = c(0.85, 0.75),
         legend.position = "bottom",
         legend.background = element_blank(),
         legend.title = element_text(size = 9),
         legend.spacing.x = unit(0, 'cm'),
         plot.margin = unit(c(0.4, 0.4, 0.4, 0), "cm")) +
-  # guides(linetype = "none",
-  #        color = guide_legend(keywidth = 0.1, keyheight = 0.1, default.unit = "inch",
-  #                             override.aes = list(linetype = c(1,1,1,1,1,0),
-  #                                                 shape = c(NA,NA,NA,NA,NA,16),
-  #                                                 alpha = rep(0.8, 6),
-  #                                                 color = pal))) +
   guides(linetype = "none",
          color = guide_legend(title.position = "top", title.hjust = 0.5, nrow = 1,
                               keywidth = 0.1, keyheight = 0.1, default.unit = "inch",
@@ -787,95 +733,7 @@ cond_index <- ggplot(div_index2, aes(year, est, color = sub_div, linetype = sub_
 
 cond_index
 
-# Plot change in condition over size
-# Plot the slopes
-# cond_year_slopes <- d %>%
-#   mutate(lenCls = cut(length_cm, breaks = seq(0, 150, 10)),
-#          lenCls_fct = factor(lenCls)) %>% 
-#   mutate(year_ct = year - 1993) %>% 
-#   split(.$lenCls_fct) %>%
-#   purrr::map(~lm(le_cren ~ year_ct, data = .x)) %>%
-#   purrr::map_df(broom::tidy, .id = 'lenCls_fct') %>%
-#   filter(term %in% c('year_ct', "(Intercept)")) %>% 
-#   dplyr::select(-c(statistic, p.value)) %>% 
-#   filter(term == "year_ct")
-
-# Calculate sample sizes...
-# d %>%
-#   mutate(lenCls = cut(length_cm, breaks = seq(0, 150, 10))) %>% 
-#   group_by(lenCls, year) %>% 
-#   summarise(n = n()) %>% 
-#   ungroup() %>% 
-#   group_by(lenCls) %>% 
-#   summarise(mean_n = mean(n))
-
-# cond_slope_fig <- cond_year_slopes %>% 
-#   separate(lenCls_fct, c("lwr", "upr"), sep = ",") %>%
-#   separate(upr, c("upr", "scrap"), sep = "]") %>%
-#   dplyr::select(-scrap) %>% 
-#   mutate(upr_num = as.numeric(upr)) %>% 
-#   filter(upr_num > 10 & upr_num < 80) %>% 
-#   ggplot(., aes(as.factor(upr_num), estimate)) +
-#   geom_hline(yintercept = 0, alpha = 0.5, linetype = 2, color = "red") +
-#   geom_point(size = 1.2, position = position_dodge(width = 0.5), color = "gray40") + 
-#   geom_errorbar(aes(x = as.factor(upr_num),
-#                     ymax = estimate + 1.96*std.error,
-#                     ymin = estimate - 1.96*std.error),
-#                 width = 0.3, position = position_dodge(width = 0.5), color = "gray40") +
-#   labs(y = "Slope (condition index ~ year)", x = "Length-class (upper value) [cm]") +
-#   theme(axis.title = element_text(size = 9)) +
-#   NULL
-
-# size_dist <- ggplot(d, aes(length_cm)) +
-#   geom_density(alpha = 0.8, fill = "gray70", color = "gray50") +
-#   coord_cartesian(expand = 0, xlim = c(14, 76), ylim = c(0, 0.031)) + 
-#   scale_x_continuous(breaks = scales::pretty_breaks(n = 7)) +
-#   labs(y = "Density", x = "Length-class (upper value) [cm]") +
-#   theme(axis.title = element_text(size = 9)) + 
-#   NULL
-
-# cond_slope_fig / size_dist + plot_layout(heights = c(3, 1))
-
-# Plot deciles
-#pal <- brewer.pal(n = 8, name = "Dark2")
-
-# Here are the sims for each year. Take the deciles of these
-# ggplot(index_avg_sims, aes(y = as.factor(year), x = log(.value))) + 
-#   geom_density_ridges_gradient(rel_min_height = 0.01, alpha = 0.8, color = "grey10", size = 0.2,
-#                                quantile_lines = TRUE, quantiles = 0.5) + 
-#   coord_flip()
-
-# deciles_sum <- d %>% 
-#   group_by(year) %>% 
-#   summarise("1st" = quantile(x = le_cren, p = c(0.1)),
-#             "5th (median)" = quantile(x = le_cren, p = c(0.5)),
-#             "9th" = quantile(x = le_cren, p = c(0.9))) %>% 
-#   ungroup() %>% 
-#   pivot_longer(2:4, names_to = "Deciles", values_to = "le_cren") 
-# 
-# pal <- brewer.pal(n = 8, name = "Dark2")
-
-# deciles <- ggplot() +
-#   stat_smooth(data = deciles_sum, aes(year, le_cren, color = Deciles), method = "gam", formula = y~s(x, k = 3),
-#               se = TRUE, show.legend = FALSE) + 
-#   geom_point(data = deciles_sum, aes(year, le_cren, color = Deciles)) +
-#   scale_color_manual(values = pal, name = "") +
-#   labs(x = "Year", y = "Le Cren's condition index", color = "Deciles") +
-#   scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
-#   theme(axis.title = element_text(size = 9),
-#         legend.position = c(0.85, 0.85),
-#         legend.background = element_blank(),
-#         legend.title = element_text(size = 9),
-#         legend.spacing.x = unit(0, 'cm'),
-#         plot.margin = unit(c(0.4, 0.4, 0.4, 0), "cm")) +
-#   guides(fill = "none",
-#          color = guide_legend(keywidth = 0.1,
-#                               keyheight = 0.1, 
-#                               default.unit = "inch")) + 
-#   NULL
-#   
-# deciles
-
+# Ridge-plot of data
 data_ridge <- ggplot(d, aes(x = le_cren, y = fct_rev(as.factor(year)), fill = factor(stat(quantile)))) +
   stat_density_ridges(
     rel_min_height = .01,
@@ -898,12 +756,8 @@ data_ridge <- ggplot(d, aes(x = le_cren, y = fct_rev(as.factor(year)), fill = fa
         legend.background = element_blank(),
         legend.title = element_text(size = 9),
         legend.spacing.x = unit(0.1, 'cm'),
-        plot.margin = unit(c(0.4, 0.67, 0.4, 0), "cm")) +
+        plot.margin = unit(c(0.4, 0.7, 0.4, 0), "cm")) +
   NULL
-
-# cond_index + cond_slope_fig + deciles + size_dist +
-#   plot_annotation(tag_levels = 'A') +
-#   plot_layout(ncol = 2, )
 
 data_ridge + cond_index + plot_annotation(tag_levels = 'A') +
    plot_layout(widths = c(1, 2.2))
@@ -928,6 +782,9 @@ write.csv(div_index_delta_cond, "output/div_index_delta_cond.csv")
 ## Effect sizes
 
 ```{r extract coefficients, message=FALSE}
+# What is one standard deviation of oxygen?
+sd(d$oxy)
+
 # Extract random and fixed coefficients from the full model
 mfull_est <- bind_rows(tidy(mfull, effects = "ran_par", conf.int = TRUE) %>%
                          filter(term %in% c("sigma_O", "sigma_E")),
@@ -965,7 +822,6 @@ mfull_est <- mfull_est %>%
 levels(mfull_est$term)
 
 # I want the random effects to be dark gray...
-#pal2 <- c(pal[1:3], "black", pal[4:8])
 pal <- brewer.pal(n = 8, name = "Dark2")
 pal2 <- c(pal[1:5], "black", pal[6:8])
 
@@ -973,7 +829,6 @@ pal2 <- c(pal[1:5], "black", pal[6:8])
 mfull_est <- mfull_est %>% 
   mutate(term2 = ifelse(term %in% c("sigma_E", "sigma_O"), 2, 1))
 
-#ggplot(mfull_est, aes(reorder(term, estimate), estimate)) +
 ggplot(mfull_est, aes(reorder(term, term2), estimate, color = group, fill = group, shape = scale)) +
   geom_hline(yintercept = 0, linetype = 2, color = "gray40", alpha = 0.5) +
   geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0) +
@@ -1008,41 +863,26 @@ ggplot(mfull_est, aes(reorder(term, term2), estimate, color = group, fill = grou
   guides(color = "none", fill = "none", shape = guide_legend(ncol = 2)) + 
   NULL
   
-ggsave("figures/effect_size.png", width = 4.5, height = 6.5, dpi = 600)
+ggsave("figures/effect_size.png", width = 5.5, height = 6.5, dpi = 600)
 
 # Just a test to see the labels were alright
 #ggplot(mfull_est, aes(reorder(term, estimate), estimate)) +
-ggplot(mfull_est, aes(term, estimate)) +
-  geom_hline(yintercept = 0, linetype = 2, color = "red", alpha = 0.5) +
-  geom_point(size = 2) +
-  labs(x = "", y = "Standardized coefficient") +
-  coord_flip()
+# ggplot(mfull_est, aes(term, estimate)) +
+#   geom_hline(yintercept = 0, linetype = 2, color = "red", alpha = 0.5) +
+#   geom_point(size = 2) +
+#   labs(x = "", y = "Standardized coefficient") +
+#   coord_flip()
 
 # Now save this for comparison in sensitivity analysis script
 write.csv(mfull_est, "output/mfull_est.csv")
 ```
 
-## Map-prediction
+## Plot in space
   
 ```{r predict on grid with covariates, message=FALSE, fig.width=12}
 pred_map <- predict(mfull, newdata = pred_grid)
 
 pal <- wes_palette("Zissou1", 21, type = "continuous")
-
-summary(pred_map$est)
-hist(pred_map$est)
-
-# For plotting, remove estimates larger than the 99.99th percentile and smaller than the 0.01th percentile
-# pred_map2 <- pred_map %>% 
-#   mutate(lwr = hutils::weighted_quantile(v = est, p = c(0.0001)),
-#          upr = hutils::weighted_quantile(v = est, p = c(0.9999))) %>% 
-#   filter(est > lwr & est < upr)
-
-hist(pred_map$depth)
-ggplot(d, aes(depth)) + 
-  geom_density() + 
-  geom_vline(xintercept = c(5, 120)) +
-  coord_cartesian(expand = 0)
 
 plot_map_raster +
   geom_raster(data = filter(pred_map, depth < 120 & depth > 10), aes(x = X*1000, y = Y*1000, fill = exp(est))) +
@@ -1067,28 +907,28 @@ ggsave("figures/condition_map_covars.png", width = 6.5, height = 6.5, dpi = 600)
 # Plot correlation between random effects and covariates
 
 # Drop NA covariates for the correlation plot
-colnames(pred_map)
-
-pred_map_corrplot <- pred_map %>%
-  drop_na(biomass_her_sc, biomass_her_sd_sc, biomass_spr_sc, biomass_spr_sd_sc,
-          density_cod_sc, density_cod_rec_sc, density_fle_sc, density_fle_rec_sc, 
-          density_saduria_sc, density_saduria_rec_sc, depth_sc, depth_rec_sc,
-          oxy_sc, oxy_rec_sc, temp_sc, temp_rec_sc, omega_s, epsilon_st) %>% 
-  dplyr::select(biomass_her_sc, biomass_her_sd_sc, biomass_spr_sc, biomass_spr_sd_sc,
-          density_cod_sc, density_cod_rec_sc, density_fle_sc, density_fle_rec_sc, 
-          density_saduria_sc, density_saduria_rec_sc, depth_sc, depth_rec_sc,
-          oxy_sc, oxy_rec_sc, temp_sc, temp_rec_sc, omega_s, epsilon_st)
-
-corr_re <- round(cor(pred_map_corrplot), 2)
-
-ggcorrplot(corr_re, hc.order = TRUE, type = "lower", lab = TRUE, lab_size = 2.5) +
-  theme_classic() + 
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.3))
-
-ggsave("figures/supp/condition/correlation_variables_random_effects.png", width = 6.5, height = 6.5, dpi = 600)
+# colnames(pred_map)
+# 
+# pred_map_corrplot <- pred_map %>%
+#   drop_na(biomass_her_sc, biomass_her_sd_sc, biomass_spr_sc, biomass_spr_sd_sc,
+#           density_cod_sc, density_cod_rec_sc, density_fle_sc, density_fle_rec_sc, 
+#           density_saduria_sc, density_saduria_rec_sc, depth_sc, depth_rec_sc,
+#           oxy_sc, oxy_rec_sc, temp_sc, temp_rec_sc, omega_s, epsilon_st) %>% 
+#   dplyr::select(biomass_her_sc, biomass_her_sd_sc, biomass_spr_sc, biomass_spr_sd_sc,
+#           density_cod_sc, density_cod_rec_sc, density_fle_sc, density_fle_rec_sc, 
+#           density_saduria_sc, density_saduria_rec_sc, depth_sc, depth_rec_sc,
+#           oxy_sc, oxy_rec_sc, temp_sc, temp_rec_sc, omega_s, epsilon_st)
+# 
+# corr_re <- round(cor(pred_map_corrplot), 2)
+# 
+# ggcorrplot(corr_re, hc.order = TRUE, type = "lower", lab = TRUE, lab_size = 2.5) +
+#   theme_classic() + 
+#   theme(axis.text.x = element_text(angle = 90, vjust = 0.3))
+# 
+# ggsave("figures/supp/condition/correlation_variables_random_effects.png", width = 6.5, height = 6.5, dpi = 600)
 ```
 
-```{r testing effect of rw or factor year for intercept estimates in a simple model}
+```{r testing effect of rw or factor year for intercept estimates in a simple model, include = FALSE}
 # mesh <- make_mesh(pcod, c("X", "Y"), cutoff = 20)
 # 
 # fit <- sdmTMB(
@@ -1124,7 +964,7 @@ ggsave("figures/supp/condition/correlation_variables_random_effects.png", width 
 #   formula = log_le_cren ~ -1 + year_f + depth_sc,
 #   data = d,
 #   time = "year",
-#   mesh = spde, 
+#   mesh = spde,
 #   family = student(link = "identity", df = 5),
 #   spatiotemporal = "off",
 #   spatial = "on",
@@ -1137,7 +977,7 @@ ggsave("figures/supp/condition/correlation_variables_random_effects.png", width 
 #   data = d,
 #   time = "year",
 #   time_varying = ~1,
-#   mesh = spde, 
+#   mesh = spde,
 #   family = student(link = "identity", df = 5),
 #   spatiotemporal = "off",
 #   spatial = "on",
@@ -1147,19 +987,19 @@ ggsave("figures/supp/condition/correlation_variables_random_effects.png", width 
 # 
 # int <- bind_rows( data.frame(intercept = bind_rows(tidy(mfull_fe, conf.int = TRUE))$estimate[1:27],
 #                              model = "fixed effect year",
-#                              year = 1993:2019), 
+#                              year = 1993:2019),
 #                   data.frame(intercept = as.numeric(mfull_rw$sd_report$par.random[1:27]),
 #                              model = "random walk",
 #                              year = 1993:2019)
 # )
 # 
-# ggplot(int, aes(year, intercept, color = model)) + 
-#   geom_point(alpha = 0.5, size = 4, position = position_dodge(width = 0.4)) + 
+# ggplot(int, aes(year, intercept, color = model)) +
+#   geom_point(alpha = 0.5, size = 4, position = position_dodge(width = 0.4)) +
 #   theme_bw(base_size = 16) +
 #   theme(legend.position = "bottom")
 ```
 
-```{r gganimate condition,cache=TRUE,message=FALSE}
+```{r gganimate condition,cache=TRUE, message=FALSE, include = FALSE}
 # p <- plot_map_raster +
 #   geom_raster(data = pred_map2, aes(x = X*1000, y = Y*1000, fill = est)) +
 #   scale_fill_gradientn(colours = rev(pal), name = "log(condition factor)") +
@@ -1476,8 +1316,54 @@ mar_sad <- ggplot(p_margin_sad, aes(density_saduria_sc, exp(est),
 ### Plot together
 
 ```{r}
-mar_dep + mar_oxy + mar_temp + mar_cod + mar_spr + mar_sad
-  plot_annotation(tag_levels = 'A') 
+# mar_dep + mar_oxy + mar_temp + mar_cod + mar_spr + mar_sad
+#   plot_annotation(tag_levels = 'A') 
+# 
+# ggsave("figures/supp/condition/marginal_effects.png", width = 6.5, height = 6.5, dpi = 600)
+
+p_margin_dep2 <- p_margin_dep %>%
+  mutate(variable = "Depth (haul)") %>% 
+  dplyr::select(est, est_se, depth_sc, variable) %>% 
+  rename(value = depth_sc)
+
+p_margin_oxy2 <- p_margin_oxy %>%
+  mutate(variable = "Oxygen (haul)") %>% 
+  dplyr::select(est, est_se, oxy_sc, variable) %>% 
+  rename(value = oxy_sc)
+
+p_margin_tem2 <- p_margin_tem %>%
+  mutate(variable = "Temperature (haul)") %>% 
+  dplyr::select(est, est_se, temp_sc, variable) %>% 
+  rename(value = temp_sc)
+
+p_margin_cod2 <- p_margin_cod %>%
+  mutate(variable = "Cod (haul)") %>% 
+  dplyr::select(est, est_se, density_cod_sc, variable) %>% 
+  rename(value = density_cod_sc)
+
+p_margin_spr2 <- p_margin_spr %>%
+  mutate(variable = "Sprat (sub)") %>% 
+  dplyr::select(est, est_se, biomass_spr_sd_sc, variable) %>% 
+  rename(value = biomass_spr_sd_sc)
+
+p_margin_sad2 <- p_margin_sad %>%
+  mutate(variable = "S. entomon (haul)") %>%
+  dplyr::select(est, est_se, density_saduria_sc, variable) %>% 
+  rename(value = density_saduria_sc)
+
+margs <- bind_rows(p_margin_dep2, p_margin_oxy2, p_margin_tem2, 
+                   p_margin_cod2, p_margin_spr2, p_margin_sad2)
+
+ggplot(margs, aes(value, exp(est), ymin = exp(est - 1.96 * est_se),
+                  ymax = exp(est + 1.96 * est_se))) +
+  geom_ribbon(alpha = 0.4) +
+  geom_line() +
+  facet_wrap(~variable, scales = "free_x") +
+  labs(y = "Le Cren's condidition factor",
+       x = "Scaled value") +
+  theme_plot() +
+  theme(axis.text.x = element_text(angle = 0)) +
+  NULL
 
 ggsave("figures/supp/condition/marginal_effects.png", width = 6.5, height = 6.5, dpi = 600)
 ```

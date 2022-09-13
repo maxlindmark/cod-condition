@@ -246,7 +246,7 @@ sort(unique(sweep$Gear))
 unique(bits_hl$Gear)[!unique(bits_hl$Gear) %in% unique(sweep$Gear)] 
 ```
 
-### Create a simple ID that works across all exchange data
+### Create a simple haul ID that works across all exchange data
 
 ```{r, message=FALSE}
 # Create ID column
@@ -314,7 +314,7 @@ bits_hh <- bits_hh %>%
          sub_div = as.character(sub_div)) 
 
 # Now add the fishing line information from the sweep file (we need that later
-# to standardize based on gear geometry). We add in the in the HH data and then
+# to standardize based on gear geometry). We add in the the HH data and then
 # transfer it to the other exchange data files when left_joining.
 # Check which Fishing lines I have in the sweep data:
 fishing_line <- sweep %>% group_by(Gear) %>% distinct(Fishing.line)
@@ -342,7 +342,7 @@ bits_hh %>% filter(Fishing.line == -9) %>% distinct(Gear)
 # GOV has 160
 # ESB ??
 # GRT ??
-# Rest are unknown and likely not used by swedish data (therefore their correction
+# Rest are unknown and likely not used by Swedish data (therefore their correction
 # factors my be in the sweep file)
 
 # Add these values:
@@ -356,9 +356,10 @@ bits_hl <- bits_hl %>%
 # Match columns from the HH data to the HL and CA data
 sort(unique(bits_hh$sub_div))
 sort(colnames(bits_hh))
+
 bits_hh_merge <- bits_hh %>% 
-                       dplyr::select(sub_div, Rect, HaulVal, StdSpecRecCode, BySpecRecCode, Fishing.line,
-                                     DataType, HaulDur, GroundSpeed, haul.id, IDx, ShootLat, ShootLong)
+  dplyr::select(sub_div, Rect, HaulVal, StdSpecRecCode, BySpecRecCode, Fishing.line,
+                DataType, HaulDur, GroundSpeed, haul.id, IDx, ShootLat, ShootLong)
 
 bits_hl <- left_join(dplyr::select(bits_hl, -haul.id), bits_hh_merge, by = "IDx")
 bits_ca <- left_join(bits_ca, bits_hh_merge, by = "IDx")

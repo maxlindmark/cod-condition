@@ -4,7 +4,8 @@ author: "Max Lindmark, Sean Andersson, Mayya Gogina and Michele Casini"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
   html_document:
-  df_print: paged
+    df_print: paged
+    code_folding: hide
 pdf_document: default
 editor_options: 
   chunk_output_type: console
@@ -199,7 +200,7 @@ m <- sdmTMB(density ~ 0 + as.factor(year) + s(depth_sc) + s(oxy_sc) + s(temp_sc)
 tidy(m, conf.int = TRUE)
 ```
 
-# Sanity check
+## Sanity check
 
 ```{r, cache = TRUE}
 sanity(m)
@@ -463,10 +464,10 @@ ggsave("figures/supp/sprat_subdiv.png", width = 6.5, height = 6.5, dpi = 600)
 
 ## Biomass weighted quantiles of depth and oxygen
 
-```{r calculate biomass weighted }
+```{r calculate biomass weighted variables}
 # Plot bathymetry
 bathy_plot <- plot_map_raster_labels +
-  geom_raster(data = filter(predict_mcod, year == "1999"), aes(x = X * 1000, y = Y * 1000, fill = depth)) +
+  geom_raster(data = filter(predict_mcod, year == "2006"), aes(x = X * 1000, y = Y * 1000, fill = depth)) +
   scale_fill_viridis(option = "A", direction = -1) +
   labs(fill = "Depth") +
   theme_plot() +
@@ -506,9 +507,9 @@ plot_w_dep <- ggplot(wm_depth, aes(year, depth, color = series, group = series, 
         plot.margin = unit(c(0, 0.4, 0, 0), "cm")) +
   NULL
 
-# Plot oxygen in 1999
+# Plot oxygen in 2006
 oxy_plot <- plot_map_raster_labels +
-  geom_raster(data = filter(predict_mcod, year == "1999"), aes(x = X * 1000, y = Y * 1000, fill = oxy)) +
+  geom_raster(data = filter(predict_mcod, year == "2006"), aes(x = X * 1000, y = Y * 1000, fill = oxy)) +
   scale_fill_viridis() +
   labs(fill = expression(paste("O" [2], " [ml/L]", sep = ""))) +
   theme_plot() +
@@ -657,13 +658,13 @@ wm_oxy_sd_delta <- wm_oxy_sd %>%
   mutate(sub_div = as.character(sub_div))
 
 
-delta_dat <- cond_delta_sd %>% left_join(wm_oxy_sd_delta)
-
-ggplot(delta_dat, aes(delta_oxy, delta_cond, color = sub_div)) +
-  geom_point(size = 3) +
-  # geom_vline(xintercept = 0, color = "red", linetype = 2) +
-  # geom_hline(yintercept = 0, color = "red", linetype = 2)
-  NULL
+# delta_dat <- cond_delta_sd %>% left_join(wm_oxy_sd_delta)
+# 
+# ggplot(delta_dat, aes(delta_oxy, delta_cond, color = sub_div)) +
+#   geom_point(size = 3) +
+#   geom_vline(xintercept = 0, color = "red", linetype = 2) +
+#   geom_hline(yintercept = 0, color = "red", linetype = 2)
+#   NULL
 
 
 # Depth
@@ -692,37 +693,10 @@ ggplot(wm_dep_sd, aes(year, weighted_median, color = factor(sub_div))) +
 ggsave("figures/supp/density/weighted_depth_subdiv.png", width = 6.5, height = 6.5, dpi = 600)
 ```
 
-```{r fit prediction grid model, results='hide', cache=TRUE, message=FALSE}
-# Lm option
-pred_grid2 <- pred_grid %>% mutate(depth_sq = depth*depth,
-                                   depth_cu = depth*depth*depth)
-
-oxy_lm <- lm(oxy ~ -1 + factor(year) + depth + depth_sq + depth_cu, data = pred_grid2)
-
-nd_oxy_pred_grid <- data.frame(depth =
-                                 seq(min(pred_grid$depth),
-                                     max(pred_grid$depth),
-                                     length.out = 100))
-
-nd_oxy_pred_grid <- nd_oxy_pred_grid %>% 
-  mutate(depth_sq = depth*depth,
-         depth_cu = depth*depth*depth,
-         year = 2011L)
-
-nd_oxy_pred_grid$est <- predict(oxy_lm, newdata = nd_oxy_pred_grid)
-
-ggplot(nd_oxy_pred_grid, aes(depth, est)) + 
-  geom_point(data = pred_grid, aes(depth, oxy), inherit.aes = FALSE,
-             alpha = 0.05) +
-  geom_line(color = "red") +
-  geom_vline(xintercept = c(45, 50), color = "gray", linetype = 2) +
-  NULL
-```
-
 ### Plot biomass-weighted temperature
 
 ```{r biomass-weighted temperature, message=FALSE}
-# Plot temperature in 1999
+# Plot temperature in 2006
 temp_plot <- plot_map_raster +
   geom_raster(data = filter(predict_mcod, year == "1999"), aes(x = X * 1000, y = Y * 1000, fill = temp)) +
   scale_fill_viridis(option = "inferno", direction = -1) +
@@ -781,7 +755,7 @@ temp_plot + plot_w_temp +
 ggsave("figures/supp/density/weighted_temp.png", width = 6.5, height = 8.5, dpi = 600)
 ```
 
-```{r weighted means for grant figures}
+```{r weighted means for grant figures, fig.show='hide'}
 annual_temp2 <- pred_grid %>%
   drop_na(temp) %>%
   group_by(year) %>%
@@ -1030,7 +1004,7 @@ ggsave("figures/supp/density/VR_weighted_mean_coord_species.png", width = 6.5, h
 
 ```
 
-## Marginal effect of oxygen
+### Marginal effect of oxygen
 
 ```{r marginal effects oxygen, message=FALSE, cache=TRUE}
 # Prepare prediction data frame
@@ -1055,7 +1029,7 @@ mar_oxy <- ggplot(p_margin_oxy, aes(oxy, exp(est),
   labs(x = expression(Oxygen[haul]))
 ```
 
-## Marginal effect of depth
+### Marginal effect of depth
 
 ```{r marginal effects depth, message=FALSE, cache=TRUE}
 # Prepare prediction data frame
@@ -1079,7 +1053,7 @@ mar_depth <- ggplot(p_margin_dep, aes(depth, exp(est),
   labs(x = expression(Depth[haul]))
 ```
 
-## Marginal effect of temperature
+### Marginal effect of temperature
 
 ```{r marginal effects temperature, message=FALSE, cache=TRUE}
 # Prepare prediction data frame
@@ -1103,11 +1077,41 @@ mar_temp <- ggplot(p_margin_temp, aes(temp, exp(est),
   labs(x = expression(Temp[haul]))
 ```
 
-### Plot together
+## Plot together
 
 ```{r}
-mar_temp + mar_depth + mar_oxy +
-  plot_annotation(tag_levels = 'A') 
+# mar_temp + mar_depth + mar_oxy +
+#   plot_annotation(tag_levels = 'A') 
+# 
+# ggsave("figures/supp/density/marginal_effects.png", width = 6.5, height = 6.5, dpi = 600)
+
+p_margin_dep2 <- p_margin_dep %>%
+  mutate(variable = "Depth") %>% 
+  dplyr::select(est, est_se, depth_sc, variable) %>% 
+  rename(value = depth_sc)
+
+p_margin_oxy2 <- p_margin_oxy %>%
+  mutate(variable = "Oxygen") %>% 
+  dplyr::select(est, est_se, oxy_sc, variable) %>% 
+  rename(value = oxy_sc)
+
+p_margin_tem2 <- p_margin_temp %>%
+  mutate(variable = "Temperature") %>% 
+  dplyr::select(est, est_se, temp_sc, variable) %>% 
+  rename(value = temp_sc)
+
+margs <- bind_rows(p_margin_dep2, p_margin_oxy2, p_margin_tem2)
+
+ggplot(margs, aes(value, exp(est), ymin = exp(est - 1.96 * est_se),
+                  ymax = exp(est + 1.96 * est_se))) +
+  geom_ribbon(alpha = 0.4) +
+  geom_line() +
+  facet_wrap(~variable, scales = "free_x") +
+  labs(y = "Biomass density",
+       x = "Scaled value") +
+  theme_plot() +
+  theme(axis.text.x = element_text(angle = 0)) +
+  NULL
 
 ggsave("figures/supp/density/marginal_effects.png", width = 6.5, height = 6.5, dpi = 600)
 ```
