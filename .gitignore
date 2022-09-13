@@ -24,8 +24,9 @@
 vignettes/*.html
 vignettes/*.pdf
 
-# html files
-R/**/*.html
+# html files (not main analysis)
+R/clean_data/*.html
+R/supp_analysis/*.html
 
 # Old drafts
 drafts/old
