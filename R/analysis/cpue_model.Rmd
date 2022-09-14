@@ -1,6 +1,6 @@
 ---
 title: "Cod density in relation to environmental variables"
-author: "Max Lindmark, Sean Andersson, Mayya Gogina and Michele Casini"
+author: "Max Lindmark, Sean C. Andersson, Mayya Gogina and Michele Casini"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
   html_document:

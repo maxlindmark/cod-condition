@@ -6,7 +6,7 @@ This repo contains R code for analyzing individual-level condition of cod and to
 
 We use Spatiotemporal linear mixed-effects models and a predictive-modeling framework within the R package [sdmTMB](https://github.com/pbs-assess/sdmTMB). This repository contains all data and code used for analyses and figures from Lindmark et al (20XX).
 
-**Authors:** [Max Lindmark](https://maxlindmark.netlify.app/), [Sean Anderson](https://seananderson.ca/), [Mayya Gogina](https://www.io-warnemuende.de/mayya-gogina.html) and [Michele Casini](https://www.slu.se/cv/michele-casini/)
+**Authors:** [Max Lindmark](https://maxlindmark.netlify.app/), [Sean C. Anderson](https://seananderson.ca/), [Mayya Gogina](https://www.io-warnemuende.de/mayya-gogina.html) and [Michele Casini](https://www.slu.se/cv/michele-casini/)
 
 ## How to replicate our analyses and navigate this repo
 

@@ -1,6 +1,6 @@
 ---
 title: "Condition model - fitted to mature and immature cod separately and different sub-divisions"
-author: "Max Lindmark, Sean Andersson, Mayya Gogina and Michele Casini"
+author: "Max Lindmark"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
   html_document:

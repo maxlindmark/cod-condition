@@ -1,6 +1,6 @@
 ---
 title: "Condition model-scale comparison"
-author: "Max Lindmark, Sean Andersson, Mayya Gogina and Michele Casini"
+author: "Max Lindmark"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
   html_document:
@@ -262,66 +262,6 @@ sd25; sd26; sd27; sd28
 0.002
 
 ```
-
-# Same as above but now full time series
-
-```{r}
-# sprat_tot_sd <- d %>% 
-#   filter(!sub_div == 24) %>% 
-#   distinct(year, sub_div, .keep_all = TRUE) %>% 
-#   rename(sprat_tot_sd = biomass_spr_sd) %>% 
-#   dplyr::select(year, sub_div, sprat_tot_sd)
-# 
-# ggplot(sprat_tot_sd, aes(year, sprat_tot_sd/1000, color = factor(sub_div))) +
-#   geom_point() +
-#   stat_smooth()
-# 
-# d_sum_sd <- d %>% 
-#   filter(!sub_div == 24 & length_cm < 61 & length_cm > 9) %>% 
-#   mutate(lngt_class = cut(length_cm, breaks = seq(10, 60, 10))) %>% 
-#   group_by(year, lngt_class, sub_div) %>% 
-#   summarise(mean_fulton = mean(fulton)) %>% 
-#   ungroup() %>% 
-#   group_by(year, sub_div) %>% 
-#   summarise(mean_fulton = mean(mean_fulton)) %>% 
-#   ungroup()
-#   
-# ggplot(d_sum_sd, aes(year, mean_fulton, color = factor(sub_div))) +
-#   geom_point() +
-#   stat_smooth()
-# 
-# # left_join
-# d_sum_sd <- left_join(d_sum_sd, sprat_tot_sd)
-# 
-# # scale variables
-# d_sum_sd <- d_sum_sd %>%
-#   drop_na(sprat_tot_sd) %>% 
-#   mutate(sprat_tot_sd_sc = (sprat_tot_sd - mean(sprat_tot_sd)) / sd(sprat_tot_sd),
-#          sub_div = factor(sub_div))
-# 
-# m3 <- gam(mean_fulton ~ 1 + s(sprat_tot_sd_sc, k = 4, by = sub_div),
-#           data = d_sum_sd)
-# 
-# summary(m3)
-# 
-# plot.gam(m3, pages = 1, scale = 0)
-# plot.gam(m3, pages = 1, scale = 0, shift = 1)
-# 
-# m4 <- lm(mean_fulton ~ 1 + sprat_tot_sd_sc*sub_div, data = d_sum_sd)
-# summary(m4)
-# 
-# sd25 <- summary(m4)$coefficients["sprat_tot_sd_sc", "Estimate"]
-# sd26 <- sd25 + summary(m4)$coefficients["sprat_tot_sd_sc:sub_div26", "Estimate"]
-# sd27 <- sd25 + summary(m4)$coefficients["sprat_tot_sd_sc:sub_div27", "Estimate"]
-# sd28 <- sd25 + summary(m4)$coefficients["sprat_tot_sd_sc:sub_div28", "Estimate"]
-# 
-# sd25; sd26; sd27; sd28
-```
-
-
-```{r}
-```
-
 
 
 
