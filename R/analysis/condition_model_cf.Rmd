@@ -15,8 +15,8 @@ editor_options:
 knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>",
-  fig.width = 12,
-  fig.asp = 0.618,
+  # fig.width = 12,
+  # fig.asp = 0.618,
   fig.align ='center'
 )
 ```
@@ -721,7 +721,10 @@ cond_index <- ggplot(div_index2, aes(year, est, color = sub_div, linetype = sub_
         legend.background = element_blank(),
         legend.title = element_text(size = 9),
         legend.spacing.x = unit(0, 'cm'),
-        plot.margin = unit(c(0.4, 0.4, 0.4, 0), "cm")) +
+        plot.margin = unit(c(0.4, 0.4, 0.4, 0), "cm"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank()) +
   guides(linetype = "none",
          color = guide_legend(title.position = "top", title.hjust = 0.5, nrow = 1,
                               keywidth = 0.1, keyheight = 0.1, default.unit = "inch",
@@ -756,20 +759,24 @@ data_ridge <- ggplot(d, aes(x = le_cren, y = fct_rev(as.factor(year)), fill = fa
         legend.background = element_blank(),
         legend.title = element_text(size = 9),
         legend.spacing.x = unit(0.1, 'cm'),
-        plot.margin = unit(c(0.4, 0.7, 0.4, 0), "cm")) +
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        plot.margin = unit(c(0.4, 0.8, 0.4, 0), "cm")) +
   NULL
 
 data_ridge + cond_index + plot_annotation(tag_levels = 'A') +
    plot_layout(widths = c(1, 2.2))
 
-ggsave("figures/cond_index.png", width = 6.5, height = 6.5, dpi = 600)
+ggsave("figures/cond_index.pdf", width = 17, height = 17, units = "cm")
+
 
 ## Calculate delta_fulton and relate to delta_oxygen, by subdivision
 div_index_delta_cond <- div_index2 %>% 
   group_by(sub_div) %>% 
   filter(year %in% c(1993, 1994, 1995, 2017, 2018, 2019)) %>% 
   dplyr::select(year, log_est, sub_div) %>% 
-  pivot_wider(1:3, names_from = year, values_from = log_est) %>% 
+  pivot_wider(names_from = year, values_from = log_est) %>% 
   mutate(start_cond = mean(`1993`, `1994`, `1995`),
          end_cond = mean(`2017`, `2018`, `2019`),
          delta_cond = end_cond - start_cond) %>% 
@@ -859,11 +866,15 @@ ggplot(mfull_est, aes(reorder(term, term2), estimate, color = group, fill = grou
                               )) +
   coord_flip() +
   theme(plot.margin = unit(c(0.4, 0.4, 0.4, 0), "cm"),
-        legend.position = "bottom") +
+        legend.position = "bottom",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank()) +
   guides(color = "none", fill = "none", shape = guide_legend(ncol = 2)) + 
   NULL
   
-ggsave("figures/effect_size.png", width = 5.5, height = 6.5, dpi = 600)
+ggsave("figures/effect_size.pdf", width = 17, height = 17, units = "cm")
+
 
 # Just a test to see the labels were alright
 #ggplot(mfull_est, aes(reorder(term, estimate), estimate)) +
@@ -902,7 +913,9 @@ plot_map_raster_labels +
   theme_plot() +
   NULL
 
-ggsave("figures/condition_map_covars.png", width = 6.5, height = 6.5, dpi = 600)
+ggsave("figures/condition_map_covars.pdf", width = 17, height = 17, units = "cm")
+
+
 
 # Plot correlation between random effects and covariates
 

@@ -1072,8 +1072,8 @@ ggplot(dat, aes(density, density_fle)) + geom_point()
 test_cod <- hlcodhaul %>% filter(!Country == "SWE")
 test_fle <- hlflehaul %>% filter(!Country == "SWE")
 
-orio_cod <- read.csv("/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/ale_gear_standardization/datras_st_ale.csv")
-orio_fle <- read.csv("/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/ale_gear_standardization/datras_fle_st_ale.csv")
+orio_cod <- read.csv("/Users/maxlindmark/Dropbox/Max work/R/gear_standardization_ale/datras_st_ale.csv")
+orio_fle <- read.csv("/Users/maxlindmark/Dropbox/Max work/R/gear_standardization_ale/datras_fle_st_ale.csv")
 
 orio_cod <- orio_cod %>%
   group_by(IDX) %>%

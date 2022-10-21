@@ -260,13 +260,21 @@ sort(unique(bits_hh$sub_div))
 sort(colnames(bits_hh))
 bits_hh_merge <- bits_hh %>% 
                        dplyr::select(sub_div, Rect, HaulVal, StdSpecRecCode, BySpecRecCode,
-                                     IDx, ShootLat, ShootLong)
+                                     IDx, ShootLat, ShootLong, Month, Day)
 
 bits_ca <- left_join(bits_ca, bits_hh_merge, by = "IDx")
 
 # Now filter the subdivisions I want from all data sets
 bits_hh <- bits_hh %>% filter(sub_div %in% c(24, 25, 26, 27, 28))
 bits_ca <- bits_ca %>% filter(sub_div %in% c(24, 25, 26, 27, 28))
+```
+
+```{r test}
+library(lubridate)
+
+bits_ca$Date <- as.Date(paste(bits_ca$Year, bits_ca$Month, bits_ca$Day, sep = "-"))
+
+bits_ca$yday <- yday(bits_ca$Date)
 ```
 
 ### Now clean the CA data and go to 1 row 1 observation
@@ -307,6 +315,11 @@ ggplot(bits_ca, aes(IndWgt, length_cm)) +
 bits_ca <- bits_ca %>%
   mutate(keep = ifelse(Year == 2010 & IndWgt > 12500, "N", "Y")) %>% 
   filter(keep == "Y") %>% dplyr::select(-keep)
+
+# bits_ca %>% 
+#   mutate(fulton_k = (IndWgt / (length_cm^3)) * 100) %>% 
+#   filter(fulton_k < 10) %>% 
+#   ggplot(aes(yday, fulton_k)) + geom_point() + stat_smooth()
 
 ggplot(bits_ca, aes(IndWgt, length_cm)) +
   geom_point() + 
