@@ -102,10 +102,23 @@ ggplot(d) +
   geom_point(aes(year, density_cod, color = factor(sub_div))) + 
   facet_wrap(~sub_div)
 
-# Explore data a bit
 ggplot(d) + 
   geom_point(aes(year, density_fle, color = factor(sub_div))) + 
   facet_wrap(~sub_div)
+
+ggplot(d) + 
+  geom_point(aes(X*1000, Y*1000, color = density_fle)) + 
+  facet_wrap(~year)
+
+d %>% 
+  group_by(year) %>% 
+  summarise(n_haul = length(unique(haul.id))) %>% 
+  ggplot(aes(year, n_haul)) +
+  geom_line()
+  
+nrow(d)
+
+summary(d$density_fle)
 ```
 
 ## Load prediction grid
@@ -116,7 +129,7 @@ pred_grid <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_
 
 pred_grid <- bind_rows(pred_grid1, pred_grid)
 
-# Standardize data with respect to data
+# Standardize depth with respect to data
 pred_grid <- pred_grid %>%
   mutate(year = as.integer(year)) %>% 
   filter(year %in% c(unique(d$year))) %>% 
