@@ -563,7 +563,7 @@ for(i in unique(d_sub_oxy$year_f)) {
                          limits = c(-200, 400)) +
     NULL
   
-  ggsave(paste("figures/supp/cpue_oxygen_rasters/", i,".png", sep = ""),
+  ggsave(paste("figures/supp/condition/cond_oxygen_rasters/", i,".png", sep = ""),
          width = 6.5, height = 6.5, dpi = 600)
   
 }
@@ -824,7 +824,7 @@ for(i in unique(d_sub_temp$year_f)) {
                          limits = c(2, 17)) +
     NULL
   
-  ggsave(paste("figures/supp/cpue_temp_rasters/", i,".png", sep = ""),
+  ggsave(paste("figures/supp/condition/cond_temp_rasters/", i,".png", sep = ""),
          width = 6.5, height = 6.5, dpi = 600)
   
 }
@@ -900,7 +900,7 @@ dat$Y <- utm_coords$Y/1000 # for computational reasons
 
 ```{r, message=FALSE}
 # This is so that we can standardize the prediction grid with respect to the data
-density <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cpue_q_1_4.csv")
+density <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/catch_q_1_4.csv")
 
 density <- density %>% filter(quarter == 4)
 
