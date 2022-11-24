@@ -324,11 +324,6 @@ for(i in unique(d_sub_oxy$year_f)) {
   # Extract raster value (oxygen)
   rasValue <- raster::extract(proj_raster, data_sp)
   
-  # Now we want to plot the results of the raster extractions by plotting the pred-grid
-  # data points over a raster and saving it for each year.
-  # Make the SpatialPoints object into a raster again (for pl)
-  df <- as.data.frame(data_sp)
-  
   # Add in the raster value in the df holding the coordinates for the pred-grid data
   d_slice$oxy <- rasValue
   
@@ -542,11 +537,6 @@ for(i in unique(d_sub_temp$year_f)) {
   # Extract raster value (temperature)
   rasValue <- raster::extract(proj_raster, data_sp)
   
-  # Now we want to plot the results of the raster extractions by plotting the pred-grid
-  # data points over a raster and saving it for each year.
-  # Make the SpatialPoints object into a raster again (for pl)
-  df <- as.data.frame(data_sp)
-  
   # Add in the raster value in the df holding the coordinates for the pred-grid data
   d_slice$temp <- rasValue
   
@@ -718,7 +708,7 @@ her <- read_xlsx("data/BIAS/N and B per Rect. 1991-2020.xlsx",
   mutate(ices_rect = as.factor(ices_rect),
          Species = "Herring",
          biomass_her = `1`+`2`+`3`+`4`+`5`+`6`+`7`+`8`, 
-         IDr = paste(ices_rect, Year, sep = ".")) # Make new ID)
+         IDr = paste(ices_rect, Year, sep = ".")) # Make new ID
 
 # Plot distribution over time in the whole area
 spr %>%
@@ -840,8 +830,8 @@ unique(pred_grid$ices_rect[!pred_grid$ices_rect %in% her$ices_rect])
 unique(pred_grid$ices_rect[!pred_grid$ices_rect %in% spr$ices_rect])
 
 # Check IDr
-pred_grid$IDr[!pred_grid$IDr %in% her$IDr]
-pred_grid$IDr[!pred_grid$IDr %in% spr$IDr]
+head(pred_grid$IDr[!pred_grid$IDr %in% her$IDr], 50)
+head(pred_grid$IDr[!pred_grid$IDr %in% spr$IDr], 50)
 
 # Filter columns so that I only use sprat and herring IDr's that are in the condition data (don't need the others!)
 spr_sum <- spr_sum %>% filter(IDr %in% pred_grid$IDr)
@@ -925,7 +915,7 @@ pred_grid %>%
 
 ```{r cod and flounder densities}
 # This is so that we can standardize the prediction grid with respect to the data
-density <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cpue_q_1_4.csv")
+density <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/catch_q_1_4.csv")
 
 density <- density %>% filter(quarter == 4)
 
