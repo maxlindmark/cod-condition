@@ -1,3 +1,5 @@
+.DS_Store
+
 # History files
 .Rhistory
 .Rapp.history
@@ -95,5 +97,3 @@ test.Rmd
 test.html
 R/guides/
 
-# 
-.DS_Store
