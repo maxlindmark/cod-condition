@@ -94,3 +94,6 @@ Checklist for cod_density project - Google Docs
 test.Rmd
 test.html
 R/guides/
+
+# 
+.DS_Store
