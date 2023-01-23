@@ -449,8 +449,6 @@ tidy(mfull, conf.int = TRUE) %>%
 tidy(mfull, conf.int = TRUE, effects = "ran_par") %>%
   filter(term %in% c("sigma_O", "sigma_E")) %>%
   summarise(mean_estimate = mean(estimate))
-
-
 ```
 
 ```{r only spatiotemporal le cren model, cache=TRUE}
@@ -635,13 +633,7 @@ ggplot(d, aes(year, length_cm, z = residuals)) +
 ```{r sim version condition index, cache=TRUE}
 pred_avg_sim <- predict(mfull, newdata = pred_grid %>% filter(depth > 10 & depth < 110), nsim = 500)
 
-#ncells <- filter(pred_grid, year == max(pred_grid$year)) %>% nrow()
-# index_avg_sim <- get_index_sims(pred_avg_sim, area = rep(1/ncells, nrow(pred_avg_sim)))
-# index_avg_sims <- get_index_sims(pred_avg_sim, area = rep(1/ncells, nrow(pred_avg_sim)),
-#                                  return_sims = TRUE) # This is for calculation on samples!
-
-# Old version above: now we do a weighted version. We could do it directly in the get_index_sims or manually in the prediction grid (but then we don't get an CIs)
-# This is so that we can divide by the sum of weights (needs to be done by year)
+# Weighted version. We could do it directly in the get_index_sims or manually in the prediction grid (but then we don't get an CIs). This is so that we can divide by the sum of weights (needs to be done by year)
 
 weight_sum <- pred_grid %>% 
   filter(depth > 10 & depth < 110) %>% 
@@ -669,6 +661,13 @@ ggplot(index_avg_sim, aes(year, est, ymin = lwr, ymax = upr)) +
   geom_line(data = filter(index_avg_sims, .iteration < 26),
             aes(year, est, group = .iteration), inherit.aes = FALSE, alpha = 0.3)
 
+# Make the un-weighted index
+ncells <- filter(pred_grid, year == max(pred_grid$year) & depth > 10 & depth < 110) %>% nrow()
+
+index_avg_sim_uw <- get_index_sims(pred_avg_sim, area = rep(1/ncells, nrow(pred_avg_sim)))
+
+index_avg_sims_uw <- get_index_sims(pred_avg_sim, area = rep(1/ncells, nrow(pred_avg_sim)),
+                                    return_sims = TRUE) # This is for calculation on samples!
 ```
 
 ### Get sims from prediction with only fixed effects (-year) and random effects
@@ -842,7 +841,7 @@ div_index <- bind_rows(div_index_list)
 ```{r plot condition index and condition factor, message=FALSE}
 # Spatiotemporally standardized indicies
 div_index2 <- bind_rows(div_index %>% dplyr::select(year, est, lwr, upr, sub_div) %>% mutate(sub_div = as.factor(sub_div)),
-                        mutate(index_avg_sim, sub_div = as.factor("Full model prediction")))
+                        mutate(index_avg_sim, sub_div = as.factor("Weighted index")))
 
 # Add in raw mean of data:
 div_index2 <- bind_rows(div_index2,
@@ -851,38 +850,39 @@ div_index2 <- bind_rows(div_index2,
                           summarise(est = exp(mean(log_le_cren))) %>%
                           mutate(sub_div = "Empirical mean"))
 
-# Add fixed effect predictions
+# Add fixed effect predictions and the un-weighted index
 div_index2 <- bind_rows(div_index2,
-                        index_avg_sim_fe %>% mutate(sub_div = "Fixed effects (year omitted)"))
+                        index_avg_sim_fe %>% mutate(sub_div = "Weighted index (fixed effects)"),
+                        index_avg_sim_uw %>% mutate(sub_div = "Un-weighted index",
+                                                    upr = NA,
+                                                    lwr = NA))
 
 
 # Add sims for total and fixed effect prediction
-index_comp_sims <- bind_rows(index_avg_sims_fe %>% mutate(sub_div = "Fixed effects (year omitted)"),
-                             index_avg_sims %>% mutate(sub_div = "Full model prediction")) %>%
+index_comp_sims <- bind_rows(index_avg_sims_fe %>% mutate(sub_div = "Weighted index (fixed effects)"),
+                             index_avg_sims %>% mutate(sub_div = "Weighted index")) %>%
   filter(.iteration < 26)
-
-pal <- brewer.pal(n = 4, name = "Set1")[2:4]
 
 # Plot!
 p1 <- div_index2 %>% 
-  filter(sub_div %in% c("Full model prediction", "Empirical mean", "Fixed effects (year omitted)")) %>% 
+  filter(sub_div %in% c("Weighted index", "Un-weighted index", "Empirical mean", "Weighted index (fixed effects)")) %>% 
   mutate(plot_facet = "Total and data") %>% 
-  mutate(plot_group = ifelse(sub_div == "Empirical mean", 1, 0)) %>% 
+  mutate(plot_group = ifelse(sub_div %in% c("Empirical mean", "Un-weighted index"), 1, 0)) %>% 
+  mutate(line_group = ifelse(sub_div %in% c("Empirical mean", "Un-weighted index"), "1", "0")) %>%
   ggplot(aes(year, est, color = reorder(sub_div, plot_group))) +
   labs(y = "Le Cren's condition factor", x = "", color = "") +
   geom_ribbon(aes(x = year, y = est, ymin = lwr, ymax = upr, fill = sub_div), color = NA, alpha = 0.25) +
   geom_line(data = filter(index_comp_sims, .iteration < 26),
             aes(year, est, group = interaction(.iteration, sub_div), color = sub_div), inherit.aes = FALSE, alpha = 0.3) +
-  geom_line(size = 0.8) +
+  geom_line(aes(linetype = line_group), size = 0.6) +
   facet_wrap(~plot_facet, ncol = 1) +
+  guides(linetype = "none") +
   scale_color_brewer(palette = "Set2") +
   scale_fill_brewer(palette = "Set2") +
   scale_x_continuous(breaks = c(1994, 2000, 2006, 2012, 2018)) +
-  # scale_fill_manual(values = pal) +
-  # scale_color_manual(values = pal) +
   theme_plot(base_size = 10) +
   theme(plot.margin = unit(c(0.4, 0.4, 0, 0.4), "cm"), 
-        legend.position = c(0.22, 0.1),
+        legend.position = c(0.24, 0.11),
         legend.direction = "horizontal",
         legend.spacing.y = unit(0, 'cm'),
         legend.key.size = unit(1, "cm"),
@@ -898,12 +898,11 @@ p1 <- div_index2 %>%
 p1
 
 p2 <- div_index2 %>% 
-  filter(!sub_div %in% c("Full model prediction", "Empirical mean", "Fixed effects (year omitted)")) %>% 
+  filter(!sub_div %in% c("Weighted index", "Un-weighted index", "Empirical mean", "Weighted index (fixed effects)")) %>% 
   mutate(plot_facet = "Subdivision") %>% 
   ggplot(aes(year, est, color = sub_div, fill = sub_div)) +
   scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
   labs(y = "Le Cren's condition factor", x = "Year") +
-  #geom_ribbon(aes(x = year, y = est, ymin = lwr, ymax = upr), color = NA, alpha = 0.15) + 
   geom_line() +
   facet_wrap(~plot_facet, ncol = 1) +
   scale_color_brewer(palette = "Dark2", name = "") +
@@ -973,7 +972,7 @@ mfull_est <- mfull_est %>%
 mfull_est %>% 
   mutate(par_type = ifelse(term %in% c("sigma_O", "sigma_E"), "re", "fe")) %>% 
   group_by(par_type) %>% 
-  summarise(mean_est = mean(estimate)) %>% 
+  summarise(mean_est = mean(abs(estimate))) %>% 
   pivot_wider(names_from = par_type, values_from = mean_est) %>% 
   mutate(ratio = re/fe)
 
