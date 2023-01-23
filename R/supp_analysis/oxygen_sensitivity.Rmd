@@ -14,8 +14,6 @@ editor_options:
 knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>",
-  fig.width = 12,
-  fig.asp = 0.618,
   fig.align ='center'
 )
 ```
@@ -25,7 +23,7 @@ Load libraries
 
 ```{r lib, message=FALSE}
 # Load libraries, install if needed
-library(tidyverse); theme_set(theme_light(base_size = 11))
+library(tidyverse)
 library(readxl)
 library(tidylog)
 library(RCurl)

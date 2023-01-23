@@ -1,0 +1,449 @@
+---
+title: "Density-weighting condition index"
+author: "Max Lindmark, Sean C. Andersson, Mayya Gogina and Michele Casini"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: paged
+    code_folding: hide
+  pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include = FALSE, cache=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.align ='center'
+)
+```
+
+# Fit condition model with environmental and biological predictors
+Fit main model (see exploratory scripts and model comparison), visualize results.
+
+## Load packages
+
+```{r packages, message=FALSE, warning=TRUE}
+library(tidyverse)
+library(tidylog)
+library(viridis)
+library(marmap)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(sf)
+library(RColorBrewer)
+library(gganimate)
+library(gifski)
+library(latex2exp)
+library(patchwork)
+library(png)
+library(RCurl)
+library(wesanderson)
+library(qwraps2) 
+library(ggcorrplot)
+library(ggridges)
+# remotes::install_github("pbs-assess/sdmTMB")
+library(sdmTMB)
+```
+
+## Code for map plots
+
+```{r read coastline data, message=FALSE, warning=FALSE, fig.show='hide'}
+# Specify map ranges
+ymin = 52; ymax = 60; xmin = 10; xmax = 24
+
+map_data <- rnaturalearth::ne_countries(
+  scale = "medium",
+  returnclass = "sf", continent = "europe")
+
+# Crop the polygon for plotting and efficiency:
+# st_bbox(map_data) # find the rough coordinates
+swe_coast <- suppressWarnings(suppressMessages(
+  st_crop(map_data,
+          c(xmin = xmin, ymin = ymin, xmax = xmax, ymax = ymax))))
+
+# Transform our map into UTM 33 coordinates, which is the equal-area projection we fit in:
+utm_zone33 <- 32633
+swe_coast_proj <- sf::st_transform(swe_coast, crs = utm_zone33)
+
+# Define plotting theme for main plot
+theme_plot <- function(base_size = 10, base_family = "") {
+  theme_light(base_size = 10, base_family = "") +
+    theme(
+      axis.text.x = element_text(angle = 90),
+      axis.text = element_text(size = 8),
+      legend.text = element_text(size = 8),
+      legend.title = element_text(size = 8),
+      legend.position = "bottom",
+      legend.key.height = unit(0.2, "cm"),
+      legend.margin = margin(0, 0, 0, 0),
+      legend.box.margin = margin(-5, -5, -5, -5),
+      strip.text = element_text(size = 8, colour = 'gray10', margin = margin(b = 1, t = 1)),
+      strip.background = element_rect(fill = "grey95")
+      )
+}
+
+# Define plotting theme for facet_wrap map with years
+theme_facet_map <- function(base_size = 10, base_family = "") {
+  theme_light(base_size = 10, base_family = "") +
+    theme(
+        axis.text.x = element_text(angle = 90),
+        axis.text = element_text(size = 6),
+        strip.text = element_text(size = 8, colour = 'gray10', margin = margin(b = 1, t = 1)),
+        strip.background = element_rect(fill = "gray95"),
+        legend.position = c(0.7, 0.02),
+        legend.direction = "horizontal"
+      )
+}
+
+# Make default base map plot
+xmin2 <- 303000; xmax2 <- 916000; xrange <- xmax2 - xmin2
+ymin2 <- 5980000; ymax2 <- 6450000; yrange <- ymax2 - ymin2
+
+plot_map_raster <- 
+ggplot(swe_coast_proj) + 
+  xlim(xmin2, xmax2) +
+  ylim(ymin2, ymax2) +
+  labs(x = "Longitude", y = "Latitude") +
+  geom_sf(size = 0.3) + 
+  theme_plot() +
+  NULL
+
+plot_map_raster_labels <- 
+  plot_map_raster + 
+  annotate("text", label = "Sweden", x = xmin2 + 0.25*xrange, y = ymin2 + 0.8*yrange, color = "black", size = 1.9) +
+  annotate("text", label = "Denmark", x = xmin2 + 0.029*xrange, y = ymin2 + 0.43*yrange, color = "black", size = 1.9, angle = 75) +
+  annotate("text", label = "Germany", x = xmin2 + 0.07*xrange, y = ymin2 + 0.025*yrange, color = "black", size = 1.9) +
+  annotate("text", label = "Poland", x = xmin2 + 0.55*xrange, y = ymin2 + 0.1*yrange, color = "black", size = 1.9) +
+  annotate("text", label = "Russia", x = xmin2 + 0.95*xrange, y = ymin2 + 0.2*yrange, color = "black", size = 1.9) +
+  annotate("text", label = "Lithuania", x = xmin2 + 1*xrange, y = ymin2 + 0.47*yrange, color = "black", size = 1.9, angle = 75) +
+  annotate("text", label = "Latvia", x = xmin2 + 0.99*xrange, y = ymin2 + 0.68*yrange, color = "black", size = 1.9, angle = 75)
+```
+
+## Read data
+
+```{r read and process data, message=FALSE, warning=FALSE, fig.show='hide'}
+# Read the split files and join them
+d1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cond_(1_2).csv")
+d2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cond_(2_2).csv")
+
+d <- bind_rows(d1, d2)
+
+unique(is.na(d$density_cod))
+unique(is.na(d$density_cod_rec))
+
+# Calculate standardized variables
+d <- d %>% 
+  mutate(ln_length_cm = log(length_cm),
+         ln_weight_g = log(weight_g),
+         year_ct = year - mean(year),
+         biomass_her_sc = biomass_her,
+         biomass_her_sd_sc = biomass_her_sd,
+         biomass_spr_sc = biomass_spr,
+         biomass_spr_sd_sc = biomass_spr_sd,
+         density_cod_sc = density_cod,
+         density_cod_rec_sc = density_cod_rec,
+         density_fle_sc = density_fle,
+         density_fle_rec_sc = density_fle_rec,
+         density_saduria_sc = density_saduria,
+         density_saduria_rec_sc = density_saduria_rec,
+         depth_sc = depth,
+         depth_rec_sc = depth_rec,
+         depth_sd_sc = depth_sd,
+         oxy_sc = oxy,
+         oxy_rec_sc = oxy_rec,
+         oxy_sd_sc = oxy_sd,
+         temp_sc = temp,
+         temp_rec_sc = temp_rec,
+         temp_sd_sc = temp_sd,
+         year_f = as.factor(year))  %>%
+  mutate_at(c("biomass_her_sc", "biomass_her_sd_sc", "biomass_spr_sc", "biomass_spr_sd_sc",
+              "density_cod_sc", "density_cod_rec_sc", 
+              "density_fle_sc", "density_fle_rec_sc", 
+              "density_saduria_sc", "density_saduria_rec_sc", 
+              "depth_sc", "depth_rec_sc", "depth_sd_sc",
+              "oxy_sc", "oxy_rec_sc", "oxy_sd_sc",
+              "temp_sc", "temp_rec_sc", "temp_sd_sc"
+              ),
+            ~(scale(.) %>% as.vector)) %>% 
+  mutate(year = as.integer(year))
+
+unique(is.na(d))
+
+unique(is.na(d$density_cod_rec))
+unique(is.na(d$density_cod))
+
+# Drop NA covariates for the correlation plot
+d <- d %>% drop_na(biomass_her_sc, biomass_her_sd_sc, biomass_spr_sc, biomass_spr_sd_sc,
+                   density_cod_sc, density_cod_rec_sc, density_fle_sc, density_fle_rec_sc, 
+                   density_saduria_sc, density_saduria_rec_sc, depth_sc, depth_rec_sc,
+                   oxy_sc, oxy_rec_sc, temp_sc, temp_rec_sc)
+
+
+
+# Plot correlation between variables
+d_cor <- d %>% dplyr::select("biomass_her_sc", "biomass_her_sd_sc",
+                             "biomass_spr_sc", "biomass_spr_sd_sc",
+                             "density_cod_sc", "density_cod_rec_sc", 
+                             "density_fle_sc", "density_fle_rec_sc", 
+                             "density_saduria_sc", "density_saduria_rec_sc", 
+                             "depth_sc", "depth_rec_sc",
+                             "oxy_sc", "oxy_rec_sc",
+                             "temp_sc", "temp_rec_sc")
+
+corr <- round(cor(d_cor), 1)
+
+ggcorrplot(corr, hc.order = TRUE, type = "lower", lab = TRUE, lab_size = 2.5) +
+  theme_classic() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.3))
+
+ggsave("figures/supp/condition/correlation_variables.png", width = 6.5, height = 6.5, dpi = 600)
+```
+
+## Read the prediction grids
+
+```{r read and process prediction grid, message=FALSE, warning=FALSE, fig.show='hide'}
+pred_grid1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(1_2).csv")
+pred_grid2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(2_2).csv")
+
+pred_grid <- bind_rows(pred_grid1, pred_grid2)
+
+unique(is.na(pred_grid$density_cod))
+unique(is.na(pred_grid$density_cod_rec))
+
+pred_grid <- pred_grid %>% mutate(year = as.integer(year),
+                                  year_f = as.factor(year))
+
+# Scale the variables with respect to data! First calculate means in data
+data_means <- d %>%
+  dplyr::select(biomass_her, biomass_her_sd, biomass_spr, biomass_spr_sd,
+                density_cod, density_cod_rec, 
+                density_fle, density_fle_rec, 
+                density_saduria, density_saduria_rec, 
+                depth, depth_rec, depth_sd,
+                oxy, oxy_rec, oxy_sd,
+                temp, temp_rec, temp_sd) %>%
+  mutate_all(~mean(.)) %>%
+  distinct(.keep_all = TRUE)
+
+data_stdev <- d %>%
+  dplyr::select(biomass_her, biomass_her_sd, biomass_spr, biomass_spr_sd,
+                density_cod, density_cod_rec, 
+                density_fle, density_fle_rec, 
+                density_saduria, density_saduria_rec, 
+                depth, depth_rec, 
+                oxy, oxy_rec, 
+                temp, temp_rec
+                ) %>%
+  mutate_all(~sd(.)) %>%
+  distinct(.keep_all = TRUE)
+
+# Before actually scaling, replace the ices-rectangle pelagic values that are NA with the mean across rectangles 
+# in the sub division. Replace the sub-division pelagic values that are NA with the mean in the year.
+# Note that the sub-division values are not the sum of the rectangles (due to missing rectangles), so 
+# I need to calculate a sub-division mean across rectangles within each sub-division
+pred_grid <- pred_grid %>% 
+  group_by(year) %>% 
+  mutate(median_biomass_sprat_across_sub_div = median(biomass_spr_sd, na.rm = TRUE),
+         median_biomass_herring_across_sub_div = median(biomass_her_sd, na.rm = TRUE)) %>% 
+  ungroup() %>% # Replace sub_divsion NA's with the median across sub_divisions in that year
+  mutate(biomass_spr_sd = ifelse(is.na(biomass_spr_sd) == TRUE, median_biomass_sprat_across_sub_div, biomass_spr_sd),
+         biomass_her_sd = ifelse(is.na(biomass_her_sd) == TRUE, median_biomass_herring_across_sub_div, biomass_her_sd)) %>% 
+  group_by(year, sub_div) %>% 
+  mutate(median_biomass_sprat_across_rect_in_sub_div = median(biomass_spr, na.rm = TRUE),
+         median_biomass_herring_across_rect_in_sub_div = median(biomass_her, na.rm = TRUE)) %>% 
+  ungroup() %>% # Replace rectangle NA's with the median across rectangles in that year and sub-division
+  mutate(biomass_spr = ifelse(is.na(biomass_spr) == TRUE, median_biomass_sprat_across_rect_in_sub_div, biomass_spr),
+         biomass_her = ifelse(is.na(biomass_her) == TRUE, median_biomass_herring_across_rect_in_sub_div, biomass_her)) %>% 
+  # Since I still have some NAs (some sub-divisions do not have a single rectangle in some years), I will will those rectangles 
+  # with the sub-division value divided by the number of rectangles in that sub division
+  group_by(year, sub_div) %>% 
+  mutate(n_rect = length(unique(ices_rect))) %>% 
+  ungroup() %>% 
+  mutate(biomass_spr = ifelse(is.na(biomass_spr) == TRUE, biomass_spr_sd/n_rect, biomass_spr),
+         biomass_her = ifelse(is.na(biomass_her) == TRUE, biomass_her_sd/n_rect, biomass_her))
+
+pred_grid <- pred_grid %>%
+  mutate(ln_length_cm = log(1),
+         year_ct = year - mean(year),
+         biomass_her_sc = (biomass_her - data_means$biomass_her) / data_stdev$biomass_her,
+         biomass_her_sd_sc = (biomass_her_sd - data_means$biomass_her_sd) / data_stdev$biomass_her_sd,
+         biomass_spr_sc = (biomass_spr - data_means$biomass_spr) / data_stdev$biomass_spr,
+         biomass_spr_sd_sc = (biomass_spr_sd - data_means$biomass_spr_sd) / data_stdev$biomass_spr_sd,
+         density_cod_sc = (density_cod - data_means$density_cod) / data_stdev$density_cod,
+         density_cod_rec_sc = (density_cod_rec - data_means$density_cod_rec) / data_stdev$density_cod_rec,
+         density_fle_sc = (density_fle - data_means$density_fle) / data_stdev$density_fle,
+         density_fle_rec_sc = (density_fle_rec - data_means$density_fle_rec) / data_stdev$density_fle_rec,
+         density_saduria_sc = (density_saduria - data_means$density_saduria) / data_stdev$density_saduria,
+         density_saduria_rec_sc = (density_saduria_rec - data_means$density_saduria_rec) / data_stdev$density_saduria_rec,
+         depth_sc = (depth - data_means$depth) / data_stdev$depth,
+         depth_rec_sc = (depth_rec - data_means$depth_rec) / data_stdev$depth_rec,
+         oxy_sc = (oxy - data_means$oxy) / data_stdev$oxy,
+         oxy_rec_sc = (oxy_rec - data_means$oxy_rec) / data_stdev$oxy_rec,
+         temp_sc = (temp - data_means$temp) / data_stdev$temp,
+         temp_rec_sc = (temp_rec - data_means$temp_rec) / data_stdev$temp_rec,
+         )
+```
+
+```{r load cached models, class.source = "fold-show"}
+# To load entire cache in interactive r session, do: 
+qwraps2::lazyload_cache_dir(path = "R/analysis/condition_model_cf_cache/html")
+```
+
+Condition and mainly density varies a lot in space, so if we want the index to reflect a population-metric rather than the trends in the spatial domain, should we weight the predictions by biomass density in the prediction grid? Let's check first how density and condition varies in space and time:
+
+```{r calculate index, cache=TRUE, class.source = "fold-show"}
+ncells <- filter(pred_grid, year == max(pred_grid$year)) %>% nrow()
+
+pred <- predict(mfull, newdata = pred_grid)
+pred_avg_sim <- predict(mfull, newdata = pred_grid, nsim = 100)
+
+# Simulated index with confidence intervals
+index_avg_sim <- get_index_sims(pred_avg_sim, area = rep(1/ncells, nrow(pred_avg_sim)))
+
+index_avg_sim$source <- "sims"
+
+# Average of prediction from pred_grid
+avg_pred <- pred %>%
+  group_by(year) %>%
+  summarise(est = mean(exp(est))) %>%
+  mutate(source = "pred_grid_avg")
+
+# Weighted average from prediction grid
+weighted_avg_pred <- pred %>%
+  group_by(year) %>%
+  summarise(est = weighted.mean(exp(est), density_cod)) %>%
+  mutate(source = "pred_grid_avg_weighted")
+
+# Combine
+index <- bind_rows(index_avg_sim, avg_pred, weighted_avg_pred)
+```
+
+Plot at the spatiotemporal variation in density and condition. 
+
+```{r map plots, class.source = "fold-show"}
+# Plot cod on map
+plot_map_raster +
+  geom_raster(data = pred, aes(x = X*1000, y = Y*1000, fill = density_cod)) +
+  scale_fill_viridis(trans = "sqrt") +
+  facet_wrap(~ year, ncol = 5) +
+  theme_facet_map() +
+  theme(legend.text = element_text(angle = 90)) +
+  ggtitle("Biomass density") +
+  NULL
+
+# Plot condition on map
+plot_map_raster +
+  geom_raster(data = pred, aes(x = X*1000, y = Y*1000, fill = exp(est))) +
+  scale_fill_gradient2(midpoint = 1) +
+  facet_wrap(~ year, ncol = 5) +
+  theme_facet_map() +
+  theme(legend.text = element_text(angle = 90)) +
+  ggtitle("Condition") +
+  NULL
+```
+
+Now plot different condition indices
+
+```{r plot index, class.source = "fold-show"}
+# Pot 
+ggplot(index, aes(year, est, ymin = lwr, ymax = upr, color = source, linetype = source, fill = source)) +
+  geom_ribbon(alpha = 0.4, color = NA) +
+  geom_line(size = 1.2) + 
+  scale_color_brewer(palette = "Set2") +
+  scale_fill_brewer(palette = "Set2") +
+  scale_linetype_manual(values = c(1,1,2)) + 
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(override.aes = list(fill = NA))) +
+  NULL
+
+index %>% 
+  dplyr::select(year, est, source) %>% 
+  pivot_wider(names_from = source, values_from = est) %>% 
+  mutate(diff = pred_grid_avg_weighted - pred_grid_avg) %>% 
+  ggplot(aes(year, diff)) +
+  labs(y = "Biomass-weighted average in grid - average in grid") +
+  geom_line() +  
+  geom_hline(yintercept = 0, color = "grey30", linetype = 2) +
+  theme(legend.position = "bottom") +
+  NULL
+```
+
+The weighted index predicts a slightly higher value throughout. What's the trend *within* subdivisions?
+
+```{r plot different index, class.source = "fold-show"}
+# Plot the average biomass by sub_division over time
+pred_sum <- pred %>% 
+  group_by(year, sub_div) %>% 
+  summarise(mean_density_cod = mean(density_cod),
+            cond_index_weighted = weighted.mean(exp(est), density_cod),
+            cond_index = mean(exp(est))) %>% 
+  ungroup() %>% 
+  pivot_longer(c(mean_density_cod, cond_index_weighted, cond_index), names_to = "variable", values_to = "est")
+
+ggplot(pred_sum, aes(year, est, color = factor(sub_div))) +
+  geom_line(size = 1.2) + 
+  facet_wrap(~variable, scales = "free_y", ncol = 2) +
+  scale_color_brewer(palette = "Set2", name = "Subdivision") +
+  theme_plot() +
+  theme(legend.position = "bottom",
+        aspect.ratio = 3/4)
+  NULL
+```
+
+Here we see that subdivision 24 has the smallest decline in condition over time (the others have similar trends). But! This subdivision also has somewhat of a decline in biomass. However, the biggest decline in biomass is in subdivision 27-28, which also have a steep decline in condition (and they also have very little cod). So, the trends are not the same but it's hard to say how it should affect the condition index.
+
+Furthermore, it seems that the weighted index produces indices are are much more similar, whereas the un-weighted index for subdivision 24 is quite above the others. Can we zoom in on the spatial trends in subdivision 24? Are in subdivision 24 moving from god to bad condition areas?
+
+```{r check sd 24, class.source = "fold-show"}
+p1 <- plot_map_raster +
+  geom_raster(data = filter(pred, year == 1994 & sub_div == 24), aes(x = X * 1000, y = Y * 1000, fill = exp(est))) +
+  scale_fill_gradient2(midpoint = exp(mean(filter(pred, sub_div == 24 & year == 1994)$est))) +
+  theme(legend.text = element_text(angle = 90),
+        plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+  xlim(xmin2, xmax2*0.55) +
+  ylim(ymin2, ymax2*0.955) +
+  ggtitle("Condition 1994") +
+  NULL
+
+p2 <- plot_map_raster +
+  geom_raster(data = filter(pred, year == 2019 & sub_div == 24), aes(x = X * 1000, y = Y * 1000, fill = exp(est))) +
+  scale_fill_gradient2(midpoint = exp(mean(filter(pred, sub_div == 24 & year == 2019)$est))) +
+  theme(legend.text = element_text(angle = 90),
+        plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+  xlim(xmin2, xmax2*0.55) +
+  ylim(ymin2, ymax2*0.955) +
+  ggtitle("Condition 2019") +
+  NULL
+
+p3 <- plot_map_raster +
+  geom_raster(data = filter(pred, year == 1994 & sub_div == 24), aes(x = X * 1000, y = Y * 1000, fill = density_cod)) +
+  scale_fill_gradient2(midpoint = mean(filter(pred, sub_div == 24 & year == 1994)$density_cod)) +
+  theme(legend.text = element_text(angle = 90),
+        plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+  xlim(xmin2, xmax2*0.55) +
+  ylim(ymin2, ymax2*0.955) +
+  ggtitle("Density 1994") + 
+  NULL
+
+p4 <- plot_map_raster +
+  geom_raster(data = filter(pred, year == 2019 & sub_div == 24), aes(x = X * 1000, y = Y * 1000, fill = density_cod)) +
+  scale_fill_gradient2(midpoint = mean(filter(pred, sub_div == 24 & year == 2019)$density_cod)) +
+  theme(legend.text = element_text(angle = 90),
+        plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+  xlim(xmin2, xmax2*0.55) +
+  ylim(ymin2, ymax2*0.955) +
+  ggtitle("Density 2019") +
+  NULL
+
+p1 + p3 + p2 + p4
+```
+
+Difficult to say based on these plots why sd 24 has the most different trend, but I guess it must have to do with a shift in the relationship between condition and density (i.e., cod are more numerous now in low-condition areas)
+
+Either way:
+
+1) When making indices that are not sums but averages, does it make sense to weight it with density if we are interested in the population-average rather than the area in the spatial domain? (especially if the species is not distributed evenly?)
+
+2) Is it possible to get confidence intervals no a weighted quantile like this?

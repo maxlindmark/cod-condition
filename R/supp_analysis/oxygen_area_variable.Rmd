@@ -14,8 +14,6 @@ editor_options:
 knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>",
-  fig.width = 12,
-  fig.asp = 0.618,
   fig.align ='center'
 )
 ```
@@ -26,7 +24,7 @@ Fit main model (see exploratory scripts and model comparison), visualize results
 ## Load packages
 
 ```{r packages, message=FALSE, warning=TRUE}
-library(tidyverse); theme_set(theme_light(base_size = 12))
+library(tidyverse)
 library(tidylog)
 library(viridis)
 library(marmap)

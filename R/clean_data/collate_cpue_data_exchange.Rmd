@@ -14,8 +14,6 @@ editor_options:
 knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>",
-  fig.width = 12,
-  fig.asp = 0.618,
   fig.align ='center'
 )
 ```
@@ -26,9 +24,7 @@ In this script, I load exchange data from datras and calculate catch of cod and 
 ## Load libraries
 
 ```{r, message=FALSE}
-rm(list = ls())
-
-library(tidyverse); theme_set(theme_light(base_size = 12))
+library(tidyverse)
 library(readxl)
 library(tidylog)
 library(RCurl)
@@ -70,6 +66,7 @@ map_data <- rnaturalearth::ne_countries(
 
 # Crop the polygon for plotting and efficiency:
 # st_bbox(map_data) # find the rough coordinates
+sf::sf_use_s2(FALSE)
 swe_coast <- suppressWarnings(suppressMessages(
   st_crop(map_data,
           c(xmin = xmin, ymin = ymin, xmax = xmax, ymax = ymax))))
@@ -79,6 +76,23 @@ utm_zone33 <- 32633
 swe_coast_proj <- sf::st_transform(swe_coast, crs = utm_zone33)
 
 #ggplot(swe_coast_proj) + geom_sf() 
+
+# Define plotting theme for main plot
+theme_plot <- function(base_size = 10, base_family = "") {
+  theme_light(base_size = 10, base_family = "") +
+    theme(
+      axis.text.x = element_text(angle = 90),
+      axis.text = element_text(size = 8),
+      legend.text = element_text(size = 8),
+      legend.title = element_text(size = 8),
+      legend.position = "bottom",
+      legend.key.height = unit(0.2, "cm"),
+      legend.margin = margin(0, 0, 0, 0),
+      legend.box.margin = margin(-5, -5, -5, -5),
+      strip.text = element_text(size = 8, colour = 'gray10', margin = margin(b = 1, t = 1)),
+      strip.background = element_rect(fill = "grey95")
+      )
+}
 ```
 
 ## Read data
@@ -359,7 +373,7 @@ sort(colnames(bits_hh))
 
 bits_hh_merge <- bits_hh %>% 
   dplyr::select(sub_div, Rect, HaulVal, StdSpecRecCode, BySpecRecCode, Fishing.line,
-                DataType, HaulDur, GroundSpeed, haul.id, IDx, ShootLat, ShootLong)
+                DataType, HaulDur, GroundSpeed, haul.id, IDx, ShootLat, ShootLong, Depth)
 
 bits_hl <- left_join(dplyr::select(bits_hl, -haul.id), bits_hh_merge, by = "IDx")
 bits_ca <- left_join(bits_ca, bits_hh_merge, by = "IDx")
@@ -561,7 +575,7 @@ cod_intercept <- bits_ca_cod %>%
   filter(term == "(Intercept)") %>% 
   mutate(a = exp(estimate)) %>% 
   mutate(Year = as.integer(Year)) %>% 
-  dplyr::select(Year, a)
+  dplyr::select(Year, a, std.error)
 
 cod_slope <- bits_ca_cod %>%
   split(.$Year) %>%
@@ -570,7 +584,7 @@ cod_slope <- bits_ca_cod %>%
   filter(term == "log(length_cm)") %>% 
   mutate(Year = as.integer(Year)) %>% 
   rename("b" = "estimate") %>% 
-  dplyr::select(Year, b)
+  dplyr::select(Year, b, std.error)
 
 # Flounder
 bits_ca_fle <- bits_ca %>% 
@@ -607,7 +621,7 @@ fle_intercept <- bits_ca_fle %>%
   filter(term == "(Intercept)") %>% 
   mutate(a = exp(estimate)) %>% 
   mutate(Year = as.integer(Year)) %>% 
-  dplyr::select(Year, a)
+  dplyr::select(Year, a, std.error)
 
 fle_slope <- bits_ca_fle %>%
   split(.$Year) %>%
@@ -616,7 +630,69 @@ fle_slope <- bits_ca_fle %>%
   filter(term == "log(length_cm)") %>% 
   mutate(Year = as.integer(Year)) %>% 
   rename("b" = "estimate") %>% 
-  dplyr::select(Year, b)
+  dplyr::select(Year, b, std.error)
+
+# Make a plot for the supporting information
+#plot(cod_intercept$a ~ cod_slope$b)
+
+pars <- bind_rows(cod_intercept %>% rename(est = a) %>% mutate(par = "a", Species = "Cod"),
+                  cod_slope %>% rename(est = b) %>% mutate(par = "b", Species = "Cod"),
+                  fle_intercept %>% rename(est = a) %>% mutate(par = "a", Species = "Flounder"),
+                  fle_slope %>% rename(est = b) %>% mutate(par = "b", Species = "Flounder")) %>% 
+  mutate(lwr = est - 1.96*std.error,
+         upr = est + 1.96*std.error) %>% 
+  mutate(par = ifelse(par == "a", "Weight-length constant", "Weight-length exponent"))
+
+coefs <- pars %>% 
+  filter(Year > 1992) %>% 
+  ggplot(aes(x = Year, y = est, color = Species)) + 
+  geom_point() + 
+  #geom_errorbar(width = 0) + 
+  facet_wrap(~par, scales = "free") +
+  scale_color_brewer(palette = "Set2") +
+  coord_flip() +
+  labs(y = "Estimate") + 
+  scale_x_continuous(breaks = c(1993:2020)) +
+  theme_plot() +
+  theme(axis.text.x = element_text(angle = 0))
+
+dd_test <- data.frame(L = rep(seq(1, 30, 1), 2),
+                      Year = as.factor(rep(c(1993, 2020), each = 30)),
+                      a = rep(c(0.006, 0.015), each = 30),
+                      b = rep(c(3.2, 2.9), each = 30)) %>% 
+  mutate(W = a*L^b) %>% 
+  ggplot(aes(L, W, color = Year)) + 
+  scale_color_brewer(palette = "Set1") +
+  geom_line() +
+  theme_plot() + 
+  theme(axis.text.x = element_text(angle = 0),
+        aspect.ratio = 3/4)
+
+
+dd_test2 <- data.frame(L = rep(seq(5, 34, 1), 2),
+                       Year = as.factor(rep(c(1993, 2020), each = 30)),
+                       a = rep(c(0.006, 0.015), each = 30),
+                       b = rep(c(3.2, 2.9), each = 30)) %>% 
+  mutate(W = a*L^b) %>% 
+  dplyr::select(-a, -b) %>% 
+  pivot_wider(names_from = Year, values_from = W) %>% 
+  mutate(ratio = `2020` / `1993`) %>% 
+  ggplot(aes(L, ratio)) + 
+  geom_line() +
+  theme_plot() + 
+  geom_hline(yintercept = 1, linetype = 2, size = 0.5, color = "grey") +
+  labs(y = "Weight ratio 2020:1993") + 
+  theme(axis.text.x = element_text(angle = 0),
+        aspect.ratio = 3/4)
+
+coefs + (dd_test + dd_test2) + plot_annotation(tag_levels = "A") + plot_layout(heights = c(2, 1))
+
+ggsave("figures/supp/density/annual_LW_pars.png", width = 4.5, height = 6.5, dpi = 600)
+
+cod_intercept <- cod_intercept %>% dplyr::select(-std.error)
+cod_slope <- cod_slope %>% dplyr::select(-std.error)
+fle_intercept <- fle_intercept %>% dplyr::select(-std.error)
+fle_slope <- fle_slope %>% dplyr::select(-std.error)
 ```
 
 ### Join the annual L-W relationships to the respective catch data to calculate CPUE in biomass not abundance
@@ -672,7 +748,7 @@ ggplot(hlcodL, aes(weight_kg, length_cm2)) +
   facet_wrap(~Year)
 
 # Hmm, some unrealistic weights actually
-hlcodL %>% arrange(desc(weight_kg)) %>% as.data.frame()
+hlcodL %>% arrange(desc(weight_kg)) %>% as.data.frame() %>% head(100)
 hlcodL <- hlcodL %>% filter(weight_kg < 100)
 
 ggplot(hlcodL, aes(weight_kg, length_cm2)) +
@@ -1053,8 +1129,9 @@ dat <- hlcodhaul %>% rename("year" = "Year",
                             "lat" = "ShootLat",
                             "lon" = "ShootLong",
                             "quarter" = "Quarter",
-                            "ices_rect" = "Rect") %>% 
-  dplyr::select(density, year, lat, lon, quarter, haul.id, IDx, ices_rect, sub_div)
+                            "ices_rect" = "Rect",
+                            "depth" = "Depth") %>% 
+  dplyr::select(density, year, lat, lon, quarter, haul.id, IDx, ices_rect, sub_div, depth)
 
 # Now add in the flounder data in the cod data based on haul ID
 hlflehaul_select <- hlflehaul %>% mutate(density_fle = density) %>% dplyr::select(density_fle, haul.id)
@@ -1076,8 +1153,8 @@ ggplot(dat, aes(density, density_fle)) + geom_point()
 test_cod <- hlcodhaul %>% filter(!Country == "SWE")
 test_fle <- hlflehaul %>% filter(!Country == "SWE")
 
-orio_cod <- read.csv("/Users/maxlindmark/Dropbox/Max work/R/gear_standardization_ale/datras_st_ale.csv")
-orio_fle <- read.csv("/Users/maxlindmark/Dropbox/Max work/R/gear_standardization_ale/datras_fle_st_ale.csv")
+orio_cod <- read.csv("/Users/maxlindmark/Dropbox/Max work/R/gear-standardization-ale/datras_st_ale.csv")
+orio_fle <- read.csv("/Users/maxlindmark/Dropbox/Max work/R/gear-standardization-ale/datras_fle_st_ale.csv")
 
 orio_cod <- orio_cod %>%
   group_by(IDX) %>%
@@ -1246,24 +1323,21 @@ test_full %>%
   ggplot(., aes(factor(Year), haul_cpue_un, color = source)) + 
   geom_point(size = 1, position = position_dodge(width = 0.5)) + 
   theme(axis.text.x = element_text(angle = 90)) +
-  facet_wrap(~Quarter) +
-  NULL
+  facet_wrap(~Quarter)
   
 test_full %>% 
   filter(species == "Cod" & Quarter == 1) %>% 
   ggplot(., aes(haul_cpue_un, fill = source)) + 
   geom_histogram(position = position_dodge()) + 
   facet_wrap(~Year, scale = "free") +
-  theme(axis.text.x = element_text(angle = 90)) + 
-  NULL
+  theme(axis.text.x = element_text(angle = 90))
 
 test_full %>% 
   filter(species == "Cod" & Quarter == 4) %>% 
   ggplot(., aes(haul_cpue_un, fill = source)) + 
   geom_histogram(position = position_dodge()) + 
   facet_wrap(~Year, scale = "free") +
-  theme(axis.text.x = element_text(angle = 90)) + 
-  NULL
+  theme(axis.text.x = element_text(angle = 90))
 
 # Mean abundance cpue
 test_full %>% 
@@ -1274,8 +1348,7 @@ test_full %>%
   ggplot(., aes(Year, mean_cpue, linetype = source, color = source)) + 
   geom_line(size = 1.1) +
   geom_point(size = 3) + 
-  facet_wrap(~Quarter, ncol = 1) +
-  NULL
+  facet_wrap(~Quarter, ncol = 1)
 
 # Mean abundance cpue by country
 test_full %>% 
@@ -1285,8 +1358,7 @@ test_full %>%
             sd_cpue = sd(haul_cpue_un)) %>% 
   ggplot(., aes(Year, mean_cpue, linetype = source, color = source)) + 
   geom_line(size = 1.1) +
-  facet_grid(Quarter ~ Country) +
-  NULL
+  facet_grid(Quarter ~ Country)
 
 # Mean abundance cpue for non-zero cathes
 test_full %>% 
@@ -1298,8 +1370,7 @@ test_full %>%
   ggplot(., aes(Year, mean_cpue, linetype = source, color = source)) + 
   geom_line(size = 1.1) +
   geom_point(size = 3) + 
-  facet_wrap(~ Quarter, ncol = 1) +
-  NULL
+  facet_wrap(~ Quarter, ncol = 1)
 
 # Now plot corrected biomass cpue
 test_full %>% 
@@ -1307,8 +1378,7 @@ test_full %>%
   ggplot(., aes(factor(Year), haul_cpue_kg, color = source)) + 
   geom_point(size = 1, position = position_dodge(width = 0.5)) + 
   theme(axis.text.x = element_text(angle = 90)) +
-  facet_wrap(~ Quarter, ncol = 1) +
-  NULL
+  facet_wrap(~ Quarter, ncol = 1)
 
 # Mean corrected biomass cpue
 test_full %>% 
@@ -1319,8 +1389,7 @@ test_full %>%
   ggplot(., aes(Year, mean_cpue, linetype = source, color = source)) + 
   geom_line(size = 1.1) +
   geom_point(size = 3) + 
-  facet_wrap(~ Quarter, ncol = 1) +
-  NULL
+  facet_wrap(~ Quarter, ncol = 1)
 
 # Now check in on flounder
 # Raw abundance cpue
@@ -1329,24 +1398,21 @@ test_full %>%
   ggplot(., aes(factor(Year), haul_cpue_un, color = source)) + 
   geom_point(size = 1, position = position_dodge(width = 0.5)) + 
   theme(axis.text.x = element_text(angle = 90)) +
-  facet_wrap(~ Quarter, ncol = 1) +
-  NULL
+  facet_wrap(~ Quarter, ncol = 1)
   
 test_full %>% 
   filter(species == "Fle" & Quarter == 1) %>% 
   ggplot(., aes(haul_cpue_un, fill = source)) + 
   geom_histogram(position = position_dodge()) + 
   facet_wrap(~Year, scale = "free") +
-  theme(axis.text.x = element_text(angle = 90)) + 
-  NULL
+  theme(axis.text.x = element_text(angle = 90))
 
 test_full %>% 
   filter(species == "Fle" & Quarter == 4) %>% 
   ggplot(., aes(haul_cpue_un, fill = source)) + 
   geom_histogram(position = position_dodge()) + 
   facet_wrap(~Year, scale = "free") +
-  theme(axis.text.x = element_text(angle = 90)) + 
-  NULL
+  theme(axis.text.x = element_text(angle = 90))
 
 # Mean abundance cpue
 test_full %>% 
@@ -1357,8 +1423,7 @@ test_full %>%
   ggplot(., aes(Year, mean_cpue, linetype = source, color = source)) + 
   geom_line(size = 1.1) +
   geom_point(size = 3) + 
-  facet_wrap(~ Quarter, ncol = 1) +
-  NULL
+  facet_wrap(~ Quarter, ncol = 1)
 
 # Ok, here we can see that Ale predicts an increase earlier, which we also saw 
 # on the plot of raw catches as points
@@ -1370,8 +1435,7 @@ test_full %>%
             sd_cpue = sd(haul_cpue_un)) %>% 
   ggplot(., aes(Year, mean_cpue, linetype = source, color = source)) + 
   geom_line(size = 1.1) +
-  facet_grid(Quarter ~ Country) +
-  NULL
+  facet_grid(Quarter ~ Country)
 
 # Ok, after checking, the reason I don't have the older LAT data is because I don't
 # have RS or RSA-values for those hauls, even though the catch data are in datras...
@@ -1383,8 +1447,7 @@ test_full %>%
   ggplot(., aes(factor(Year), haul_cpue_kg, color = source)) + 
   geom_point(size = 1, position = position_dodge(width = 0.5)) + 
   theme(axis.text.x = element_text(angle = 90)) +
-  facet_wrap(~ Quarter, ncol = 1) +
-  NULL
+  facet_wrap(~ Quarter, ncol = 1)
 
 # Mean corrected biomass cpue
 test_full %>% 
@@ -1395,8 +1458,7 @@ test_full %>%
   ggplot(., aes(Year, mean_cpue, linetype = source, color = source)) + 
   geom_line(size = 1.1) +
   geom_point(size = 3) + 
-  facet_wrap(~ Quarter, ncol = 1) +
-  NULL
+  facet_wrap(~ Quarter, ncol = 1)
 
 # Then check length-weight relationships again
 ```
@@ -1414,12 +1476,40 @@ east <- raster("data/depth_geo_tif/D6_2018_rgb-1.tif")
 
 dep_rast <- raster::merge(west, east)
 
-dat$depth <- extract(dep_rast, dat[, 4:3])
+dat$depth_r <- extract(dep_rast, dat %>% dplyr::select(lon, lat), method = "bilinear")
 
 # Convert to depth (instead of elevation)
 ggplot(dat, aes(depth)) + geom_histogram()
-dat$depth <- (dat$depth - max(drop_na(dat)$depth)) *-1
+
+dat$depth_r <- (dat$depth_r - max(drop_na(dat)$depth_r)) *-1
+
+ggplot(dat, aes(depth_r)) + geom_histogram()
 ggplot(dat, aes(depth)) + geom_histogram()
+ggplot(dat, aes(depth_r, depth)) + geom_point() + geom_abline(color = "red")
+
+ggplot(dat, aes(depth_r, depth)) +
+  geom_point() +
+  geom_abline(color = "red") +
+  coord_cartesian(xlim = c(0, 20), ylim = c(0, 75)) + 
+  geom_vline(xintercept = 10, color = "blue") +
+  geom_hline(yintercept = 10, color = "blue")
+
+ggplot(dat, aes(depth_r, depth)) +
+  geom_point() +
+  geom_abline(color = "red") +
+  coord_cartesian(xlim = c(90, 130), ylim = c(75, 125)) + 
+  geom_vline(xintercept = 110, color = "blue") +
+  geom_hline(yintercept = 110, color = "blue")
+
+# So, roughly 3 meter is 10, and 120 is 110
+
+summary(dat$depth)
+quantile(drop_na(dat)$depth, prob = c(0.01, 0.99))
+summary(dat$depth_r)
+
+dat <- dat %>% 
+  dplyr::select(-depth) %>% 
+  rename(depth = depth_r)
 ```
 
 ### Oxygen
@@ -1610,8 +1700,8 @@ for(i in unique(d_sub_oxy_q1$year_f)) { # We can use q1 as looping index, doesn'
   data_sp_q4 <- SpatialPoints(d_slice_q4)
   
   # Extract raster value (oxygen)
-  rasValue_q1 <- raster::extract(r_q1, data_sp_q1)
-  rasValue_q4 <- raster::extract(r_q4, data_sp_q4)
+  rasValue_q1 <- raster::extract(r_q1, data_sp_q1, method = "bilinear")
+  rasValue_q4 <- raster::extract(r_q4, data_sp_q4, method = "bilinear")
   
   # Now we want to plot the results of the raster extractions by plotting the cpue
   # data points over a raster and saving it for each year.
@@ -1669,8 +1759,7 @@ for(i in unique(d_sub_oxy_q1$year_f)) { # We can use q1 as looping index, doesn'
     scale_colour_gradientn(colours = rev(terrain.colors(10)),
                            limits = c(-200, 400)) +
     scale_fill_gradientn(colours = rev(terrain.colors(10)),
-                         limits = c(-200, 400)) +
-    NULL
+                         limits = c(-200, 400))
   
   ggsave(paste("figures/supp/density/density_oxygen_rasters/", i,"q1.png", sep = ""),
          width = 6.5, height = 6.5, dpi = 600)
@@ -1687,8 +1776,7 @@ for(i in unique(d_sub_oxy_q1$year_f)) { # We can use q1 as looping index, doesn'
     scale_colour_gradientn(colours = rev(terrain.colors(10)),
                            limits = c(-200, 400)) +
     scale_fill_gradientn(colours = rev(terrain.colors(10)),
-                         limits = c(-200, 400)) +
-    NULL
+                         limits = c(-200, 400))
   
   ggsave(paste("figures/supp/density/density_oxygen_rasters/", i,"q4.png", sep = ""),
          width = 6.5, height = 6.5, dpi = 600)
@@ -1715,8 +1803,7 @@ big_raster_dat_oxy %>%
   ggplot(., aes(year_num, mean_oxy)) +
   geom_point(size = 2) +
   stat_smooth(method = "lm") +
-  facet_wrap(~ quarter) +
-  NULL
+  facet_wrap(~ quarter)
 
 big_raster_dat_oxy %>%
   group_by(quarter, year) %>%
@@ -1728,8 +1815,7 @@ big_raster_dat_oxy %>%
   ggplot(., aes(year_num, n)) +
   geom_point(size = 2) +
   stat_smooth(method = "lm") +
-  facet_wrap(~ quarter) +
-  NULL
+  facet_wrap(~ quarter)
 
 # Now add in the new oxygen column in the original data:
 str(d_sub_oxy_q1)
@@ -1759,7 +1845,9 @@ big_dat_sub_oxy %>% group_by(id_oxy) %>% mutate(n = n()) %>% arrange(desc(n))
 big_dat_sub_oxy2 <- big_dat_sub_oxy %>% distinct(id_oxy, .keep_all = TRUE)
 
 # Join the data with raster-derived oxygen with the full cpue data
+nrow(dat)
 dat <- left_join(dat, big_dat_sub_oxy2, by = "id_oxy")
+nrow(dat)
 
 # Now the unit of oxygen is mmol/m3. I want it to be ml/L. The original model is in unit ml/L
 # and it's been converted by the data host. Since it was converted without accounting for
@@ -1918,7 +2006,7 @@ for(i in unique(d_sub_temp$year_f)) {
   data_sp <- SpatialPoints(d_slice)
   
   # Extract raster value (temperature)
-  rasValue <- raster::extract(r, data_sp)
+  rasValue <- raster::extract(r, data_sp, method = "bilinear")
   
   # Now we want to plot the results of the raster extractions by plotting the cpue
   # data points over a raster and saving it for each year.
@@ -1966,8 +2054,7 @@ for(i in unique(d_sub_temp$year_f)) {
     scale_colour_gradientn(colours = rev(terrain.colors(10)),
                            limits = c(2, 17)) +
     scale_fill_gradientn(colours = rev(terrain.colors(10)),
-                         limits = c(2, 17)) +
-    NULL
+                         limits = c(2, 17))
   
   ggsave(paste("figures/supp/density/density_temp_rasters/", i,".png", sep = ""),
          width = 6.5, height = 6.5, dpi = 600)
@@ -1989,8 +2076,7 @@ big_raster_dat_temp %>%
   mutate(year_num = as.numeric(year)) %>%
   ggplot(., aes(year_num, mean_temp)) +
   geom_point(size = 2) +
-  stat_smooth(method = "lm") +
-  NULL
+  stat_smooth(method = "lm")
 
 # Now add in the new temperature column in the original data:
 str(d_sub_temp)

@@ -1,4 +1,4 @@
-# Compare effect sizes between sdmTMB and simpler lm's
+# Compare effect sizes between sdmTMB with and without random effects
 library(tidyverse); theme_set(theme_light(base_size = 12))
 library(tidylog)
 library(sdmTMB)
@@ -52,7 +52,7 @@ m1 <- lm(ln_weight_g ~ year + ln_length_cm + biomass_her_sc + biomass_her_sd_sc 
 
 ## Extract coefficients and join models 
 # Read in coefficients from the main model
-mfull_est <- read.csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/output/mfull_est.csv") %>%
+mfull_est <- read.csv("https://raw.githubusercontent.com/maxlindmark/cod-condition/master/output/mfull_est.csv") %>%
   dplyr::select(-X) %>% 
   mutate(Model = "sdmTMB", term = as.factor(term))
 

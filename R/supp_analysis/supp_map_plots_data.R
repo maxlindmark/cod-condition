@@ -27,6 +27,8 @@ map_data <- rnaturalearth::ne_countries(
   scale = "medium",
   returnclass = "sf", continent = "europe")
 
+sf::sf_use_s2(FALSE)
+
 swe_coast <- suppressWarnings(suppressMessages(
   st_crop(map_data,
           c(xmin = xmin, ymin = ymin, xmax = xmax, ymax = ymax))))
@@ -36,23 +38,23 @@ utm_zone33 <- 32633
 swe_coast_proj <- sf::st_transform(swe_coast, crs = utm_zone33)
 
 # Read data
-pred_grid1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(1_2).csv")
-pred_grid2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(2_2).csv")
+pred_grid1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod-condition/master/data/for_analysis/pred_grid_(1_2).csv")
+pred_grid2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod-condition/master/data/for_analysis/pred_grid_(2_2).csv")
 
 pred_grid <- bind_rows(pred_grid1, pred_grid2)
 
-cpue <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cpue_q_1_4.csv") %>% 
+cpue <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod-condition/master/data/for_analysis/catch_q_1_4.csv") %>% 
   drop_na(oxy, depth, temp) %>% 
   mutate(Data = "CPUE") %>% 
   filter(lon > 12 & lat < 58) %>% 
   dplyr::select(Data, X, Y, year)
 
-cond1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cond_(1_2).csv") %>% 
+cond1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod-condition/master/data/for_analysis/mdat_cond_(1_2).csv") %>% 
   mutate(Data = "Condition") %>% 
   filter(lon > 12 & lat < 58) %>% 
   dplyr::select(Data, X, Y, year)
 
-cond2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cond_(2_2).csv") %>% 
+cond2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod-condition/master/data/for_analysis/mdat_cond_(2_2).csv") %>% 
     mutate(Data = "Condition") %>% 
     filter(lon > 12 & lat < 58) %>% 
     dplyr::select(Data, X, Y, year)
@@ -65,7 +67,9 @@ p1 <- ggplot(swe_coast_proj) +
   geom_raster(data = pred_grid2, aes(x = X*1000, y = Y*1000, fill = factor(sub_div)), alpha = 0.8) +
   geom_sf() +
   scale_fill_brewer(palette = "Dark2") + 
-  labs(x = "Longitude", y = "Latitude", fill = "SubDiv")
+  theme(legend.position = "bottom") +
+  guides(fill = guide_legend(title.position = "top")) +
+  labs(x = "Longitude", y = "Latitude", fill = "ICES\ subdivision")
 
 # To add text
 xmin <- 303379.1; xmax <- 958492.4; xrange <- xmax - xmin
@@ -120,8 +124,8 @@ p3 <- ggplot() +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_line(size = 1),
         axis.ticks = element_blank(),
-        panel.background = element_blank()
-        , panel.ontop = TRUE
+        panel.background = element_blank(), 
+        panel.ontop = TRUE
         ) +
   coord_quickmap() + 
   NULL

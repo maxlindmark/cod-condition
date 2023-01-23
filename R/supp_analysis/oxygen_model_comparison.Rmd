@@ -14,8 +14,6 @@ editor_options:
 knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>",
-  fig.width = 12,
-  fig.asp = 0.618,
   fig.align ='center'
 )
 ```
@@ -42,24 +40,23 @@ library(RColorBrewer)
 
 ```{r, read and clean data}
 # Define plotting theme for main plot
-theme_plot <- function(base_size = 10, base_family = "") {
-  theme_light(base_size = 10, base_family = "") +
+theme_plot <- function(base_size = 11, base_family = "") {
+  theme_light(base_size = base_size, base_family = "") +
     theme(
-      axis.text.x = element_text(angle = 90),
-      axis.text = element_text(size = 8),
-      legend.text = element_text(size = 8),
-      legend.title = element_text(size = 8),
+      axis.text = element_text(size = 9),
+      legend.text = element_text(size = 9),
+      legend.title = element_text(size = 9),
       legend.position = "bottom",
       legend.key.height = unit(0.2, "cm"),
       legend.margin = margin(0, 0, 0, 0),
       legend.box.margin = margin(-5, -5, -5, -5),
-      strip.text = element_text(size = 8, colour = 'gray10', margin = margin()),
+      strip.text = element_text(size = 9, colour = 'gray10', margin = margin(b = 1, t = 1)),
       strip.background = element_rect(fill = "grey95")
       )
 }
 
 # To read Ale's multiple files, set wd there temporarily
-setwd("/Users/maxlindmark/Dropbox/Max work/R/cod_condition/data/geomar_oxy_from_ale/")
+setwd("/Users/maxlindmark/Dropbox/Max work/R/cod-condition/data/geomar_oxy_from_ale/")
 getwd()
 
 filenames <- list.files(pattern="*.csv")
@@ -67,7 +64,7 @@ filenames <- list.files(pattern="*.csv")
 geomar <- purrr::map_df(filenames, 
                             ~read.csv(.x, stringsAsFactors = FALSE) %>% mutate(filename = .x))
 
-setwd("/Users/maxlindmark/Dropbox/Max work/R/cod_condition")
+setwd("/Users/maxlindmark/Dropbox/Max work/R/cod-condition")
 
 # Tidy up data
 geomar_25 <- geomar %>% 
@@ -146,8 +143,8 @@ p1 <- ggplot(geomar_25, aes(X, Y, color = depth)) +
 # Compare with the pred grid
 
 # Read in prediction grid
-pred_grid1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(1_2).csv")
-pred_grid2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(2_2).csv")
+pred_grid1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod-condition/master/data/for_analysis/pred_grid_(1_2).csv")
+pred_grid2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod-condition/master/data/for_analysis/pred_grid_(2_2).csv")
 
 pred_grid <- bind_rows(pred_grid1, pred_grid2)
 
@@ -183,9 +180,10 @@ geomar_25 %>%
 ```
 
 ## Predict biomass density onto the different grids 
+
 ```{r predict density on grid, cache=TRUE}
 # Standardize the grids with respect to t+he mean in the data
-density <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cpue_q_1_4.csv") %>%
+density <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod-condition/master/data/for_analysis/catch_q_1_4.csv") %>%
   filter(quarter == 4) %>%
   filter(year > 1992 & year < 2017) %>% 
   mutate(depth_sc = (depth - mean(depth))/sd(depth))
@@ -288,24 +286,20 @@ oxygen_series %>%
   mutate(source = ifelse(source == "geomar", "GEOMAR", "NEMO-NORDIC-SCOBI")) %>% 
   ggplot(aes(year, oxy, color = source, linetype = series)) +
   stat_smooth(method = "gam", formula = y ~ s(x, k = 4), se = FALSE, size = 1) +
-  geom_point(size = 1.5, alpha = 0.8) +
+  #geom_point(size = 1.5, alpha = 0.8) +
   scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
-  scale_color_manual(values = pal) +
-  scale_fill_manual(values = pal) +
+  # scale_color_manual(values = pal) +
+  # scale_fill_manual(values = pal) +
+  scale_fill_brewer(palette = "Accent") +
+  scale_color_brewer(palette = "Accent") +
   guides(linetype = guide_legend(override.aes = list(color = "gray10"))) +
   labs(y = expression(paste("O" [2], " [ml/L]", sep = "")), x = "Year",
        color = "", linetype = "") +
-  theme_plot() +
-  theme(aspect.ratio = 1,
-        axis.text.x = element_text(angle = 0)) +
+  theme_plot(base_size = 14) +
+  theme(aspect.ratio = 1) +
   NULL
 
 ggsave("figures/supp/density/weighted_oxygen_comparison.png", width = 6.5, height = 6.5, dpi = 600)
 ```
-
-
-
-
-
 
 

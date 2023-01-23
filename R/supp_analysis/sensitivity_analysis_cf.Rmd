@@ -14,8 +14,6 @@ editor_options:
 knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>",
-  fig.width = 12,
-  fig.asp = 0.618,
   fig.align ='center'
 )
 ```
@@ -26,7 +24,7 @@ Fit main model (see exploratory scripts and model comparison), visualize results
 ## Load packages
 
 ```{r packages, message=FALSE, warning=TRUE}
-library(tidyverse); theme_set(theme_light(base_size = 12))
+library(tidyverse)
 library(tidylog)
 library(viridis)
 library(marmap)
@@ -48,6 +46,21 @@ library(sdmTMB)
 
 # To load entire cache in interactive r session, do: 
 # qwraps2::lazyload_cache_dir(path = "R/supp_analysis/sensitivity_analysis_cf_cache/html")
+
+theme_plot <- function(base_size = 11, base_family = "") {
+  theme_light(base_size = base_size, base_family = "") +
+    theme(
+      axis.text = element_text(size = 9),
+      legend.text = element_text(size = 9),
+      legend.title = element_text(size = 9),
+      legend.position = "bottom",
+      legend.key.height = unit(0.2, "cm"),
+      legend.margin = margin(0, 0, 0, 0),
+      legend.box.margin = margin(-5, -5, -5, -5),
+      strip.text = element_text(size = 9, colour = 'gray10', margin = margin(b = 1, t = 1)),
+      strip.background = element_rect(fill = "grey95")
+      )
+}
 ```
 
 ## Read data
@@ -115,15 +128,14 @@ d_adu <- d %>% filter(length_cm > 30)
 d_juv <- d %>% filter(length_cm < 30)
 d_25_28 <- d %>% filter(!sub_div == 24)
 
-
 d_rec <- d
 
 # For this analysis, I calculate the rectangle-level variables differently, I calculate
 # median rectangle variables using only grid points where there is sufficient cod density.
 # This means I will read in the prediction grid and simply redo the left_join
 
-pred_grid1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(1_2).csv")
-pred_grid2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(2_2).csv")
+pred_grid1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod-condition/master/data/for_analysis/pred_grid_(1_2).csv")
+pred_grid2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod-condition/master/data/for_analysis/pred_grid_(2_2).csv")
 
 pred_grid <- bind_rows(pred_grid1, pred_grid2)
  
@@ -245,7 +257,7 @@ m_adu <- sdmTMB(
   mesh = spde_adu, 
   family = student(link = "identity", df = 5),
   spatiotemporal = "iid",
-  spatial = "on",
+  spatial = "off",
   silent = TRUE,
   reml = FALSE,
   control = sdmTMBcontrol(newton_loops = 1))
@@ -277,7 +289,7 @@ m_juv <- sdmTMB(
   mesh = spde_juv, 
   family = student(link = "identity", df = 5),
   spatiotemporal = "iid",
-  spatial = "on",
+  spatial = "off",
   silent = TRUE,
   reml = FALSE,
   control = sdmTMBcontrol(newton_loops = 1))
@@ -308,7 +320,7 @@ m_25_28 <- sdmTMB(
   mesh = spde_25_28, 
   family = student(link = "identity", df = 5),
   spatiotemporal = "iid",
-  spatial = "on",
+  spatial = "off",
   silent = TRUE,
   reml = FALSE,
   control = sdmTMBcontrol(newton_loops = 1))
@@ -339,7 +351,7 @@ m_rec <- sdmTMB(
   mesh = spde_rec, 
   family = student(link = "identity", df = 5),
   spatiotemporal = "iid",
-  spatial = "on",
+  spatial = "off",
   silent = TRUE,
   reml = FALSE,
   control = sdmTMBcontrol(newton_loops = 1))
@@ -356,36 +368,32 @@ sanity(m_rec)
 
 ```{r extract coefficients, message=FALSE}
 # Extract random and fixed coefficients from the adult model
-m_adu_est <- bind_rows(#tidy(m_adu, effects = "ran_par", conf.int = TRUE) %>%
-                       #  filter(term %in% c("sigma_O", "sigma_E")),
-                       
+m_adu_est <- bind_rows(tidy(m_adu, effects = "ran_par", conf.int = TRUE) %>%
+                         filter(term == "sigma_E"),
                        tidy(m_adu, effects = "fixed", conf.int = TRUE) %>%
                          filter(!grepl('year', term)))  %>%
   
   mutate(term = factor(term))
 
 # Extract random and fixed coefficients from the juvenile model
-m_juv_est <- bind_rows(# tidy(m_juv, effects = "ran_par", conf.int = TRUE) %>%
-                       #  filter(term %in% c("sigma_O", "sigma_E")),
-                       
+m_juv_est <- bind_rows(tidy(m_juv, effects = "ran_par", conf.int = TRUE) %>%
+                         filter(term == "sigma_E"),
                        tidy(m_juv, effects = "fixed", conf.int = TRUE) %>%
                          filter(!grepl('year', term)))  %>%
   
   mutate(term = factor(term))
 
 # Extract random and fixed coefficients from the sd25+ model
-m_25_28_est <- bind_rows(# tidy(m_25_28, effects = "ran_par", conf.int = TRUE) %>%
-                         #  filter(term %in% c("sigma_O", "sigma_E")),
-                         
+m_25_28_est <- bind_rows(tidy(m_25_28, effects = "ran_par", conf.int = TRUE) %>%
+                           filter(term == "sigma_E"),
                          tidy(m_25_28, effects = "fixed", conf.int = TRUE) %>%
                            filter(!grepl('year', term)))  %>%
   
   mutate(term = factor(term))
 
 # Extract random and fixed coefficients from the rec model
-m_rec_est <- bind_rows(# tidy(m_rec, effects = "ran_par", conf.int = TRUE) %>%
-                       #  filter(term %in% c("sigma_O", "sigma_E")),
-                       
+m_rec_est <- bind_rows(tidy(m_rec, effects = "ran_par", conf.int = TRUE) %>%
+                         filter(term == "sigma_E"),
                        tidy(m_rec, effects = "fixed", conf.int = TRUE) %>%
                          filter(!grepl('year', term)))  %>%
   
@@ -401,22 +409,24 @@ m_25_28_est$Model <- "SubDiv 25-28"
 m_rec_est$Model <- "Rec."
 
 # Read in coefficients from the main model
-m_full <- read.csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/output/mfull_est.csv") %>%
+m_full_st <- read.csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/output/mfull_est_st.csv") %>%
   dplyr::select(-X) %>% 
-  mutate(Model = "Full model", term = as.factor(term)) %>% 
-  filter(!term %in% c("sigma_O", "sigma_E"))
+  mutate(Model = "Full model", term = as.factor(term))
 
-plot_dat <- bind_rows(m_juv_est, m_adu_est, m_25_28_est, m_rec_est, m_full) %>% 
-  mutate(term = as.factor(term))
+plot_dat <- bind_rows(m_juv_est, m_adu_est, m_25_28_est, m_rec_est, m_full_st)
 
 # Plot effects
+# Sort the terms so that random effects are at the top...
+plot_dat <- plot_dat %>% 
+  mutate(term2 = ifelse(term == "sigma_E", 2, 1))
+
 ggplot(plot_dat, aes(reorder(term, term2), estimate, color = Model)) +
   geom_hline(yintercept = 0, linetype = 2, color = "gray40", alpha = 0.5) +
-  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2,
-                position = position_dodge(width = 0.7), alpha = 0.6) +
-  geom_point(size = 2.5, position = position_dodge(width = 0.7), alpha = 0.6) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0,
+                position = position_dodge(width = 0.6), alpha = 0.6) +
+  geom_point(size = 2.5, position = position_dodge(width = 0.76), alpha = 0.6) +
   scale_color_brewer(palette = "Dark2") +
-  labs(x = "", y = "Standardized coefficient") +
+  labs(y = "Estimate", x = "Standardized coefficient") +
   scale_x_discrete(breaks = levels(plot_dat$term),
                    labels = c(expression(Herring[rec]),
                               expression(Herring[sub]),
@@ -432,16 +442,18 @@ ggplot(plot_dat, aes(reorder(term, term2), estimate, color = Model)) +
                               expression(Depth[haul]),
                               expression(Oxygen[rec]),
                               expression(Oxygen[haul]),
+                              expression(sigma[E]),
                               expression(Temp[rec]),
                               expression(Temp[haul])
                               )) +
   coord_flip() +
-  guides(color = guide_legend(ncol = 2)) +
-  theme(plot.margin = unit(c(0.4, 0.4, 0.4, 0), "cm"),
+  guides(color = guide_legend(ncol = 4)) +
+  theme_plot() +
+  theme(plot.margin = unit(c(0.4, 0.4, 0.4, 0.4), "cm"),
         legend.position = "bottom") +
   NULL
   
-ggsave("figures/supp/condition/sensitivity_coefficients.png", width = 4.5, height = 6.5, dpi = 600)
+ggsave("figures/supp/condition/sensitivity_coefficients.png", width = 6.5, height = 6.5, dpi = 600)
 
 # Just a test to see the labels were alright
 effect_sizes <- ggplot(plot_dat, aes(reorder(term, estimate), estimate)) +

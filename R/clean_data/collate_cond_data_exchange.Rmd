@@ -14,8 +14,6 @@ editor_options:
 knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>",
-  fig.width = 12,
-  fig.asp = 0.618,
   fig.align ='center'
 )
 ```
@@ -26,9 +24,7 @@ In this script, I load exchange data from datras and extract CA data (i.e. biolo
 ## Load libraries
 
 ```{r, message=FALSE}
-rm(list = ls())
-
-library(tidyverse); theme_set(theme_light(base_size = 12))
+library(tidyverse)
 library(readxl)
 library(tidylog)
 library(RCurl)
@@ -69,6 +65,9 @@ map_data <- rnaturalearth::ne_countries(
 
 # Crop the polygon for plotting and efficiency:
 # st_bbox(map_data) # find the rough coordinates
+sf::sf_use_s2(FALSE)
+# https://stackoverflow.com/questions/68478179/how-to-resolve-spherical-geometry-failures-when-joining-spatial-data
+
 swe_coast <- suppressWarnings(suppressMessages(
   st_crop(map_data,
           c(xmin = xmin, ymin = ymin, xmax = xmax, ymax = ymax))))
@@ -78,6 +77,22 @@ utm_zone33 <- 32633
 swe_coast_proj <- sf::st_transform(swe_coast, crs = utm_zone33)
 
 #ggplot(swe_coast_proj) + geom_sf() 
+
+theme_plot <- function(base_size = 10, base_family = "") {
+  theme_light(base_size = 10, base_family = "") +
+    theme(
+      axis.text.x = element_text(angle = 90),
+      axis.text = element_text(size = 8),
+      legend.text = element_text(size = 8),
+      legend.title = element_text(size = 8),
+      legend.position = "bottom",
+      legend.key.height = unit(0.2, "cm"),
+      legend.margin = margin(0, 0, 0, 0),
+      legend.box.margin = margin(-5, -5, -5, -5),
+      strip.text = element_text(size = 8, colour = 'gray10', margin = margin(b = 1, t = 1)),
+      strip.background = element_rect(fill = "grey95")
+      )
+}
 ```
 
 ## Read data
@@ -355,7 +370,7 @@ east <- raster("data/depth_geo_tif/D6_2018_rgb-1.tif")
 
 dep_rast <- raster::merge(west, east)
 
-dat$depth <- extract(dep_rast, dat[, 5:4])
+dat$depth <- extract(dep_rast, dat %>% dplyr::select(lon, lat), method = "bilinear")
 
 # Convert to depth (instead of elevation)
 ggplot(dat, aes(depth)) + geom_histogram()
@@ -512,7 +527,7 @@ for(i in unique(d_sub_oxy$year_f)) {
   data_sp <- SpatialPoints(d_slice)
   
   # Extract raster value (oxygen)
-  rasValue <- raster::extract(r, data_sp)
+  rasValue <- raster::extract(r, data_sp, method = "bilinear")
   
   # Now we want to plot the results of the raster extractions by plotting the cpue
   # data points over a raster and saving it for each year.
@@ -553,15 +568,14 @@ for(i in unique(d_sub_oxy$year_f)) {
     geom_raster(aes(fill = oxy)) +
     geom_point(data = d_slice, aes(x = lon, y = lat, fill = oxy),
                color = "black", size = 5, shape = 21) +
-    theme_bw() +
+    theme_plot() +
     geom_sf(data = world, inherit.aes = F, size = 0.2) +
     coord_sf(xlim = c(xmin, xmax),
              ylim = c(ymin, ymax)) +
     scale_colour_gradientn(colours = rev(terrain.colors(10)),
                            limits = c(-200, 400)) +
     scale_fill_gradientn(colours = rev(terrain.colors(10)),
-                         limits = c(-200, 400)) +
-    NULL
+                         limits = c(-200, 400))
   
   ggsave(paste("figures/supp/condition/cond_oxygen_rasters/", i,".png", sep = ""),
          width = 6.5, height = 6.5, dpi = 600)
@@ -580,8 +594,7 @@ big_raster_dat_oxy %>%
   mutate(year_num = as.numeric(year)) %>%
   ggplot(., aes(year_num, mean_oxy)) +
   geom_point(size = 2) +
-  stat_smooth(method = "lm") +
-  NULL
+  stat_smooth(method = "lm")
 
 big_raster_dat_oxy %>%
   group_by(year) %>%
@@ -592,8 +605,7 @@ big_raster_dat_oxy %>%
          year_num = as.numeric(year)) %>%
   ggplot(., aes(year_num, n)) +
   geom_point(size = 2) +
-  stat_smooth(method = "lm") +
-  NULL
+  stat_smooth(method = "lm")
 
 # Now add in the new oxygen column in the original data:
 str(d_sub_oxy)
@@ -773,7 +785,7 @@ for(i in unique(d_sub_temp$year_f)) {
   data_sp <- SpatialPoints(d_slice)
   
   # Extract raster value (temperature)
-  rasValue <- raster::extract(r, data_sp)
+  rasValue <- raster::extract(r, data_sp, method = "bilinear")
   
   # Now we want to plot the results of the raster extractions by plotting the cpue
   # data points over a raster and saving it for each year.
@@ -814,15 +826,14 @@ for(i in unique(d_sub_temp$year_f)) {
     geom_raster(aes(fill = temp)) +
     geom_point(data = d_slice, aes(x = lon, y = lat, fill = temp),
                color = "black", size = 5, shape = 21) +
-    theme_bw() +
+    theme_plot() +
     geom_sf(data = world, inherit.aes = F, size = 0.2) +
     coord_sf(xlim = c(min(dat$lon), max(dat$lon)),
              ylim = c(min(dat$lat), max(dat$lat))) +
     scale_colour_gradientn(colours = rev(terrain.colors(10)),
                            limits = c(2, 17)) +
     scale_fill_gradientn(colours = rev(terrain.colors(10)),
-                         limits = c(2, 17)) +
-    NULL
+                         limits = c(2, 17))
   
   ggsave(paste("figures/supp/condition/cond_temp_rasters/", i,".png", sep = ""),
          width = 6.5, height = 6.5, dpi = 600)
@@ -844,8 +855,7 @@ big_raster_dat_temp %>%
   mutate(year_num = as.numeric(year)) %>%
   ggplot(., aes(year_num, mean_temp)) +
   geom_point(size = 2) +
-  stat_smooth(method = "lm") +
-  NULL
+  stat_smooth(method = "lm")
 
 # Now add in the new temperature column in the original data:
 str(d_sub_temp)
@@ -961,7 +971,7 @@ extent(saduria)
 plot(saduria_longlat)
 
 # Now extract the values from the saduria raster to the data
-dat$density_saduria <- extract(saduria_longlat, dat[, 5:4])
+dat$density_saduria <- extract(saduria_longlat, dat %>% dplyr::select(lon, lat), method = "bilinear")
 
 ggplot(dat, aes(lon, lat, color = density_saduria)) +
   geom_point()
@@ -971,7 +981,6 @@ ggplot(dat, aes(lon, lat, color = density_saduria)) +
 
 ```{r add large scale variables}
 # First explore what the difference is between filtering depths and oxygen within their niche rather than the total in the rectangle
-
 pred_grid1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(1_2).csv")
 pred_grid2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(2_2).csv")
 
@@ -983,18 +992,6 @@ unique(is.na(pred_grid$density_cod_rec))
 # First create ID's for joining
 dat <- dat %>% mutate(year_rect_id = paste(year, ices_rect, sep = "_"),
                       year_sd_id = paste(year, sub_div, sep = "_"))
-
-# t <- pred_grid %>% 
-#   mutate(test_id = paste(year, ices_rect)) %>% 
-#   group_by(test_id) %>% 
-#   mutate(n = unique(temp_rec)) %>% 
-#   ungroup() %>% 
-#   distinct(n)
-# 
-# tt <- pred_grid %>% filter(year == "1994" & ices_rect == "39G7")
-# unique(tt$temp_rec)
-
-# Ok, some weird rounding error! Anyhow... 
 
 # Take distinct year + ices_rect id's and select the variables
 pred_grid_rec_vars <- pred_grid %>% 
@@ -1020,9 +1017,7 @@ unique(is.na(dat$density_cod_rec))
 pred_grid_sd_vars <- pred_grid %>% 
   mutate(year_sd_id = paste(year, sub_div, sep = "_")) %>% 
   distinct(year_sd_id, .keep_all = TRUE) %>% 
-  dplyr::select(year_sd_id,
-                density_saduria_sd, density_cod_sd, density_fle_sd,
-                depth_sd, oxy_sd, temp_sd, biomass_spr_sd, biomass_her_sd)
+  dplyr::select(year_sd_id, biomass_spr_sd, biomass_her_sd)
 
 # Join!
 dat <- left_join(dat, pred_grid_sd_vars)
@@ -1031,8 +1026,7 @@ t <- dat %>% drop_na(density_cod_rec)
 t <- dat %>% drop_na(biomass_her)
 t <- dat %>% drop_na(density_saduria_rec, density_cod_rec, density_fle_rec,
                      depth_rec, oxy_rec, temp_rec, biomass_spr, biomass_her,
-                     density_saduria_sd, density_cod_sd, density_fle_sd, 
-                     depth_sd, oxy_sd, temp_sd, biomass_spr_sd, biomass_her_sd)
+                     biomass_spr_sd, biomass_her_sd)
 ```
 
 ## Save data
@@ -1128,15 +1122,13 @@ all_dat <- all_dat %>%
 ggplot(all_dat %>% filter(year == 1999)) +
   geom_bar(aes(ices_rect, median_depth, fill = type), position="dodge", stat="identity") +
   theme(axis.text.x = element_text(angle = 90)) +
-  facet_wrap(~small_sample, ncol = 1) +
-  NULL
+  facet_wrap(~small_sample, ncol = 1)
 
 # Oxygen
 ggplot(all_dat %>% filter(year == 1999)) +
   geom_bar(aes(ices_rect, median_oxy, fill = type), position="dodge", stat="identity") +
   theme(axis.text.x = element_text(angle = 90)) +
-  facet_wrap(~small_sample, ncol = 1) +
-  NULL
+  facet_wrap(~small_sample, ncol = 1)
 
 # The fine scale variables are matched to haul. However, the ices_rect level variables
 # and sub division averages should not be averages of the hauls in those areas, but rather

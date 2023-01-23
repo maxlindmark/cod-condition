@@ -14,8 +14,6 @@ editor_options:
 knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>",
-  fig.width = 12,
-  fig.asp = 0.618,
   fig.align ='center'
 )
 ```
@@ -26,7 +24,7 @@ Fit main model (see exploratory scripts and model comparison), visualize results
 ## Load packages
 
 ```{r packages, message=FALSE, warning=TRUE}
-library(tidyverse); theme_set(theme_light(base_size = 12))
+library(tidyverse)
 library(tidylog)
 library(viridis)
 library(marmap)
@@ -81,21 +79,18 @@ d <- d %>%
          density_saduria_rec_sc = density_saduria_rec,
          depth_sc = depth,
          depth_rec_sc = depth_rec,
-         depth_sd_sc = depth_sd,
          oxy_sc = oxy,
          oxy_rec_sc = oxy_rec,
-         oxy_sd_sc = oxy_sd,
          temp_sc = temp,
          temp_rec_sc = temp_rec,
-         temp_sd_sc = temp_sd,
          year_f = as.factor(year))  %>%
   mutate_at(c("biomass_her_sc", "biomass_her_sd_sc", "biomass_spr_sc", "biomass_spr_sd_sc",
               "density_cod_sc", "density_cod_rec_sc", 
               "density_fle_sc", "density_fle_rec_sc", 
               "density_saduria_sc", "density_saduria_rec_sc", 
-              "depth_sc", "depth_rec_sc", "depth_sd_sc",
-              "oxy_sc", "oxy_rec_sc", "oxy_sd_sc",
-              "temp_sc", "temp_rec_sc", "temp_sd_sc"
+              "depth_sc", "depth_rec_sc", 
+              "oxy_sc", "oxy_rec_sc", 
+              "temp_sc", "temp_rec_sc"
               ),
             ~(scale(.) %>% as.vector)) %>% 
   mutate(year = as.integer(year))
@@ -151,7 +146,7 @@ d_sum <- d_sum %>%
 sd(d_sum$tot_sprat)
 
 # From mich residual plots it seems 1 value per year
-m <- gam(mean_fulton ~ 1+ s(tot_sprat_sc, k = 4), data = d_sum)
+m <- gam(mean_fulton ~ 1 + s(tot_sprat_sc, k = 4), data = d_sum)
 
 summary(m)
 plot.gam(m)
@@ -160,110 +155,8 @@ plot.gam(m, shift = 1)
 m2 <- lm(mean_fulton ~ 1 + tot_sprat_sc, data = d_sum)
 summary(m2)
 
-# Ok, effect size of ~0.05 now. That means a 5% change in condition per 1 sd change in sprat
-sd(d_sum$tot_sprat) / 1000
-
-sprat_tot %>% 
-  ggplot(aes(year, tot_sprat / 1000)) +
-  geom_point() +
-  geom_hline(yintercept = sd(d_sum_sd$sprat_tot_sd) / 1000) +
-  geom_hline(yintercept = 0) +
-  stat_smooth(se = FALSE)
-
-# What is the R2?
-# ~60%
-```
-
-See if the results hold when doing it per sub-division
-
-```{r}
-sprat_tot_sd <- d %>% 
-  filter(year > 1993 & year < 2015 & !sub_div == 24) %>% 
-  distinct(year, sub_div, .keep_all = TRUE) %>% 
-  rename(sprat_tot_sd = biomass_spr_sd) %>% 
-  dplyr::select(year, sub_div, sprat_tot_sd)
-
-ggplot(sprat_tot_sd, aes(year, sprat_tot_sd/1000, color = factor(sub_div))) +
-  geom_point() +
-  stat_smooth()
-
-d_sum_sd <- d %>% 
-  filter(year > 1993 & year < 2015 & !sub_div == 24 & length_cm < 61 & length_cm > 9) %>% 
-  mutate(lngt_class = cut(length_cm, breaks = seq(10, 60, 10))) %>% 
-  group_by(year, lngt_class, sub_div) %>% 
-  summarise(mean_fulton = mean(fulton)) %>% 
-  ungroup() %>% 
-  group_by(year, sub_div) %>% 
-  summarise(mean_fulton = mean(mean_fulton)) %>% 
-  ungroup()
-  
-ggplot(d_sum_sd, aes(year, mean_fulton, color = factor(sub_div))) +
-  geom_point() +
-  stat_smooth()
-
-# left_join
-d_sum_sd <- left_join(d_sum_sd, sprat_tot_sd)
-
-# scale variables
-d_sum_sd <- d_sum_sd %>%
-  drop_na(sprat_tot_sd) %>% 
-  mutate(sprat_tot_sd_sc = (sprat_tot_sd - mean(sprat_tot_sd)) / sd(sprat_tot_sd),
-         sub_div = factor(sub_div))
-
-# From mich residual plots it seems 1 value per year
-m3 <- gam(mean_fulton ~ 1 + s(sprat_tot_sd_sc, k = 4, by = sub_div),
-          data = d_sum_sd)
-
+m3 <- lm(fulton ~ 1 + biomass_spr_sd_sc, data = d)
 summary(m3)
 
-plot.gam(m3, pages = 1, scale = 0)
-plot.gam(m3, pages = 1, scale = 0, shift = 1)
-
-m4 <- lm(log(mean_fulton) ~ 1 + sprat_tot_sd_sc*sub_div, data = d_sum_sd)
-summary(m4)
-
-sd25 <- summary(m4)$coefficients["sprat_tot_sd_sc", "Estimate"]
-sd26 <- sd25 + summary(m4)$coefficients["sprat_tot_sd_sc:sub_div26", "Estimate"]
-sd27 <- sd25 + summary(m4)$coefficients["sprat_tot_sd_sc:sub_div27", "Estimate"]
-sd28 <- sd25 + summary(m4)$coefficients["sprat_tot_sd_sc:sub_div28", "Estimate"]
-
-sd25; sd26; sd27; sd28
-
-# Ok, effect size of ~0.5 now. That means a 5% change in condition per 1 sd change in sprat
-sd(d_sum_sd$sprat_tot_sd) / 1000
-
-sprat_tot_sd %>% 
-  filter(sub_div %in% c("27", "28")) %>%
-  ggplot(aes(year, sprat_tot_sd/1000, color = factor(sub_div))) +
-  geom_point() +
-  geom_hline(yintercept = sd(d_sum_sd$sprat_tot_sd) / 1000) +
-  geom_hline(yintercept = 0) +
-  stat_smooth(se = FALSE)
-
-# Sprat pop has decline by approx 2 sd, correspondint to approx 10% decline in condition
-# 
-# library(brms)
-# m5 <- brm(mean_fulton ~ 1 + sprat_tot_sd_sc*sub_div, data = d_sum_sd)
-# 
-# conditional_effects(m5)
-
-# R2 is 
-# ~40%
+# Ok, effect size of ~0.05 now (compared to 0.01 with raw data). R2 goes from 60% to 0.5%.
 ```
-
-```{r how effect sizes change with sd?}
-# Annual average
-summary(m2)$coefficients["tot_sprat_sc", "Estimate"]
-
-# Sub division model
-sd25; sd26; sd27; sd28
-
-# Individual model with sub-division covariates
-0.002
-
-```
-
-
-
-
-

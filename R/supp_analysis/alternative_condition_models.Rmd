@@ -1,0 +1,587 @@
+---
+title: "Condition model"
+author: "Max Lindmark, Sean C. Andersson, Mayya Gogina and Michele Casini"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: paged
+    code_folding: hide
+  pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include = FALSE, cache=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.align ='center'
+)
+```
+
+# Fit condition model with environmental and biological predictors
+Fit main model (see exploratory scripts and model comparison), visualize results.
+
+## Load packages
+
+```{r packages, message=FALSE, warning=TRUE}
+library(tidyverse)
+library(tidylog)
+library(viridis)
+library(marmap)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(sf)
+library(RColorBrewer)
+library(gganimate)
+library(gifski)
+library(latex2exp)
+library(patchwork)
+library(png)
+library(RCurl)
+library(wesanderson)
+library(qwraps2) 
+library(ggcorrplot)
+library(ggridges)
+# remotes::install_github("pbs-assess/sdmTMB")
+library(sdmTMB) # sdmTMB_0.1.4.9004
+
+# To load entire cache in interactive r session, do: 
+# qwraps2::lazyload_cache_dir(path = "R/supp_analysis/alternative_condition_models_cache/html")
+```
+
+## Code for map plots
+
+```{r read coastline data, message=FALSE, warning=FALSE, fig.show='hide'}
+# Specify map ranges
+ymin = 52; ymax = 60; xmin = 10; xmax = 24
+
+map_data <- rnaturalearth::ne_countries(
+  scale = "medium",
+  returnclass = "sf", continent = "europe")
+
+# Crop the polygon for plotting and efficiency:
+# st_bbox(map_data) # find the rough coordinates
+sf::sf_use_s2(FALSE)
+# https://stackoverflow.com/questions/68478179/how-to-resolve-spherical-geometry-failures-when-joining-spatial-data
+
+swe_coast <- suppressWarnings(suppressMessages(
+  st_crop(map_data,
+          c(xmin = xmin, ymin = ymin, xmax = xmax, ymax = ymax))))
+
+# Transform our map into UTM 33 coordinates, which is the equal-area projection we fit in:
+utm_zone33 <- 32633
+swe_coast_proj <- sf::st_transform(swe_coast, crs = utm_zone33)
+
+# Define plotting theme for main plot
+theme_plot <- function(base_size = 11, base_family = "") {
+  theme_light(base_size = base_size, base_family = "") +
+    theme(
+      axis.text = element_text(size = 9),
+      legend.text = element_text(size = 9),
+      legend.title = element_text(size = 9),
+      legend.position = "bottom",
+      legend.key.height = unit(0.2, "cm"),
+      legend.margin = margin(0, 0, 0, 0),
+      legend.box.margin = margin(-5, -5, -5, -5),
+      strip.text = element_text(size = 9, colour = 'gray10', margin = margin(b = 1, t = 1)),
+      strip.background = element_rect(fill = "grey95")
+      )
+}
+
+# Define plotting theme for facet_wrap map with years
+theme_facet_map <- function(base_size = 11, base_family = "") {
+  theme_light(base_size = base_size, base_family = "") +
+    theme(
+        axis.text.x = element_text(angle = 90),
+        axis.text = element_text(size = 9),
+        strip.text = element_text(size = 9, colour = 'gray10', margin = margin(b = 2, t = 2)),
+        strip.background = element_rect(fill = "gray95"),
+        legend.direction = "horizontal",
+        legend.margin = margin(1, 1, 1, 1),
+        legend.box.margin = margin(0, 0, 0, 0),
+        legend.key.height = unit(0.2, "line"),
+        legend.key.width = unit(2, "line"),
+        legend.spacing.x = unit(0.1, 'cm'),
+        legend.position = "bottom",
+      )
+}
+
+# Make default base map plot
+xmin2 <- 303000; xmax2 <- 916000; xrange <- xmax2 - xmin2
+ymin2 <- 5980000; ymax2 <- 6450000; yrange <- ymax2 - ymin2
+
+plot_map_raster <- 
+ggplot(swe_coast_proj) + 
+  xlim(xmin2, xmax2) +
+  ylim(ymin2, ymax2) +
+  labs(x = "Longitude", y = "Latitude") +
+  geom_sf(size = 0.3) + 
+  theme_plot() +
+  guides(colour = guide_colorbar(title.position = "top", title.hjust = 0.5),
+         fill = guide_colorbar(title.position = "top", title.hjust = 0.5))
+```
+
+## Read data
+
+```{r read and process data, message=FALSE, warning=FALSE, fig.show='hide'}
+# Read the split files and join them
+d1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod-condition/master/data/for_analysis/mdat_cond_(1_2).csv")
+d2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod-condition/master/data/for_analysis/mdat_cond_(2_2).csv")
+
+d <- bind_rows(d1, d2)
+
+unique(is.na(d$density_cod))
+unique(is.na(d$density_cod_rec))
+
+# Calculate standardized variables
+d <- d %>% 
+  mutate(ln_length_cm = log(length_cm),
+         ln_weight_g = log(weight_g),
+         year_ct = year - mean(year),
+         biomass_her_sc = biomass_her,
+         biomass_her_sd_sc = biomass_her_sd,
+         biomass_spr_sc = biomass_spr,
+         biomass_spr_sd_sc = biomass_spr_sd,
+         density_cod_sc = density_cod,
+         density_cod_rec_sc = density_cod_rec,
+         density_fle_sc = density_fle,
+         density_fle_rec_sc = density_fle_rec,
+         density_saduria_sc = density_saduria,
+         density_saduria_rec_sc = density_saduria_rec,
+         depth_sc = depth,
+         depth_rec_sc = depth_rec,
+         oxy_sc = oxy,
+         oxy_rec_sc = oxy_rec,
+         temp_sc = temp,
+         temp_rec_sc = temp_rec,
+         year_f = as.factor(year))  %>%
+  mutate_at(c("biomass_her_sc", "biomass_her_sd_sc", "biomass_spr_sc", "biomass_spr_sd_sc",
+              "density_cod_sc", "density_cod_rec_sc", 
+              "density_fle_sc", "density_fle_rec_sc", 
+              "density_saduria_sc", "density_saduria_rec_sc", 
+              "depth_sc", "depth_rec_sc", 
+              "oxy_sc", "oxy_rec_sc", 
+              "temp_sc", "temp_rec_sc"
+              ),
+            ~(scale(.) %>% as.vector)) %>% 
+  mutate(year = as.integer(year))
+
+unique(is.na(d))
+
+unique(is.na(d$density_cod_rec))
+unique(is.na(d$density_cod))
+
+# Drop NA covariates for the correlation plot
+d <- d %>% drop_na(biomass_her_sc, biomass_her_sd_sc, biomass_spr_sc, biomass_spr_sd_sc,
+                   density_cod_sc, density_cod_rec_sc, density_fle_sc, density_fle_rec_sc, 
+                   density_saduria_sc, density_saduria_rec_sc, depth_sc, depth_rec_sc,
+                   oxy_sc, oxy_rec_sc, temp_sc, temp_rec_sc)
+
+# Sample size
+nrow(d)
+
+# Plot correlation between variables
+d_cor <- d %>% dplyr::select("biomass_her_sc", "biomass_her_sd_sc",
+                             "biomass_spr_sc", "biomass_spr_sd_sc",
+                             "density_cod_sc", "density_cod_rec_sc", 
+                             "density_fle_sc", "density_fle_rec_sc", 
+                             "density_saduria_sc", "density_saduria_rec_sc", 
+                             "depth_sc", "depth_rec_sc",
+                             "oxy_sc", "oxy_rec_sc",
+                             "temp_sc", "temp_rec_sc")
+
+corr <- round(cor(d_cor), 1)
+
+ggcorrplot(corr, hc.order = TRUE, type = "lower", lab = TRUE, lab_size = 2.5) +
+  theme_classic() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.3))
+
+ggsave("figures/supp/condition/correlation_variables.png", width = 6.5, height = 6.5, dpi = 600)
+
+# Plot data
+d_plot <- d %>% 
+  group_by(year, X, Y) %>% 
+  summarise(n = n())
+
+plot_map_raster + 
+  geom_point(data = d_plot, aes(X*1000, Y*1000, size = n, color = n), alpha = 0.5) + 
+  scale_color_viridis() + 
+  scale_size(range = c(.1, 3), name = "N per haul") + 
+  facet_wrap(~year, ncol = 6) + 
+  guides(size = "none") + 
+  theme_facet_map()
+
+ggsave("figures/supp/condition/spatial_cond_data.png", width = 6.5, height = 6.5, dpi = 600)
+```
+
+## Read the prediction grids
+
+```{r read and process prediction grid, message=FALSE, warning=FALSE, fig.show='hide'}
+pred_grid1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(1_2).csv")
+pred_grid2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(2_2).csv")
+
+pred_grid <- bind_rows(pred_grid1, pred_grid2)
+
+unique(is.na(pred_grid$density_cod))
+unique(is.na(pred_grid$density_cod_rec))
+
+pred_grid <- pred_grid %>% mutate(year = as.integer(year),
+                                  year_f = as.factor(year))
+
+# Scale the variables with respect to data! First calculate means in data
+data_means <- d %>%
+  dplyr::select(biomass_her, biomass_her_sd, biomass_spr, biomass_spr_sd,
+                density_cod, density_cod_rec, 
+                density_fle, density_fle_rec, 
+                density_saduria, density_saduria_rec, 
+                depth, depth_rec,
+                oxy, oxy_rec, 
+                temp, temp_rec) %>%
+  mutate_all(~mean(.)) %>%
+  distinct(.keep_all = TRUE)
+
+data_stdev <- d %>%
+  dplyr::select(biomass_her, biomass_her_sd, biomass_spr, biomass_spr_sd,
+                density_cod, density_cod_rec, 
+                density_fle, density_fle_rec, 
+                density_saduria, density_saduria_rec, 
+                depth, depth_rec, 
+                oxy, oxy_rec, 
+                temp, temp_rec
+                ) %>%
+  mutate_all(~sd(.)) %>%
+  distinct(.keep_all = TRUE)
+
+# Before actually scaling, replace the ices-rectangle pelagic values that are NA with the mean across rectangles in the sub division.
+# Replace the sub-division pelagic values that are NA with the mean in the year.
+# Note that the sub-division values are not the sum of the rectangles (due to missing rectangles), so 
+# I need to calculate a sub-division mean across rectangles within each sub-division
+pred_grid <- pred_grid %>% 
+  group_by(year) %>% 
+  mutate(median_biomass_sprat_across_sub_div = median(biomass_spr_sd, na.rm = TRUE),
+         median_biomass_herring_across_sub_div = median(biomass_her_sd, na.rm = TRUE)) %>% 
+  ungroup() %>% # Replace sub_divsion NA's with the median across sub_divisions in that year
+  mutate(biomass_spr_sd = ifelse(is.na(biomass_spr_sd) == TRUE, median_biomass_sprat_across_sub_div, biomass_spr_sd),
+         biomass_her_sd = ifelse(is.na(biomass_her_sd) == TRUE, median_biomass_herring_across_sub_div, biomass_her_sd)) %>% 
+  group_by(year, sub_div) %>% 
+  mutate(median_biomass_sprat_across_rect_in_sub_div = median(biomass_spr, na.rm = TRUE),
+         median_biomass_herring_across_rect_in_sub_div = median(biomass_her, na.rm = TRUE)) %>% 
+  ungroup() %>% # Replace rectangle NA's with the median across rectangles in that year and sub-division
+  mutate(biomass_spr = ifelse(is.na(biomass_spr) == TRUE, median_biomass_sprat_across_rect_in_sub_div, biomass_spr),
+         biomass_her = ifelse(is.na(biomass_her) == TRUE, median_biomass_herring_across_rect_in_sub_div, biomass_her)) %>% 
+  # Since I still have some NAs (some sub-divisions do not have a single rectangle in some years), I will will those rectangles 
+  # with the sub-division value divided by the number of rectangles in that sub division
+  group_by(year, sub_div) %>% 
+  mutate(n_rect = length(unique(ices_rect))) %>% 
+  ungroup() %>% 
+  mutate(biomass_spr = ifelse(is.na(biomass_spr) == TRUE, biomass_spr_sd/n_rect, biomass_spr),
+         biomass_her = ifelse(is.na(biomass_her) == TRUE, biomass_her_sd/n_rect, biomass_her))
+
+pred_grid <- pred_grid %>%
+  mutate(ln_length_cm = log(1),
+         year_ct = year - mean(year),
+         biomass_her_sc = (biomass_her - data_means$biomass_her) / data_stdev$biomass_her,
+         biomass_her_sd_sc = (biomass_her_sd - data_means$biomass_her_sd) / data_stdev$biomass_her_sd,
+         biomass_spr_sc = (biomass_spr - data_means$biomass_spr) / data_stdev$biomass_spr,
+         biomass_spr_sd_sc = (biomass_spr_sd - data_means$biomass_spr_sd) / data_stdev$biomass_spr_sd,
+         density_cod_sc = (density_cod - data_means$density_cod) / data_stdev$density_cod,
+         density_cod_rec_sc = (density_cod_rec - data_means$density_cod_rec) / data_stdev$density_cod_rec,
+         density_fle_sc = (density_fle - data_means$density_fle) / data_stdev$density_fle,
+         density_fle_rec_sc = (density_fle_rec - data_means$density_fle_rec) / data_stdev$density_fle_rec,
+         density_saduria_sc = (density_saduria - data_means$density_saduria) / data_stdev$density_saduria,
+         density_saduria_rec_sc = (density_saduria_rec - data_means$density_saduria_rec) / data_stdev$density_saduria_rec,
+         depth_sc = (depth - data_means$depth) / data_stdev$depth,
+         depth_rec_sc = (depth_rec - data_means$depth_rec) / data_stdev$depth_rec,
+         oxy_sc = (oxy - data_means$oxy) / data_stdev$oxy,
+         oxy_rec_sc = (oxy_rec - data_means$oxy_rec) / data_stdev$oxy_rec,
+         temp_sc = (temp - data_means$temp) / data_stdev$temp,
+         temp_rec_sc = (temp_rec - data_means$temp_rec) / data_stdev$temp_rec,
+         )
+
+# Plot on map:
+ggplot(pred_grid2, aes(X, Y)) + geom_point(size = 0.1) + facet_wrap(~year)
+
+pred_grid %>% 
+  drop_na() %>% 
+  ggplot(., aes(X, Y)) + geom_point(size = 0.1) + facet_wrap(~year)
+
+pred_grid %>% 
+  drop_na(biomass_spr_sd) %>% 
+  ggplot(., aes(X, Y)) + geom_point(size = 0.1) + facet_wrap(~year)
+
+unique(is.na(pred_grid))
+
+pred_grid %>% 
+  drop_na(biomass_spr_sc, biomass_spr_sd_sc, biomass_her_sc, biomass_her_sd_sc) %>% 
+  ggplot(., aes(X, Y)) + geom_point(size = 0.1) + facet_wrap(~year)
+```
+
+```{r, include=FALSE}
+# Include some tests & calculations for the manuscript
+pred_grid %>% 
+  filter(depth > 40 & depth < 60) %>% 
+  ggplot(aes(depth, oxy)) +
+  geom_point(alpha = 0.1)
+  
+pred_grid %>% 
+  filter(sub_div == 25) %>% 
+  ggplot(aes(depth, oxy)) + geom_point() +
+  geom_hline(yintercept = 4.6, col = "red") +
+  geom_vline(xintercept = 57, col = "red")
+
+m1 <- lm(oxy ~ depth, data = filter(pred_grid, sub_div == 25))
+nd <- data.frame(depth = 57)
+nd$pred <- predict(m1, newdata = nd)
+nd
+nd$pred[2] - nd$pred[1]
+```
+
+## Make spde mesh
+
+```{r make mesh, results='hide', message=FALSE}
+spde <- make_mesh(d, xy_cols = c("X", "Y"),
+                  n_knots = 100,  
+                  type = "kmeans", seed = 42)
+
+# Plot and save spde
+png(file = "figures/supp/condition/spde.png", units = "in", width = 6.5, height = 6.5, res = 300)
+plot(spde)
+dev.off()
+```
+
+## Fit models
+### Non spatial model to get the average length weight relationship. The main model's response variable is the ratio of the observed vs this predicted average weight.
+
+```{r first fit non_spatial model without covariates, cache=TRUE, fig.show='hide'}
+ptm <- proc.time()
+mnull <- sdmTMB(
+  formula = ln_weight_g ~ ln_length_cm,
+  data = d,
+  time = NULL,
+  mesh = spde,
+  family = student(link = "identity", df = 5),
+  spatiotemporal = "off",
+  spatial = "off",
+  silent = TRUE,
+  reml = FALSE
+  )
+proc.time() - ptm
+
+# Extract average a and b across the total dataset
+a <- as.numeric(tidy(mnull)[1, "estimate"])
+b <- as.numeric(tidy(mnull)[2, "estimate"])
+a
+b
+
+d$weight_g_avg_pred <- exp(a)*d$length_cm^b
+
+plot(d$weight_g ~ d$length_cm)
+plot(d$weight_g_avg_pred ~ d$length_cm)
+plot(d$weight_g_avg_pred ~ d$weight_g); abline(a = 0, b = 1, col = "red")
+
+d$le_cren <- d$weight_g / d$weight_g_avg_pred
+d$log_le_cren <- log(d$le_cren)
+hist(d$le_cren)
+```
+
+```{r spatiotemporal le cren model ar1, cache=TRUE}
+# # Test AR1 random fields... 
+# ptm <- proc.time()
+# mfull_ar1 <- sdmTMB(
+#   formula = log_le_cren ~ -1 + year_f + biomass_her_sc + biomass_her_sd_sc +
+#     biomass_spr_sc + biomass_spr_sd_sc +
+#     density_cod_sc + density_cod_rec_sc + 
+#     density_fle_sc + density_fle_rec_sc + 
+#     density_saduria_sc + density_saduria_rec_sc + 
+#     depth_sc + depth_rec_sc + 
+#     oxy_sc + oxy_rec_sc + 
+#     temp_sc + temp_rec_sc,
+#     data = d,
+#   time = "year",
+#   mesh = spde, 
+#   family = student(link = "identity", df = 5),
+#   spatiotemporal = "AR1",
+#   spatial = "on",
+#   silent = TRUE,
+#   reml = TRUE, # In case we want to use AIC to compare the different random effects structures
+#   # https://stats.stackexchange.com/questions/272633/how-to-decide-whether-to-set-reml-to-true-or-false
+#   control = sdmTMBcontrol(newton_loops = 1)
+#   )
+# proc.time() - ptm
+# 
+# tidy(mfull_ar1, effects = "ran_par", conf.int = TRUE) 
+```
+
+```{r spatial le cren model, cache=TRUE}
+ptm <- proc.time()
+mfull_spatial <- sdmTMB(
+  formula = log_le_cren ~ -1 + year_f + biomass_her_sc + biomass_her_sd_sc +
+    biomass_spr_sc + biomass_spr_sd_sc +
+    density_cod_sc + density_cod_rec_sc + 
+    density_fle_sc + density_fle_rec_sc + 
+    density_saduria_sc + density_saduria_rec_sc + 
+    depth_sc + depth_rec_sc + 
+    oxy_sc + oxy_rec_sc + 
+    temp_sc + temp_rec_sc,
+    data = d,
+  time = "year",
+  mesh = spde, 
+  family = student(link = "identity", df = 5),
+  spatiotemporal = "off",
+  spatial = "on",
+  silent = TRUE,
+  reml = FALSE,
+  control = sdmTMBcontrol(newton_loops = 1)#,
+  # priors = sdmTMBpriors(b = normal(c(rep(NA, 27), rep(0, 16)),
+  #                                  c(rep(NA, 27), rep(1, 16))))
+  )
+system("say Just finished!")
+proc.time() - ptm
+
+sanity(mfull_spatial)
+print(mfull_spatial)
+
+tidy(mfull_spatial, conf.int = TRUE) %>% arrange(desc(abs(estimate)))
+tidy(mfull_spatial, effects = "ran_par", conf.int = TRUE) 
+```
+
+```{r only spatiotemporal le cren model, cache=TRUE}
+ptm <- proc.time()
+mfull_spatiotemporal <- sdmTMB(
+  formula = log_le_cren ~ -1 + year_f + biomass_her_sc + biomass_her_sd_sc +
+    biomass_spr_sc + biomass_spr_sd_sc +
+    density_cod_sc + density_cod_rec_sc + 
+    density_fle_sc + density_fle_rec_sc + 
+    density_saduria_sc + density_saduria_rec_sc + 
+    depth_sc + depth_rec_sc + 
+    oxy_sc + oxy_rec_sc + 
+    temp_sc + temp_rec_sc,
+    data = d,
+  time = "year",
+  mesh = spde, 
+  family = student(link = "identity", df = 5),
+  spatiotemporal = "iid",
+  spatial = "off",
+  silent = TRUE,
+  reml = FALSE,
+  control = sdmTMBcontrol(newton_loops = 1)#,
+  # priors = sdmTMBpriors(b = normal(c(rep(NA, 27), rep(0, 16)),
+  #                                  c(rep(NA, 27), rep(1, 16))))
+  )
+system("say Just finished!")
+proc.time() - ptm
+
+sanity(mfull_spatiotemporal)
+
+tidy(mfull_spatiotemporal, conf.int = TRUE) %>% arrange(desc(abs(estimate)))
+tidy(mfull_spatiotemporal, effects = "ran_par", conf.int = TRUE) 
+```
+
+Now compare how the random effects magnitude differ
+
+```{r}
+mfull <- readRDS("output/mfull.rds")
+
+# Rerun this when condition model is knitted...
+AIC(mfull, mfull_spatial, mfull_spatiotemporal)
+
+nrow(mfull$data)
+
+
+mfull_spatial_est <- bind_rows(tidy(mfull_spatial, effects = "ran_par", conf.int = TRUE) %>%
+                                 filter(term %in% c("sigma_O", "sigma_E")),
+                               
+                               tidy(mfull_spatial, effects = "fixed", conf.int = TRUE)  %>% 
+                                 filter(!grepl('year', term))) %>% 
+  mutate(Model = "Spatial only", term = as.factor(term))
+  
+mfull_spatiotemporal_est <- bind_rows(tidy(mfull_spatiotemporal, effects = "ran_par", conf.int = TRUE) %>%
+                                        filter(term %in% c("sigma_O", "sigma_E")),
+                                      
+                                      tidy(mfull_spatiotemporal, effects = "fixed", conf.int = TRUE)  %>% 
+                                        filter(!grepl('year', term))) %>% 
+  mutate(Model = "Spatiotemporal only (iid)", term = as.factor(term))
+  
+
+# Read in coefficients from the main model
+m_full <- read.csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/output/mfull_est.csv") %>%
+  dplyr::select(-X) %>% 
+  mutate(Model = "Full model", term = as.factor(term))
+
+plot_dat <- bind_rows(mfull_spatial_est, mfull_spatiotemporal_est, m_full) %>% 
+  mutate(group = ifelse(term %in% c("sigma_O", "sigma_E"), "random", "fixed"))
+
+# Plot effects
+ggplot(plot_dat, aes(reorder(term, term2), estimate, color = Model)) +
+  geom_hline(yintercept = 0, linetype = 2, color = "gray40", alpha = 0.5) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2,
+                position = position_dodge(width = 0.4), alpha = 0.6) +
+  geom_point(size = 2.5, position = position_dodge(width = 0.4), alpha = 0.6) +
+  scale_color_brewer(palette = "Dark2") +
+  labs(y = "Estimate", x = "Standardized coefficient") +
+  coord_flip() +
+  guides(color = guide_legend(ncol = 2)) +
+  theme_plot() +
+  theme(plot.margin = unit(c(0.4, 0.4, 0.4, 0.4), "cm"),
+        legend.position = "bottom") 
+```
+
+### Compare breakpoint vs linear oxygen effect in simplified model
+
+```{r breakpoint vs linear oxygen effect simple model, cache=TRUE, fig.show='hide'}
+mnull_oxy_bp <- sdmTMB(
+  formula = log_le_cren ~ -1 + year_f + breakpt(oxy_sc) + oxy_rec_sc,
+  data = d,
+  time = "year",
+  mesh = spde,
+  family = student(link = "identity", df = 5),
+  spatiotemporal = "iid",
+  spatial = "on",
+  silent = TRUE,
+  reml = FALSE,
+  control = sdmTMBcontrol(newton_loops = 1))
+
+mnull_oxy <- sdmTMB(
+  formula = log_le_cren ~ -1 + year_f + oxy_sc + oxy_rec_sc,
+  data = d,
+  time = "year",
+  mesh = spde,
+  family = student(link = "identity", df = 5),
+  spatiotemporal = "iid",
+  spatial = "on",
+  silent = TRUE,
+  reml = FALSE,
+  control = sdmTMBcontrol(newton_loops = 1))
+
+AIC(mnull_oxy_bp, mnull_oxy)
+min(AIC(mnull_oxy_bp), AIC(mnull_oxy))
+
+sanity(mnull_oxy_bp)
+sanity(mnull_oxy)
+
+tidy(mnull_oxy)
+tidy(mnull_oxy_bp)
+
+nd_bp_simple <- data.frame(
+  oxy_sc = seq(min(d$oxy_sc), max(d$oxy_sc), length.out = 100),
+  year = 2019L,
+  year_f = as.factor(2019),
+  oxy_rec_sc = 0
+)
+
+p_bp_simple <- predict(mnull_oxy_bp, newdata = nd_bp_simple,
+                       se_fit = TRUE, re_form = NA, xy_cols = c("X", "Y"))
+
+ggplot(p_bp_simple, aes(oxy_sc, est,
+  ymin = est - 1.96 * est_se,
+  ymax = est + 1.96 * est_se)) +
+  geom_line() + geom_ribbon(alpha = 0.4)
+
+ggplot(d, aes(oxy_sc, oxy)) +
+  geom_point() +
+  geom_hline(yintercept = (0.511*sd(d$oxy)) + mean(d$oxy)) +
+  geom_vline(xintercept = 0.511)
+
+d %>% filter(oxy_sc > 0.51 & oxy_sc < 0.52) %>% summarise(mean_oxy = mean(oxy))
+```

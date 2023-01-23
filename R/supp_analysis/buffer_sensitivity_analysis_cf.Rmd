@@ -1,0 +1,888 @@
+---
+title: "Condition model - buffer zones instead of ICES rectangle and subdivision"
+author: "Max Lindmark"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include = FALSE, cache=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.align ='center'
+)
+```
+
+# Fit condition model with environmental and biological predictors
+Fit main model (see exploratory scripts and model comparison), visualize results.
+
+## Load packages
+
+```{r packages, message=FALSE, warning=TRUE}
+library(tidyverse)
+library(tidylog)
+library(viridis)
+library(marmap)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(sf)
+library(RColorBrewer)
+library(gganimate)
+library(gifski)
+library(latex2exp)
+library(patchwork)
+library(png)
+library(RCurl)
+library(wesanderson)
+library(qwraps2) 
+library(ggcorrplot)
+library(raster)
+library(sdmTMB)
+library(ncdf4)
+library(chron)
+
+# To load entire cache in interactive r session, do: 
+# qwraps2::lazyload_cache_dir(path = "R/supp_analysis/buffer_sensitivity_analysis_cf_cache/html")
+
+theme_plot <- function(base_size = 11, base_family = "") {
+  theme_light(base_size = base_size, base_family = "") +
+    theme(
+      axis.text = element_text(size = 9),
+      legend.text = element_text(size = 9),
+      legend.title = element_text(size = 9),
+      legend.position = "bottom",
+      legend.key.height = unit(0.2, "cm"),
+      legend.margin = margin(0, 0, 0, 0),
+      legend.box.margin = margin(-5, -5, -5, -5),
+      strip.text = element_text(size = 9, colour = 'gray10', margin = margin(b = 1, t = 1)),
+      strip.background = element_rect(fill = "grey95")
+      )
+}
+```
+
+## Read data
+
+```{r read and process data, message=FALSE, warning=FALSE}
+# Read the split files and join them
+d1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cond_(1_2).csv")
+d2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/mdat_cond_(2_2).csv")
+
+d <- bind_rows(d1, d2)
+```
+
+## Replace covariates with buffer sone averages (corresponding to width of rectangle and sub-division)
+I.e., redo the data collating part, and whenever I extract from raster (oxygen, temperature, depth, saduria), do it with a buffer instead. Only ices_rectangle level, since the only variables we have on subdivision level are pelagigs (i.e., not from raster)
+
+```{r}
+pred_grid1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(1_2).csv")
+pred_grid2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(2_2).csv")
+
+pred_grid <- bind_rows(pred_grid1, pred_grid2)
+
+unique(is.na(pred_grid$density_cod))
+unique(is.na(pred_grid$density_cod_rec))
+
+pred_grid <- pred_grid %>% mutate(year = as.integer(year),
+                                  year_f = as.factor(year))
+
+# An ices rect is 55 km wide (30 nautical miles)
+pred_grid %>%
+  filter(ices_rect %in% c("40G7", "40G8")) %>%
+  group_by(ices_rect) %>% 
+  summarise(min_x = min(X)) %>% 
+  pivot_wider(names_from = ices_rect, values_from = min_x) %>% 
+  mutate(diff = `40G8` - `40G7`)
+```
+
+### Depth
+
+```{r aggregated depth}
+# Read the tifs
+west <- raster("data/depth_geo_tif/D5_2018_rgb-1.tif")
+#plot(west)
+
+east <- raster("data/depth_geo_tif/D6_2018_rgb-1.tif")
+# plot(east)
+
+dep_rast <- raster::merge(west, east)
+
+plot(dep_rast)
+
+# Crop the massive depth raster
+b <- as(extent(min(pred_grid$lon),
+               max(pred_grid$lon),
+               min(pred_grid$lat),
+               max(pred_grid$lat)), 'SpatialPolygons')
+
+crs(b) <- crs(dep_rast)
+dep_rast2 <- crop(dep_rast, b)
+
+plot(dep_rast2)
+
+# Fact here is number of cells in each direction. The resolution of the raster is...
+res(dep_rast2)
+
+# ... which is roughly 60 metres. https://www.omnicalculator.com/other/latitude-longitude-distance
+
+# So if I want the aggregation to expand width / 2 in each direction, it should be...
+fact_rec = (55000/2) / 60
+
+dep_rast2_rect_agg <- terra::aggregate(dep_rast, fact = fact_rec, fun = mean)
+
+plot(dep_rast2_rect_agg)
+
+d$depth_agg <- extract(dep_rast2_rect_agg, d %>% dplyr::select(lon, lat), method = "bilinear")
+
+# Convert to depth
+d$depth_agg <- (d$depth_agg - max(d$depth_agg)) * -1
+
+# Compare to the ices_rect value
+ggplot(d, aes(depth_agg, depth_rec)) +
+  geom_point() + 
+  geom_abline(color = "red")
+
+# Replace the depth with the new
+d <- d %>% 
+  dplyr::select(-depth_rec) %>% 
+  rename(depth_rec = depth_agg)
+```
+
+### Saduria
+
+```{r aggregated saduria}
+saduria <- raster("data/saduria_tif/FWBiomassm_raster_19812019presHighweightcor_no0_newZi.tif")
+
+saduria_longlat = projectRaster(saduria, crs = ('+proj=longlat'))
+
+crs(saduria_longlat)
+extent(saduria_longlat)
+
+plot(saduria_longlat)
+
+# Aggregate
+res(saduria_longlat) # coords
+res(saduria) # metres
+
+fact_rec = (55000/2) / 5000
+
+sad2_rect_agg <- terra::aggregate(saduria_longlat, fact = fact_rec, fun = mean)
+
+plot(sad2_rect_agg)
+
+# Now extract the values from the saduria raster to the data
+d$density_saduria_agg <- extract(sad2_rect_agg, d %>% dplyr::select(lon, lat))
+
+ggplot(d, aes(density_saduria_rec, density_saduria_agg)) +
+  geom_point() + 
+  geom_abline(color = "red")
+
+# Replace the depth with the new
+d <- d %>% 
+  dplyr::select(-density_saduria_rec) %>% 
+  rename(density_saduria_rec = density_saduria_agg)
+```
+
+#### Oxygen 
+
+```{r}
+# Loop through each year and extract the oxygen levels
+# Downloaded from here: https://resources.marine.copernicus.eu/?option=com_csw&view=details&product_id=BALTICSEA_REANALYSIS_BIO_003_012
+# Extract raster points: https://gisday.wordpress.com/2014/03/24/extract-raster-values-from-points-using-r/comment-page-1/
+# https://rpubs.com/boyerag/297592
+# https://pjbartlein.github.io/REarthSysSci/netCDF.html#get-a-variable
+# Open the netCDF file
+ncin <- nc_open("data/NEMO_Nordic_SCOBI/dataset-reanalysis-scobi-monthlymeans_1610091357600.nc")
+
+print(ncin)
+
+# Get longitude and latitude
+lon <- ncvar_get(ncin,"longitude")
+nlon <- dim(lon)
+head(lon)
+
+lat <- ncvar_get(ncin,"latitude")
+nlat <- dim(lat)
+head(lat)
+
+# Get time
+time <- ncvar_get(ncin,"time")
+time
+
+tunits <- ncatt_get(ncin,"time","units")
+nt <- dim(time)
+nt
+tunits
+
+# Get oxygen
+dname <- "o2b"
+
+oxy_array <- ncvar_get(ncin,dname)
+dlname <- ncatt_get(ncin,dname,"long_name")
+dunits <- ncatt_get(ncin,dname,"units")
+fillvalue <- ncatt_get(ncin,dname,"_FillValue")
+dim(oxy_array)
+
+# Get global attributes
+title <- ncatt_get(ncin,0,"title")
+institution <- ncatt_get(ncin,0,"institution")
+datasource <- ncatt_get(ncin,0,"source")
+references <- ncatt_get(ncin,0,"references")
+history <- ncatt_get(ncin,0,"history")
+Conventions <- ncatt_get(ncin,0,"Conventions")
+
+# Convert time: split the time units string into fields
+tustr <- strsplit(tunits$value, " ")
+tdstr <- strsplit(unlist(tustr)[3], "-")
+tmonth <- as.integer(unlist(tdstr)[2])
+tday <- as.integer(unlist(tdstr)[3])
+tyear <- as.integer(unlist(tdstr)[1])
+
+# Here I deviate from the guide a little bit. Save this info:
+dates <- chron(time, origin = c(tmonth, tday, tyear))
+
+# Crop the date variable
+months <- as.numeric(substr(dates, 2, 3))
+years <- as.numeric(substr(dates, 8, 9))
+years <- ifelse(years > 90, 1900 + years, 2000 + years)
+
+# Replace netCDF fill values with NA's
+oxy_array[oxy_array == fillvalue$value] <- NA
+
+# We use mainly quarter 4 in this analysis, but in the revision we decided to use also a lagged version. Therefore, we will add quarter 3 as well. So now we want to loop through each time step, and if it is a correct month save it as a raster. First get the index of months that correspond to Q4
+months
+
+index_keep_q3 <- which(months %in% c(7, 8, 9))
+
+# Quarter 3 or 4 by keeping months in index_keep
+oxy_q3 <- oxy_array[, , index_keep_q3]
+
+months_keep_q3 <- months[index_keep_q3]
+
+years_keep_q3 <- years[index_keep_q3]
+
+# We need to now calculate the average within a year.
+# Get a sequence that takes every third value between 1: number of months (length)
+loop_seq_q3 <- seq(1, dim(oxy_q3)[3], by = 3)
+
+# Create objects that will hold data
+dlist_q3 <- list()
+
+oxy_7 <- c()
+oxy_8 <- c()
+oxy_9 <- c()
+oxy_ave_q3 <- c()
+
+# Loop through the vector sequence with every third value, then take the average of
+# three consecutive months(i.e. a quarter)
+for(i in loop_seq_q3) { # We can use q3 as looping index, doesn't matter!
+
+  oxy_7 <- oxy_q3[, , (i)]
+  oxy_8 <- oxy_q3[, , (i + 1)]
+  oxy_9 <- oxy_q3[, , (i + 2)]
+
+  oxy_ave_q3 <- (oxy_7 + oxy_8 + oxy_9) / 3
+
+  list_pos_q3 <- ((i/3) - (1/3)) + 1 # to get index 1:n(years)
+
+  dlist_q3[[list_pos_q3]] <- oxy_ave_q3
+
+}
+
+# Now name the lists with the year:
+names(dlist_q3) <- unique(years_keep_q3)
+
+# Now I need to make a loop where I extract the raster value for each year...
+
+# Data that will extract the raster files
+d_sub_oxy <- d %>% 
+  mutate(id = paste(X, Y, year, sep = "_")) %>% 
+  distinct(id, .keep_all = TRUE)
+
+# Create data holding object
+data_list <- list()
+
+# Create factor year for indexing the list in the loop
+d_sub_oxy$year_f <- as.factor(d_sub_oxy$year)
+
+# Loop through each year and extract raster values for the pred-grid data points
+for(i in unique(d_sub_oxy$year_f)) {
+  
+  # Subset a year
+  oxy_slice_q3 <- dlist_q3[[i]]
+  
+  # Create raster for that year (i) and quarter
+  r_q3 <- raster(t(oxy_slice_q3), xmn = min(lon), xmx = max(lon), ymn = min(lat), ymx = max(lat),
+                 crs = CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs+ towgs84=0,0,0"))
+  # Flip...
+  r_q3 <- flip(r_q3, direction = 'y')
+  
+  plot(r_q3, main = paste(i, " Q3"))
+  
+  # Aggregate
+  res(r_q3) # degrees, roughly 3000 m
+  
+  fact_rec = (55000/2) / 3000
+  
+  r_q3_agg <- terra::aggregate(r_q3, fact = fact_rec, fun = mean)
+  
+  plot(r_q3_agg)
+
+  # Filter the same year (i) in the pred-grid data and select only coordinates
+  d_slice <- d_sub_oxy %>% filter(year_f == i) %>% dplyr::select(lon, lat)
+  
+  # Make into a SpatialPoints object
+  data_sp <- SpatialPoints(d_slice)
+  
+  # Extract raster value (oxygen)
+  rasValue_q3 <- raster::extract(r_q3_agg, data_sp, method = "bilinear")
+  
+  # Add in the raster value in the df holding the coordinates for the pred-grid data
+  # Q4 is our main value, but we also want q3 average
+  d_slice$oxy_q3 <- rasValue_q3
+  
+  # Add in which year
+  d_slice$year <- i
+  
+  # Create a index for the data last where we store all years (because our loop index
+  # i is not continuous, we can't use it directly)
+  index <- as.numeric(as.character(d_slice$year))[1] - 1992
+  
+  # Add each years' data in the list
+  data_list[[index]] <- d_slice
+  
+}
+
+# Now create a data frame from the list of all annual values
+d_oxy <- dplyr::bind_rows(data_list)
+
+# Add in oxygen to the main prediction grid
+d_oxy <- d_oxy %>%
+  mutate(id = paste(lon, lat, year, sep = "_")) %>% 
+  dplyr::select(oxy_q3, id)
+
+d <- d %>% mutate(id = paste(lon, lat, year, sep = "_"))
+
+d <- d %>% left_join(d_oxy, by = "id")
+
+# Now the unit of oxygen is mmol/m3. I want it to be ml/L. The original model is in unit ml/L
+# and it's been converted by the data host. Since it was converted without accounting for
+# pressure or temperature, I can simply use the following conversion factor:
+# From Ye: 1 ml/l = 10^3/22.391 = 44.661 μmol/l (same as mmol/m^3)
+# Hence, 0.0223909 ml/l = 1 μmol/l (mmol/m^3)
+
+d$oxy_q3 <- d$oxy_q3 * 0.0223909
+
+# Compare with ices_rect
+ggplot(d, aes(oxy_q3, oxy_rec)) + 
+  geom_point(alpha = 0.2) + 
+  geom_abline(color = "red")
+
+# Rename
+d <- d %>%
+  dplyr::select(-oxy_rec) %>%
+  rename(oxy_rec = oxy_q3)
+```
+
+### Temperature
+
+```{r temperature}
+# Temperature
+# Open the netCDF file
+ncin <- nc_open("data/NEMO_Nordic_SCOBI/dataset-reanalysis-nemo-monthlymeans_1608127623694.nc")
+
+print(ncin)
+
+# Get longitude and latitude
+lon <- ncvar_get(ncin,"longitude")
+nlon <- dim(lon)
+head(lon)
+
+lat <- ncvar_get(ncin,"latitude")
+nlat <- dim(lat)
+head(lat)
+
+# Get time
+time <- ncvar_get(ncin,"time")
+time
+
+tunits <- ncatt_get(ncin,"time","units")
+nt <- dim(time)
+nt
+tunits
+
+# Get temperature
+dname <- "bottomT"
+
+temp_array <- ncvar_get(ncin,dname)
+dlname <- ncatt_get(ncin,dname,"long_name")
+dunits <- ncatt_get(ncin,dname,"units")
+fillvalue <- ncatt_get(ncin,dname,"_FillValue")
+dim(temp_array)
+
+# Get global attributes
+title <- ncatt_get(ncin,0,"title")
+institution <- ncatt_get(ncin,0,"institution")
+datasource <- ncatt_get(ncin,0,"source")
+references <- ncatt_get(ncin,0,"references")
+history <- ncatt_get(ncin,0,"history")
+Conventions <- ncatt_get(ncin,0,"Conventions")
+
+# Convert time: split the time units string into fields
+tustr <- strsplit(tunits$value, " ")
+tdstr <- strsplit(unlist(tustr)[3], "-")
+tmonth <- as.integer(unlist(tdstr)[2])
+tday <- as.integer(unlist(tdstr)[3])
+tyear <- as.integer(unlist(tdstr)[1])
+
+# Here I deviate from the guide a little bit. Save this info:
+dates <- chron(time, origin = c(tmonth, tday, tyear))
+
+# Crop the date variable
+months <- as.numeric(substr(dates, 2, 3))
+years <- as.numeric(substr(dates, 8, 9))
+years <- ifelse(years > 90, 1900 + years, 2000 + years)
+
+# Replace netCDF fill values with NA's
+temp_array[temp_array == fillvalue$value] <- NA
+
+# We use mainly quarter 4 in this analysis, but in the revision we decided to use also a lagged version. Therefore, we will add quarter 3 as well. So now we want to loop through each time step, and if it is a correct month save it as a raster. First get the index of months that correspond to Q4
+
+months
+
+index_keep_q3 <- which(months %in% c(7, 8, 9))
+
+temp_q3 <- temp_array[, , index_keep_q3]
+
+months_keep_q3 <- months[index_keep_q3]
+
+years_keep_q3 <- years[index_keep_q3]
+
+# Now we have an array with Q3 & Q4 data...
+# We need to now calculate the average within a year.
+# Get a sequence that takes every third value between 1: number of months (length)
+loop_seq_q3 <- seq(1, dim(temp_q3)[3], by = 3)
+
+# Create objects that will hold data
+dlist <- list()
+
+temp_7 <- c()
+temp_8 <- c()
+temp_9 <- c()
+temp_ave_q3 <- c()
+
+# Loop through the vector sequence with every third value, then take the average of
+# three consecutive months (i.e. a quarter)
+for(i in loop_seq_q3) { # We can use q3 as looping index, doesn't matter!
+
+  temp_7 <- temp_q3[, , (i)]
+  temp_8 <- temp_q3[, , (i + 1)]
+  temp_9 <- temp_q3[, , (i + 2)]
+  
+  temp_ave_q3 <- (temp_7 + temp_8 + temp_9) / 3
+  
+  list_pos_q3 <- ((i/3) - (1/3)) + 1 # to get index 1:n(years)
+  
+  dlist_q3[[list_pos_q3]] <- temp_ave_q3
+  
+}
+
+# Now name the lists with the year:
+names(dlist_q3) <- unique(years_keep_q3)
+
+# Now I need to make a loop where I extract the raster value for each year...
+
+# Data that will extract the raster files
+d_sub_temp <- d %>% 
+  mutate(id = paste(X, Y, year, sep = "_")) %>% 
+  distinct(id, .keep_all = TRUE)
+
+# Create data holding object
+data_list <- list()
+
+# Create factor year for indexing the list in the loop
+d_sub_temp$year_f <- as.factor(d_sub_temp$year)
+
+# Loop through each year and extract raster values for the pred-grid data points
+for(i in unique(d_sub_temp$year_f)) {
+  
+  # Subset a year
+  temp_slice_q3 <- dlist_q3[[i]]
+  
+  # Create raster for that year (i)
+  r_q3 <- raster(t(temp_slice_q3), xmn = min(lon), xmx = max(lon), ymn = min(lat), ymx = max(lat),
+                 crs = CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs+ towgs84=0,0,0"))
+  
+  # Flip...
+  r_q3 <- flip(r_q3, direction = 'y')
+  
+  plot(r_q3, main = paste(i, " Q3"))
+  
+  # Aggregate
+  res(r_q3) # degrees, roughly 3000 m
+  
+  fact_rec = (55000/2) / 3000
+  
+  r_q3_agg <- terra::aggregate(r_q3, fact = fact_rec, fun = mean)
+  
+  plot(r_q3_agg)
+  
+  # Filter the same year (i) in the pred-grid data and select only coordinates
+  d_slice <- d_sub_temp %>% filter(year_f == i) %>% dplyr::select(lon, lat)
+  
+  # Make into a SpatialPoints object
+  data_sp <- SpatialPoints(d_slice)
+  
+  # Extract raster value (temperature)
+  rasValue_q3 <- raster::extract(r_q3_agg, data_sp, method = "bilinear")
+  
+  # Add in the raster value in the df holding the coordinates for the pred-grid data
+  d_slice$temp_q3 <- rasValue_q3
+  
+  # Add in which year
+  d_slice$year <- i
+  
+  # Create a index for the data last where we store all years (because our loop index
+  # i is not continuous, we can't use it directly)
+  index <- as.numeric(as.character(d_slice$year))[1] - 1992
+  
+  # Add each years' data in the list
+  data_list[[index]] <- d_slice
+  
+}
+
+# Now create a data frame from the list of all annual values
+d_temp <- dplyr::bind_rows(data_list)
+
+# Add in temperature to the main prediction grid
+d_temp <- d_temp %>%
+  mutate(id = paste(lon, lat, year, sep = "_")) %>% 
+  dplyr::select(temp_q3, id)
+
+d <- d %>% mutate(id = paste(lon, lat, year, sep = "_"))
+
+d <- left_join(d, d_temp, by = "id")
+
+# Compare with ices_rect
+ggplot(d, aes(temp_q3, temp_rec)) + 
+  geom_point(alpha = 0.2) + 
+  geom_abline(color = "red")
+
+# Rename
+d <- d %>%
+  dplyr::select(-temp_rec) %>%
+  rename(temp_rec = temp_q3)
+```
+
+## Scale variables
+
+```{r}
+# Calculate standardized variables
+d <- d %>% 
+  mutate(ln_length_cm = log(length_cm),
+         ln_weight_g = log(weight_g),
+         year_ct = year - mean(year),
+         biomass_her_sc = biomass_her,
+         biomass_her_sd_sc = biomass_her_sd,
+         biomass_spr_sc = biomass_spr,
+         biomass_spr_sd_sc = biomass_spr_sd,
+         density_cod_sc = density_cod,
+         density_cod_rec_sc = density_cod_rec,
+         density_fle_sc = density_fle,
+         density_fle_rec_sc = density_fle_rec,
+         density_saduria_sc = density_saduria,
+         density_saduria_rec_sc = density_saduria_rec,
+         depth_sc = depth,
+         depth_rec_sc = depth_rec,
+         oxy_sc = oxy,
+         oxy_rec_sc = oxy_rec,
+         temp_sc = temp,
+         temp_rec_sc = temp_rec)  %>%
+  mutate_at(c("biomass_her_sc", "biomass_her_sd_sc", "biomass_spr_sc", "biomass_spr_sd_sc",
+              "density_cod_sc", "density_cod_rec_sc", 
+              "density_fle_sc", "density_fle_rec_sc", 
+              "density_saduria_sc", "density_saduria_rec_sc", 
+              "depth_sc", "depth_rec_sc",
+              "oxy_sc", "oxy_rec_sc",
+              "temp_sc", "temp_rec_sc"
+              ),
+            ~(scale(.) %>% as.vector)) %>% 
+  mutate(year = as.integer(year),
+         year_f = as.factor(year))
+```
+
+## Calcualte Le Cren index
+
+```{r calculate Le Cren}
+# Coefficients from condition_model_cf
+a <- -4.638063
+b <- 2.983866
+d$weight_g_avg_pred <- exp(a)*d$length_cm^b
+
+d$le_cren <- d$weight_g / d$weight_g_avg_pred
+
+d$log_le_cren <- log(d$le_cren)
+hist(d$log_le_cren)
+```
+
+## Fit models
+
+```{r}
+spde <- make_mesh(d, xy_cols = c("X", "Y"),
+                  n_knots = 100, type = "kmeans", seed = 42)
+```
+
+```{r fit buffer full, cache=TRUE}
+# Aggregated ices rect raster based covariates
+# ptm <- proc.time()
+# m_buff <- sdmTMB(
+#   formula = log_le_cren ~ -1 + year_f + biomass_her_sc + biomass_her_sd_sc +
+#     biomass_spr_sc + biomass_spr_sd_sc +
+#     density_cod_sc + density_cod_rec_sc +
+#     density_fle_sc + density_fle_rec_sc +
+#     density_saduria_sc + density_saduria_rec_sc +
+#     depth_sc + depth_rec_sc +
+#     oxy_sc + oxy_rec_sc +
+#     temp_sc + temp_rec_sc, 
+#   data = d, 
+#   time = "year",
+#   mesh = spde, 
+#   family = student(link = "identity", df = 5),
+#   spatiotemporal = "iid",
+#   #spatiotemporal = "off",
+#   spatial = "on",
+#   silent = TRUE,
+#   reml = FALSE,
+#   control = sdmTMBcontrol(newton_loops = 1)
+#   )
+# proc.time() - ptm
+# system("say Just finished!")
+# 
+# sanity(m_buff)
+# tidy(m_buff, conf.int = TRUE)
+```
+
+```{r fit buffer spatial, cache=TRUE}
+# Aggregated ices rect raster based covariates
+# ptm <- proc.time()
+# m_buff_spatial <- sdmTMB(
+#   formula = log_le_cren ~ -1 + year_f + biomass_her_sc + biomass_her_sd_sc +
+#     biomass_spr_sc + biomass_spr_sd_sc +
+#     density_cod_sc + density_cod_rec_sc +
+#     density_fle_sc + density_fle_rec_sc +
+#     density_saduria_sc + density_saduria_rec_sc +
+#     depth_sc + depth_rec_sc +
+#     oxy_sc + oxy_rec_sc +
+#     temp_sc + temp_rec_sc, 
+#   data = d, 
+#   time = "year",
+#   mesh = spde, 
+#   family = student(link = "identity", df = 5),
+#   #spatiotemporal = "iid",
+#   spatiotemporal = "off",
+#   spatial = "on",
+#   silent = TRUE,
+#   reml = FALSE,
+#   control = sdmTMBcontrol(newton_loops = 1)
+#   )
+# proc.time() - ptm
+# system("say Just finished!")
+# 
+# sanity(m_buff_spatial)
+# tidy(m_buff_spatial, conf.int = TRUE)
+```
+
+```{r fit buffer spatiotemporal, cache=TRUE}
+# Aggregated ices rect raster based covariates
+ptm <- proc.time()
+m_buff_spatiotemporal <- sdmTMB(
+  formula = log_le_cren ~ -1 + year_f + biomass_her_sc + biomass_her_sd_sc +
+    biomass_spr_sc + biomass_spr_sd_sc +
+    density_cod_sc + density_cod_rec_sc +
+    density_fle_sc + density_fle_rec_sc +
+    density_saduria_sc + density_saduria_rec_sc +
+    depth_sc + depth_rec_sc +
+    oxy_sc + oxy_rec_sc +
+    temp_sc + temp_rec_sc, 
+  data = d, 
+  time = "year",
+  mesh = spde, 
+  family = student(link = "identity", df = 5),
+  spatiotemporal = "iid",
+  #spatiotemporal = "off",
+  spatial = "off",
+  silent = TRUE,
+  reml = FALSE,
+  control = sdmTMBcontrol(newton_loops = 1)
+  )
+proc.time() - ptm
+system("say Just finished!")
+
+sanity(m_buff_spatiotemporal)
+tidy(m_buff_spatiotemporal, conf.int = TRUE)
+tidy(m_buff_spatiotemporal, effects = "ran_pars", conf.int = TRUE)
+```
+
+## Compare coefficients
+
+In the main model, the magnitude of spatial and spatiotemporal variation is always larger than standardized coefficients. Here, with the aggregated data and model, I find that spatiotemporal variation is estimated to have a very small magnitude. I think this could be because the spatial field having a massive s.e. (not really converging). Hence I will use a model with only spatiotemporal field when fitting, so that I compare the same things. This model has the same familiar pattern from the main model, that spatiotemporal stdev is massive. That said, when I fit the aggregated model with only a spatial random effect, the model converges AND the stdev is small, comparable to effects. However, I don't know if I should trust this, because the spatiotemporal stdev is larger (so I don't think we can just omit it), it has much higher AIC (the spatial model only), and I also don't see the same patter in the main model.
+
+```{r extract coefficients, message=FALSE}
+# AIC(m_buff, m_buff_spatiotemporal, m_buff_spatial)
+#  
+# # nrow(m_buff$data)
+# # nrow(mfull_fit$data)
+# 
+# # Extract random and fixed coefficients from the adult model
+# m_buff_est <- bind_rows(tidy(m_buff, effects = "ran_par", conf.int = TRUE) %>%
+#                          filter(term %in% c("sigma_O", "sigma_E")),
+#                        
+#                        tidy(m_buff, effects = "fixed", conf.int = TRUE)  %>% 
+#                          filter(!grepl('year', term))) %>%
+#   mutate(Model = "Aggregated (full)")
+# 
+# m_buff_est_st <- bind_rows(tidy(m_buff_spatiotemporal, effects = "ran_par", conf.int = TRUE) %>%
+#                              filter(term %in% c("sigma_O", "sigma_E")),
+#                            
+#                            tidy(m_buff_spatiotemporal, effects = "fixed", conf.int = TRUE)  %>% 
+#                              filter(!grepl('year', term))) %>%
+#   mutate(Model = "Aggregated (spatiotemporal only")
+# 
+# m_buff_est_sp <- bind_rows(tidy(m_buff_spatial, effects = "ran_par", conf.int = TRUE) %>%
+#                              filter(term %in% c("sigma_O", "sigma_E")),
+#                            
+#                            tidy(m_buff_spatial, effects = "fixed", conf.int = TRUE)  %>% 
+#                              filter(!grepl('year', term))) %>%
+#   mutate(Model = "Aggregated (spatial only")
+# 
+# # Read in coefficients from the main model
+# m_full <- read.csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/output/mfull_est.csv") %>%
+#   dplyr::select(-X) %>% 
+#   mutate(Model = "ICES rectangle median\ (main model)", term = as.factor(term))
+# 
+# plot_dat <- bind_rows(m_buff_est, m_buff_est_st, m_buff_est_sp, m_full)
+# 
+# # Add group for large scale aggregated variables
+# plot_dat <- plot_dat %>% 
+#   mutate(group = ifelse(term %in% c("oxy_rec_sc", "depth_rec_sc", "temp_rec_sc", "density_saduria_rec_sc"),
+#                         "medium_scale", "local or subdivision"))
+# 
+# # Plot effects
+# ggplot(plot_dat, aes(reorder(term, term2), estimate, color = Model)) + #, alpha = group, size = group)) +
+#   geom_hline(yintercept = 0, linetype = 2, color = "gray40", alpha = 0.5) +
+#   geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2,
+#                 position = position_dodge(width = 0.5), size = 1, alpha = 0.6) +
+#   geom_point(position = position_dodge(width = 0.5), alpha = 0.6) +
+#   scale_color_brewer(palette = "Dark2") +
+#   scale_alpha_manual(values = c(0.3, 0.8)) +
+#   scale_size_manual(values = c(2, 2.5)) +
+#   labs(y = "Estimate", x = "Standardized coefficient") +
+#   # scale_x_discrete(breaks = levels(plot_dat$term),
+#   #                  labels = c(expression(Herring[rec]),
+#   #                             expression(Herring[sub]),
+#   #                             expression(Sprat[rec]),
+#   #                             expression(Sprat[sub]),
+#   #                             expression(Cod[rec]),
+#   #                             expression(Cod[haul]),
+#   #                             expression(Flounder[rec]),
+#   #                             expression(Flounder[haul]),
+#   #                             expression(Saduria~entomon[rec]),
+#   #                             expression(Saduria~entomon[haul]),
+#   #                             expression(Depth[rec]),
+#   #                             expression(Depth[haul]),
+#   #                             expression(Oxygen[rec]),
+#   #                             expression(Oxygen[haul]),
+#   #                             expression(sigma[E]),
+#   #                             expression(sigma[O]),
+#   #                             expression(Temp[rec]),
+#   #                             expression(Temp[haul])
+#   #                             )) +
+#   coord_flip() +
+#   ylim(-0.05, 0.08) +
+#   guides(color = guide_legend(ncol = 2), alpha = "none") +
+#   theme_plot() +
+#   theme(plot.margin = unit(c(0.4, 0.4, 0.4, 0), "cm"),
+#         legend.position = "bottom") +
+#   NULL
+```
+
+## Now do main plot (for revision), comparing all effects using a spatiotemporal model only
+
+```{r}
+# Extract random and fixed coefficients from the adult model
+m_buff_est_st <- bind_rows(tidy(m_buff_spatiotemporal, effects = "ran_par", conf.int = TRUE) %>%
+                             filter(term %in% c("sigma_O", "sigma_E")),
+                           
+                           tidy(m_buff_spatiotemporal, effects = "fixed", conf.int = TRUE)  %>% 
+                             filter(!grepl('year', term))) %>%
+  mutate(Model = "Aggregated")
+
+# Read in coefficients from the main model
+m_full_st <- read.csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/output/mfull_est_st.csv") %>%
+  dplyr::select(-X) %>% 
+  mutate(Model = "ICES rectangle median\ (main model)")
+
+plot_dat <- bind_rows(m_buff_est_st, m_full_st)
+
+# Add group for large scale aggregated variables
+plot_dat <- plot_dat %>% 
+  mutate(group = ifelse(term %in% c("oxy_rec_sc", "depth_rec_sc", "temp_rec_sc", "density_saduria_rec_sc"),
+                        "Medium scale", "Local or subdivision")) %>% 
+  mutate(term = as.factor(term))
+
+# Plot effects
+# Sort the terms so that random effects are at the top...
+plot_dat <- plot_dat %>% 
+  mutate(term2 = ifelse(term == "sigma_E", 2, 1))
+
+ggplot(plot_dat, aes(reorder(term, term2), estimate, color = Model, alpha = group, size = group)) +
+  geom_hline(yintercept = 0, linetype = 2, color = "gray40", alpha = 0.5) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0,
+                position = position_dodge(width = 0.5), size = 1) +
+  geom_point(position = position_dodge(width = 0.5)) +
+  scale_color_brewer(palette = "Dark2") +
+  scale_alpha_manual(values = c(0.3, 0.8)) +
+  scale_size_manual(values = c(2, 2.5), name = "") +
+  labs(y = "Estimate", x = "Standardized coefficient") +
+  scale_x_discrete(breaks = levels(plot_dat$term),
+                   labels = c(expression(Herring[rec]),
+                              expression(Herring[sub]),
+                              expression(Sprat[rec]),
+                              expression(Sprat[sub]),
+                              expression(Cod[rec]),
+                              expression(Cod[haul]),
+                              expression(Flounder[rec]),
+                              expression(Flounder[haul]),
+                              expression(Saduria~entomon[rec]),
+                              expression(Saduria~entomon[haul]),
+                              expression(Depth[rec]),
+                              expression(Depth[haul]),
+                              expression(Oxygen[rec]),
+                              expression(Oxygen[haul]),
+                              expression(sigma[E]),
+                              expression(Temp[rec]),
+                              expression(Temp[haul])
+                              )) +
+  coord_flip() +
+  guides(color = guide_legend(ncol = 1),
+         size = guide_legend(ncol = 1),
+         alpha = "none") +
+  theme_plot() +
+  theme(plot.margin = unit(c(0.4, 0.4, 0.4, 0), "cm"),
+        legend.position = "bottom") +
+  NULL
+
+ggsave("figures/supp/condition/sensitivity_scale_coefficients.png", width = 6.5, height = 6.5, dpi = 600)
+
+# Just a test to see the labels were alright
+effect_sizes <- ggplot(plot_dat, aes(reorder(term, estimate), estimate)) +
+  geom_hline(yintercept = 0, linetype = 2, color = "red", alpha = 0.5) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +
+  labs(x = "", y = "Standardized coefficient") +
+  coord_flip()
+```

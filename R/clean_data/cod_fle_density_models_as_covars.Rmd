@@ -14,8 +14,6 @@ editor_options:
 knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>",
-  fig.width = 12,
-  fig.asp = 0.618,
   fig.align ='center'
 )
 ```
@@ -26,9 +24,7 @@ In this script, I fit simplified models to density data so that I can predict de
 ## Load libraries
 
 ```{r, message=FALSE}
-rm(list = ls())
-
-library(tidyverse); theme_set(theme_light(base_size = 12))
+library(tidyverse)
 library(readxl)
 library(tidylog)
 library(RCurl)
@@ -53,6 +49,22 @@ library(mapplots)
 library(geosphere)
 #remotes::install_github("pbs-assess/sdmTMB")
 library(sdmTMB)
+
+theme_plot <- function(base_size = 11, base_family = "") {
+  theme_light(base_size = base_size, base_family = "") +
+    theme(
+      axis.text = element_text(size = 9),
+      legend.text = element_text(size = 9),
+      legend.title = element_text(size = 9),
+      legend.position = "bottom",
+      legend.key.height = unit(0.2, "cm"),
+      legend.margin = margin(0, 0, 0, 0),
+      legend.box.margin = margin(-5, -5, -5, -5),
+      strip.text = element_text(size = 9, colour = 'gray10', margin = margin(b = 1, t = 1)),
+      strip.background = element_rect(fill = "grey95")
+      )
+}
+
 # To load entire cache in interactive r session, do:
 # qwraps2::lazyload_cache_dir(path = "R/clean_data/cod_fle_density_models_as_covars_cache/html")
 ```
@@ -71,6 +83,7 @@ map_data <- rnaturalearth::ne_countries(
 
 # Crop the polygon for plotting and efficiency:
 # st_bbox(map_data) # find the rough coordinates
+sf::sf_use_s2(FALSE)
 swe_coast <- suppressWarnings(suppressMessages(
   st_crop(map_data,
           c(xmin = xmin, ymin = ymin, xmax = xmax, ymax = ymax))))
@@ -119,24 +132,6 @@ d %>%
 nrow(d)
 
 summary(d$density_fle)
-```
-
-## Load prediction grid
-
-```{r pred grid}
-pred_grid1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(1_2).csv")
-pred_grid <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(2_2).csv")
-
-pred_grid <- bind_rows(pred_grid1, pred_grid)
-
-# Standardize depth with respect to data
-pred_grid <- pred_grid %>%
-  mutate(year = as.integer(year)) %>% 
-  filter(year %in% c(unique(d$year))) %>% 
-  mutate(depth_sc = (depth - mean(d$depth))/sd(d$depth),
-         temp_sc = (temp - mean(d$temp))/sd(d$temp),
-         oxy_sc = (oxy - mean(d$oxy))/sd(d$oxy)) %>% # Need to scale these to the mean and sd in the data!
-  drop_na(oxy, depth, temp)
 ```
 
 ## Make mesh
@@ -225,7 +220,84 @@ saveRDS(mfle_1, "output/mfle.rds")
 
 ## Now that the models have been fit, I can create the `pred_gid` (make_pred_grid_utm.R)
 
-## [Extra for bentfish - calculate biomass index per subdivision]
+```{r}
+knitr::knit_exit()
+```
+
+## [Extra for bentfish - calculate biomass index per subdivision]: Requires making the pred grid first
+
+## Load prediction grid
+
+```{r pred grid}
+pred_grid1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod-condition/master/data/for_analysis/pred_grid_(1_2).csv")
+pred_grid <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod-condition/master/data/for_analysis/pred_grid_(2_2).csv")
+
+pred_grid <- bind_rows(pred_grid1, pred_grid)
+
+# Standardize depth with respect to data
+pred_grid <- pred_grid %>%
+  mutate(year = as.integer(year)) %>% 
+  filter(year %in% c(unique(d$year))) %>% 
+  mutate(depth_sc = (depth - mean(d$depth))/sd(d$depth),
+         temp_sc = (temp - mean(d$temp))/sd(d$temp),
+         oxy_sc = (oxy - mean(d$oxy))/sd(d$oxy)) %>% # Need to scale these to the mean and sd in the data!
+  drop_na(oxy, depth, temp)
+```
+
+```{r calculate total indexes, cachce=TRUE}
+preds_cod_sim <- predict(mcod_1, newdata = pred_grid, nsim = 100)
+ 
+preds_fle_sim <- predict(mfle_1, newdata = pred_grid, nsim = 100)
+
+index_fle_sim <- get_index_sims(preds_fle_sim,
+                                area = rep(4*4, nrow(preds_fle_sim)))
+
+index_fle_sims <- get_index_sims(preds_fle_sim,
+                                 area = rep(4*4, nrow(preds_fle_sim)),
+                                 return_sims = TRUE)
+
+index_cod_sim <- get_index_sims(preds_cod_sim,
+                                area = rep(4*4, nrow(preds_cod_sim)))
+
+index_cod_sims <- get_index_sims(preds_cod_sim,
+                                 area = rep(4*4, nrow(preds_cod_sim)),
+                                 return_sims = TRUE)
+
+sim <- bind_rows(index_fle_sim %>% mutate(Species = "Flounder"),
+                 index_cod_sim %>% mutate(Species = "Cod"))
+
+sims <- bind_rows(index_fle_sims %>% mutate(Species = "Flounder"),
+                  index_cod_sims %>% mutate(Species = "Cod"))
+
+# Plot
+sims %>% 
+  filter(.iteration < 26) %>% 
+  ggplot() +
+  facet_wrap(~Species, ncol = 1, scales = "free") +
+  #facet_wrap(~Species, ncol = 3, scales = "free") +
+  geom_ribbon(data = sim, aes(year, est, ymin = lwr, ymax = upr, color = Species, fill = Species), alpha = 0.2, color = NA) +
+  geom_line(aes(year, .value, group = .iteration, color = Species), alpha = 0.2) +
+  geom_line(data = sim, aes(year, est, color = Species), size = 0.5) +
+  scale_color_brewer(palette = "Set1") +
+  scale_fill_brewer(palette = "Set1") +
+  theme_minimal(base_size = 18) +
+  guides(color = "none",
+         fill = "none") +
+  xlab('Year') +
+  ylab('Biomass [kg]') +
+  NULL
+
+ggsave("figures/supp/density/cod_fle_index.png", width = 6.5, height = 8.5, dpi = 600)
+
+data.frame(Cod = filter(sim, Species == "Cod")$est,
+                 Flounder = filter(sim, Species == "Flounder")$est) %>% 
+  ggplot(aes(Cod, Flounder)) + 
+  geom_point(size = 3, alpha = 0.8) + 
+  theme_minimal(base_size = 18) +
+  theme(aspect.ratio = 1)
+
+ggsave("figures/supp/density/cod_fle_index_corr.png", width = 6.5, height = 6.5, dpi = 600)
+```
 
 ```{r calculate indexes, cachce=TRUE}
 ### Cod
@@ -245,11 +317,11 @@ preds_cod27_sim <- predict(mcod_1, newdata = filter(pred_grid, sub_div == 27), n
 preds_cod28_sim <- predict(mcod_1, newdata = filter(pred_grid, sub_div == 28), nsim = 100)
 
 # Now calculate the CPUE index (average)
-index24_cod_sim <- get_index_sims(preds_cod24_sim, area = rep(2*2, nrow(preds_cod24_sim)))
-index25_cod_sim <- get_index_sims(preds_cod25_sim, area = rep(2*2, nrow(preds_cod25_sim)))
-index26_cod_sim <- get_index_sims(preds_cod26_sim, area = rep(2*2, nrow(preds_cod26_sim)))
-index27_cod_sim <- get_index_sims(preds_cod27_sim, area = rep(2*2, nrow(preds_cod27_sim)))
-index28_cod_sim <- get_index_sims(preds_cod28_sim, area = rep(2*2, nrow(preds_cod28_sim)))
+index24_cod_sim <- get_index_sims(preds_cod24_sim, area = rep(4*4, nrow(preds_cod24_sim)))
+index25_cod_sim <- get_index_sims(preds_cod25_sim, area = rep(4*4, nrow(preds_cod25_sim)))
+index26_cod_sim <- get_index_sims(preds_cod26_sim, area = rep(4*4, nrow(preds_cod26_sim)))
+index27_cod_sim <- get_index_sims(preds_cod27_sim, area = rep(4*4, nrow(preds_cod27_sim)))
+index28_cod_sim <- get_index_sims(preds_cod28_sim, area = rep(4*4, nrow(preds_cod28_sim)))
 
 # Add some columns
 index24_cod_sim <- index24_cod_sim %>% mutate(sub_div = "24", species = "cod")
@@ -276,11 +348,11 @@ preds_fle27_sim <- predict(mfle_1, newdata = filter(pred_grid, sub_div == 27), n
 preds_fle28_sim <- predict(mfle_1, newdata = filter(pred_grid, sub_div == 28), nsim = 100)
 
 # Now calculate the CPUE index (average)
-index24_fle_sim <- get_index_sims(preds_fle24_sim, area = rep(2*2, nrow(preds_fle24_sim)))
-index25_fle_sim <- get_index_sims(preds_fle25_sim, area = rep(2*2, nrow(preds_fle25_sim)))
-index26_fle_sim <- get_index_sims(preds_fle26_sim, area = rep(2*2, nrow(preds_fle26_sim)))
-index27_fle_sim <- get_index_sims(preds_fle27_sim, area = rep(2*2, nrow(preds_fle27_sim)))
-index28_fle_sim <- get_index_sims(preds_fle28_sim, area = rep(2*2, nrow(preds_fle28_sim)))
+index24_fle_sim <- get_index_sims(preds_fle24_sim, area = rep(4*4, nrow(preds_fle24_sim)))
+index25_fle_sim <- get_index_sims(preds_fle25_sim, area = rep(4*4, nrow(preds_fle25_sim)))
+index26_fle_sim <- get_index_sims(preds_fle26_sim, area = rep(4*4, nrow(preds_fle26_sim)))
+index27_fle_sim <- get_index_sims(preds_fle27_sim, area = rep(4*4, nrow(preds_fle27_sim)))
+index28_fle_sim <- get_index_sims(preds_fle28_sim, area = rep(4*4, nrow(preds_fle28_sim)))
 
 # Add some columns
 index24_fle_sim <- index24_fle_sim %>% mutate(sub_div = "24", species = "fle")
@@ -349,10 +421,6 @@ ggplot(div_index_sim, aes(year, est_t, color = species)) +
 write.csv(div_index_sim, "output/cod_fle_index.csv")
 ```
 
-```{r}
-knitr::knit_exit()
-```
-
 #### I want to explore the flounder model a little bit more before I trust it, because in contrast to cod, I haven't done so yet
 
 ```{r, cache=TRUE}
@@ -372,7 +440,7 @@ pred_grid2 <- pred_grid2 %>%
   drop_na(oxy, depth, temp)
 
 # Predict on the pred grid, calculate index
-preds_fle <- predict(mfle, newdata = pred_grid2, return_tmb_object = TRUE, area = 2*2)
+preds_fle <- predict(mfle, newdata = pred_grid2, return_tmb_object = TRUE, area = 4*4)
 index <- get_index(preds_fle, bias_correct = FALSE)
 index <- index %>% mutate(est_t = est/1000, lwr_t = lwr/1000, upr_t = upr/1000)
 

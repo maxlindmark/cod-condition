@@ -1,0 +1,1120 @@
+---
+title: "Cod density in relation to environmental variables"
+author: "Max Lindmark, Sean C. Andersson, Mayya Gogina and Michele Casini"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: paged
+    code_folding: hide
+pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+  
+```{r setup, include = FALSE, cache=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  # fig.width = 12,
+  # fig.asp = 0.618,
+  fig.align ='center'
+)
+```
+
+# Intro
+Fit density (also referred to as CPUE) model with environmental predictors and use that to calculate weighted mean dissolved oxygen, temperature and depth of Baltic cod
+
+```{r lib, message=FALSE}
+# Load libraries, install if needed
+library(tidyverse)
+library(readxl)
+library(tidylog)
+library(RCurl)
+library(viridis)
+library(RColorBrewer)
+library(patchwork)
+library(janitor)
+library(icesDatras)
+library(mapdata)
+library(patchwork)
+library(rgdal)
+library(raster)
+library(sf)
+library(rgeos)
+library(chron)
+library(lattice)
+library(ncdf4)
+library(marmap)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(mapplots)
+library(qwraps2) 
+library(wesanderson)
+#remotes::install_github("pbs-assess/sdmTMB")
+library(sdmTMB)
+
+# To load entire cache in interactive r session, do: 
+# qwraps2::lazyload_cache_dir(path = "R/analysis/density_model_cache/html")
+```
+
+## For maps
+
+```{r read coastline data, message=FALSE, warning=FALSE}
+# Specify map ranges
+ymin = 52; ymax = 60; xmin = 10; xmax = 24
+
+map_data <- rnaturalearth::ne_countries(
+  scale = "medium",
+  returnclass = "sf", continent = "europe")
+
+# Crop the polygon for plotting and efficiency:
+# st_bbox(map_data) # find the rough coordinates
+sf::sf_use_s2(FALSE)
+# https://stackoverflow.com/questions/68478179/how-to-resolve-spherical-geometry-failures-when-joining-spatial-data
+
+swe_coast <- suppressWarnings(suppressMessages(
+  st_crop(map_data,
+          c(xmin = xmin, ymin = ymin, xmax = xmax, ymax = ymax))))
+
+# Transform our map into UTM 33 coordinates, which is the equal-area projection we fit in:
+utm_zone33 <- 32633
+swe_coast_proj <- sf::st_transform(swe_coast, crs = utm_zone33)
+
+# Define plotting theme for main plot
+theme_plot <- function(base_size = 11, base_family = "") {
+  theme_light(base_size = base_size, base_family = "") +
+    theme(
+      legend.position = "bottom",
+      legend.key.height = unit(0.2, "cm"),
+      legend.margin = margin(0, 0, 0, 0),
+      legend.box.margin = margin(-5, -5, -5, -5),
+      strip.text = element_text(size = 9, colour = 'gray10', margin = margin(b = 1, t = 1)),
+      strip.background = element_rect(fill = "grey95")
+      )
+}
+
+# Define plotting theme for facet_wrap map with years
+theme_facet_map <- function(base_size = 11, base_family = "") {
+  theme_light(base_size = base_size, base_family = "") +
+    theme(
+        axis.text.x = element_text(angle = 90),
+        axis.text = element_text(size = 7),
+        strip.text = element_text(size = 8, colour = 'gray10', margin = margin(b = 1, t = 1)),
+        strip.background = element_rect(fill = "gray95"),
+        legend.direction = "horizontal",
+        legend.margin = margin(1, 1, 1, 1),
+        legend.box.margin = margin(0, 0, 0, 0),
+        legend.key.height = unit(0.4, "line"),
+        legend.key.width = unit(2, "line"),
+        legend.spacing.x = unit(0.1, 'cm'),
+        legend.position = "bottom",
+      )
+}
+
+# Make default base map plot
+xmin2 <- 303000; xmax2 <- 916000; xrange <- xmax2 - xmin2
+ymin2 <- 5980000; ymax2 <- 6450000; yrange <- ymax2 - ymin2
+
+plot_map_raster <- 
+ggplot(swe_coast_proj) + 
+  xlim(xmin2, xmax2) +
+  ylim(ymin2, ymax2) +
+  labs(x = "Longitude", y = "Latitude") +
+  geom_sf(size = 0.3) + 
+  theme_plot() +
+  guides(colour = guide_colorbar(title.position = "top", title.hjust = 0.5),
+         fill = guide_colorbar(title.position = "top", title.hjust = 0.5))
+```
+
+## Read data
+
+```{r read and process data, message=FALSE, warning=FALSE}
+d <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/catch_q_1_4.csv")
+
+# Calculate standardized variables
+d <- d %>% 
+  filter(year < 2020 & year > 1992 & quarter == 4) %>% 
+  mutate(oxy_sc = oxy,
+         temp_sc = temp,
+         depth_sc = depth,
+         ) %>%
+  mutate_at(c("oxy_sc", "temp_sc", "depth_sc"),
+            ~(scale(.) %>% as.vector)) %>% 
+  mutate(year = as.integer(year)) %>% 
+  drop_na(oxy, depth, temp)
+
+plot_map_raster +
+  geom_point(data = d, aes(X*1000, Y*1000))
+```
+
+## Read the prediction grids
+
+```{r read and process prediction grid, message=FALSE, warning=FALSE}
+pred_grid1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(1_2).csv")
+pred_grid <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(2_2).csv")
+
+pred_grid <- bind_rows(pred_grid1, pred_grid)
+
+# Standardize data with respect to data grid:
+pred_grid <- pred_grid %>%
+  mutate(year = as.integer(year)) %>% 
+  filter(year %in% c(unique(d$year))) %>% 
+  mutate(depth_sc = (depth - mean(d$depth))/sd(d$depth),
+         temp_sc = (temp - mean(d$temp))/sd(d$temp),
+         oxy_sc = (oxy - mean(d$oxy))/sd(d$oxy)) %>% # Need to scale these to the mean and sd in the data!
+  drop_na(oxy, depth, temp)
+```
+
+## Make spde mesh
+
+```{r make barrier spde mesh, results='hide', cache=TRUE, message=FALSE}
+spde <- make_mesh(d, xy_cols = c("X", "Y"),
+                  n_knots = 200, 
+                  type = "kmeans", seed = 42)
+
+# Plot and save spde
+png(file = "figures/supp/density/spde.png", units = "in", width = 6.5, height = 6.5, res = 300)
+plot(spde)
+dev.off()
+```
+
+## Fit the density model
+
+```{r fit, results='hide', cache=TRUE, message=FALSE}
+# Depth spline + oxy spline
+# Takes about 30 minutes
+m <- sdmTMB(density ~ 0 + as.factor(year) + s(depth_sc) + s(oxy_sc) + s(temp_sc),
+            data = d,
+            mesh = spde,
+            family = tweedie(link = "log"),
+            spatiotemporal = "AR1",
+            spatial = "on",
+            time = "year",
+            reml = FALSE,
+            control = sdmTMBcontrol(newton_steps = 1))
+
+tidy(m, conf.int = TRUE)
+
+sanity(m)
+```
+
+## Check QQ plot and residuals
+
+```{r qqplot and resid, results='hide', cache=TRUE, message=FALSE}
+mcmc_res <- residuals(m, type = "mle-mcmc", mcmc_iter = 5000, mcmc_warmup = 2000,
+                      stan_args = list(control = list(max_treedepth = 11)))
+
+png(file = "figures/supp/density/qq.png", units = "in", width = 6.5, height = 6.5, res = 300)
+qqnorm(mcmc_res);qqline(mcmc_res)
+dev.off()
+
+d$residuals <- mcmc_res[, 1]
+```
+
+```{r residuals on map, results='hide', cache=TRUE, message=FALSE}
+# Residuals on map
+plot_map_raster +
+  geom_point(data = d, aes(x = X * 1000, y = Y * 1000, color = residuals), size = 0.5) +
+  scale_colour_gradient2() +
+  facet_wrap(~ year, ncol = 5) +
+  labs(color = "residuals") +
+  theme_facet_map() +
+  geom_sf(size = 0.1)
+  
+ggsave("figures/supp/density/spatial_resid.png", width = 6.5, height = 8.5, dpi = 600)
+```
+
+## Check the AR1 parameter (`rho` is `ar_phi` on the -1 to 1 scale):
+
+```{r check AR1 estimate}
+tidy(m, effects = "ran_pars", conf.int = TRUE)
+```
+
+## Predict on grid
+
+```{r predict, cache=TRUE}
+predict_mcod <- predict(m, newdata = pred_grid)
+
+# Save prediction as csv (smaller than the model object...)
+write.csv(predict_mcod, "output/predict_mcod_density.csv")
+```
+
+## Plot predictions on map
+
+```{r plot}
+# Plot predicted density and random effects
+plot_map_raster +
+  geom_raster(data = filter(predict_mcod, depth < 120 & depth > 10), aes(x = X * 1000, y = Y * 1000, fill = exp(est))) +
+  scale_fill_viridis_c(trans = "sqrt") +
+  facet_wrap(~ year, ncol = 5) +
+  labs(fill = expression(kg/km^2)) +
+  theme_facet_map() +
+  geom_sf(size = 0.1)
+ 
+ggsave("figures/supp/density/est_map.png", width = 6.5, height = 8.5, dpi = 600)
+
+# Plot spatiotemporal random effect
+plot_map_raster +
+  geom_raster(data = predict_mcod, aes(x = X * 1000, y = Y * 1000, fill = epsilon_st)) +
+  scale_fill_gradient2() +
+  facet_wrap(~ year, ncol = 5) +
+  theme_facet_map() +
+  geom_sf(size = 0.1)
+
+ggsave("figures/supp/density/epsilon_st_map.png", width = 6.5, height = 8.5, dpi = 600)
+
+# Plot spatial random effect
+plot_map_raster +
+  geom_raster(data = filter(predict_mcod, year == 1999), aes(x = X * 1000, y = Y * 1000, fill = omega_s)) +
+  scale_fill_gradient2() +
+  geom_sf(size = 0.1)
+  
+ggsave("figures/supp/density/omega_s_map.png", width = 6.5, height = 6.5, dpi = 600)
+```
+
+## Annual indices using `get_index_sims` 
+
+```{r pred cod sim, cache=TRUE}
+div_index_list <- list()
+
+for(i in unique(pred_grid$sub_div)){
+  
+  pred_grid_sub <- pred_grid %>% filter(sub_div == i & depth > 10 & depth < 110)
+  
+  pred_sim_sub <- predict(m, newdata = pred_grid_sub, nsim = 500)
+  
+  index_sim <- get_index_sims(pred_sim_sub, 
+                              area = rep(4*4, nrow(pred_sim_sub))) %>% 
+    mutate(sub_div = i)
+           
+  div_index_list[[i]] <- index_sim
+  
+}
+
+div_index <- bind_rows(div_index_list)
+
+# In addition to the subdivision indicies, we'll also group a few and also do the total
+# Now get the total index by specifying the area of a grid cell
+# Total prediction 
+preds_cod_sim <- predict(m, newdata = pred_grid, nsim = 500)
+
+# Now calculate the biomass index
+index_sim <- get_index_sims(preds_cod_sim, area = rep(4*4, nrow(preds_cod_sim)))
+
+# Join indices
+index_sim <- index_sim %>% mutate(sub_div = "Total")
+
+div_index_sim <- bind_rows(div_index %>% mutate(sub_div = as.character(sub_div)),
+                           index_sim %>% mutate(sub_div = "Total"))
+```
+
+### Compare the above biomass-index with one where I filter deep depths
+
+```{r compare index with different pred grids}
+# Now do the same but excluding the areas not sampled in the pred grid
+ncells_sub <- filter(pred_grid, year == max(pred_grid$year) & depth > 10 & depth < 120) %>% nrow()
+pred_grid_sub <- filter(pred_grid, depth > 10 & depth < 120)
+
+pred_avg_sim_sub <- predict(m, newdata = pred_grid_sub, nsim = 500)
+
+index_avg_sim_sub <- get_index_sims(pred_avg_sim_sub, area = rep(4*4, nrow(pred_avg_sim_sub)))
+
+# Combine and plot & compare
+index_avg_sim_comp <- bind_rows(mutate(index_sim, area = "full"),
+                                mutate(index_avg_sim_sub, area = "subset")) %>% 
+  mutate(est_t = est/1000, lwr_t = lwr/1000, upr_t = upr/1000)
+
+ggplot(index_avg_sim_comp, aes(year, est_t, ymin = lwr_t, ymax = upr_t, color = area)) +
+  geom_line() +
+  geom_ribbon(alpha = 0.4)
+```
+
+### Combined plot with biomass index by sd, total and predictions on map for two years
+
+```{r make cpue index and cpue pred on map figure, message=FALSE}
+lab_size <- 1.7
+
+div_index_sim <- div_index_sim %>% mutate(est_t = est/1000, lwr_t = lwr/1000, upr_t = upr/1000) 
+
+ind_plot_sd <- 
+  ggplot() +
+  scale_x_continuous(breaks = c(1994, 2000, 2006, 2012, 2018)) +
+  geom_line(data = filter(div_index_sim, !sub_div == "Total"),
+            aes(year, est_t, color = sub_div)) + 
+  geom_ribbon(data = filter(div_index_sim, !sub_div == "Total"),
+              aes(year, ymin = lwr_t, ymax = upr_t, fill = sub_div), alpha = 0.2) +
+  scale_color_brewer(palette = "Dark2") +
+  scale_fill_brewer(palette = "Dark2", name = "ICES subdivision") +
+  guides(color = "none") + 
+  labs(x = "Year", y = "Tonnes") +
+  theme_plot() + 
+  guides(colour = "none",
+         fill = guide_legend(title.position = "top", title.hjust = 0.5)) + 
+  theme(legend.position = c(0.6, 0.9),
+        legend.direction = "horizontal",
+        legend.key.height = unit(0.03, "cm"),
+        legend.key.width = unit(0.4, "cm"),
+        legend.text = element_text(size = 6),
+        legend.title = element_text(size = 7),
+        legend.background = element_blank(),
+        plot.margin = unit(c(0, 0, 0, 0), "cm"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank())
+
+ind_plot_tot <- 
+  ggplot() +
+  geom_line(data = filter(div_index_sim, sub_div == "Total"),
+            aes(year, est_t)) +
+  geom_ribbon(data = filter(div_index_sim, sub_div == "Total"),
+              aes(year, ymin = lwr_t, ymax = upr_t, fill = "Total"), alpha = 0.4) +
+  scale_x_continuous(breaks = c(1994, 2000, 2006, 2012, 2018)) +
+  scale_fill_manual(values = "grey40") + 
+  labs(x = "Year", y = "Tonnes", fill = "") +
+  theme_plot() + 
+  theme(legend.position = c(0.88, 0.92),
+        legend.key.height = unit(0.03, "cm"),
+        legend.key.width = unit(0.4, "cm"),
+        legend.text = element_text(size = 6),
+        legend.title = element_text(size = 7),
+        legend.background = element_blank(),
+        plot.margin = unit(c(0, 0, 0, 0), "cm"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+
+cpue_map_94_18 <- plot_map_raster +
+  geom_raster(data = filter(predict_mcod, year %in% c("1994", "2018") & depth < 120 & depth > 10), aes(x = X * 1000, y = Y * 1000, fill = exp(est))) +
+  scale_fill_viridis_c(trans = "sqrt") +
+  facet_wrap(~ year, ncol = 2) +
+  labs(fill = expression(kg/km^2)) +
+  theme(plot.margin = unit(c(0, 0, 0, 0), "cm"),
+        legend.key.height = unit(0.2, "cm"),
+        legend.key.width = unit(0.5, "cm"),
+        legend.position = c(0.9, .085),
+        legend.direction = "horizontal",
+        legend.background = element_rect(fill = NA),
+        legend.text = element_text(size = 5),
+        legend.title = element_text(size = 7)) +
+  guides(fill = guide_colorbar(title.position = "top", title.hjust = 0.9)) +
+  geom_sf(size = 0.1) +
+  annotate("text", label = "Sweden", x = xmin2 + 0.25*xrange, y = ymin2 + 0.8*yrange, color = "black", size = lab_size) +
+  annotate("text", label = "Denmark", x = xmin2 + 0.029*xrange, y = ymin2 + 0.43*yrange, color = "black", size = lab_size, angle = 75) +
+  annotate("text", label = "Germany", x = xmin2 + 0.07*xrange, y = ymin2 + 0.025*yrange, color = "black", size = lab_size) +
+  annotate("text", label = "Poland", x = xmin2 + 0.55*xrange, y = ymin2 + 0.1*yrange, color = "black", size = lab_size) +
+  annotate("text", label = "Russia", x = xmin2 + 0.95*xrange, y = ymin2 + 0.2*yrange, color = "black", size = lab_size) +
+  annotate("text", label = "Lithuania", x = xmin2 + 1*xrange, y = ymin2 + 0.47*yrange, color = "black", size = lab_size, angle = 75) +
+  annotate("text", label = "Latvia", x = xmin2 + 0.99*xrange, y = ymin2 + 0.68*yrange, color = "black", size = lab_size, angle = 75)
+
+(ind_plot_sd | ind_plot_tot) / cpue_map_94_18 + plot_annotation(tag_levels = 'A')
+
+ggsave("figures/density.pdf", width = 17, height = 15, units = "cm")
+
+# All years cpue
+plot_map_raster +
+  geom_raster(data = filter(predict_mcod, depth < 120 & depth > 10), aes(x = X * 1000, y = Y * 1000, fill = exp(est))) +
+  scale_fill_viridis_c(trans = "sqrt") +
+  facet_wrap(~ year, ncol = 5) +
+  labs(fill = expression(kg/km^2)) +
+  theme_facet_map() +
+  geom_sf(size = 0.1)
+
+ggsave("figures/supp/density/all_years_density_pred.png", width = 6.5, height = 8.5, dpi = 600)
+```
+
+## Biomass weighted quantiles of depth, oxygen and temperature
+
+```{r test}
+# Plot bathymetry
+plot_map_raster +
+  geom_raster(data = filter(predict_mcod, year == "2006"), aes(x = X * 1000, y = Y * 1000, fill = depth)) +
+  scale_fill_viridis(option = "A", direction = -1) +
+  labs(fill = "Depth") +
+  theme(plot.margin = unit(c(0, 0, 0.5, 0), "cm"),
+        legend.key.height = unit(0.1, "cm"),
+        legend.key.width = unit(0.7, "cm"),
+        legend.position = c(0.8, .07),
+        legend.direction = "horizontal",
+        legend.background = element_rect(fill = NA)) +
+  geom_sf(size = 0.1) +
+  annotate("text", label = "Sweden", x = xmin2 + 0.25*xrange, y = ymin2 + 0.8*yrange, color = "black", size = lab_size) +
+  annotate("text", label = "Denmark", x = xmin2 + 0.029*xrange, y = ymin2 + 0.43*yrange, color = "black", size = lab_size, angle = 75) +
+  annotate("text", label = "Germany", x = xmin2 + 0.07*xrange, y = ymin2 + 0.025*yrange, color = "black", size = lab_size) +
+  annotate("text", label = "Poland", x = xmin2 + 0.55*xrange, y = ymin2 + 0.1*yrange, color = "black", size = lab_size) +
+  annotate("text", label = "Russia", x = xmin2 + 0.95*xrange, y = ymin2 + 0.2*yrange, color = "black", size = lab_size) +
+  annotate("text", label = "Lithuania", x = xmin2 + 1*xrange, y = ymin2 + 0.47*yrange, color = "black", size = lab_size, angle = 75) +
+  annotate("text", label = "Latvia", x = xmin2 + 0.99*xrange, y = ymin2 + 0.68*yrange, color = "black", size = lab_size, angle = 75)
+  
+```
+
+```{r calculate biomass weighted variables}
+lab_size <- 1.6
+## Depth
+# Plot bathymetry
+bathy_plot <- plot_map_raster +
+  geom_raster(data = filter(predict_mcod, year == "2006"), aes(x = X * 1000, y = Y * 1000, fill = depth)) +
+  scale_fill_viridis(option = "A", direction = -1) +
+  labs(fill = "Depth", x = "", y = "") +
+  theme_plot(base_size = 9) +
+  theme(plot.margin = unit(c(0, 0, 0, 0), "cm"),
+        legend.key.height = unit(0.1, "cm"),
+        legend.key.width = unit(0.35, "cm"),
+        legend.position = c(0.8, .085),
+        legend.direction = "horizontal",
+        legend.background = element_rect(fill = NA),
+        legend.text = element_text(size = 5),
+        legend.title = element_text(size = 6)) +
+  guides(fill = guide_colorbar(title.position = "top", title.hjust = 1)) +
+  geom_sf(size = 0.1) +
+  annotate("text", label = "Sweden", x = xmin2 + 0.25*xrange, y = ymin2 + 0.8*yrange, color = "black", size = lab_size) +
+  annotate("text", label = "Denmark", x = xmin2 + 0.029*xrange, y = ymin2 + 0.43*yrange, color = "black", size = lab_size, angle = 75) +
+  annotate("text", label = "Germany", x = xmin2 + 0.07*xrange, y = ymin2 + 0.025*yrange, color = "black", size = lab_size) +
+  annotate("text", label = "Poland", x = xmin2 + 0.55*xrange, y = ymin2 + 0.1*yrange, color = "black", size = lab_size) +
+  annotate("text", label = "Russia", x = xmin2 + 0.95*xrange, y = ymin2 + 0.2*yrange, color = "black", size = lab_size) +
+  annotate("text", label = "Lithuania", x = xmin2 + 1*xrange, y = ymin2 + 0.47*yrange, color = "black", size = lab_size, angle = 75) +
+  annotate("text", label = "Latvia", x = xmin2 + 0.99*xrange, y = ymin2 + 0.68*yrange, color = "black", size = lab_size, angle = 75)
+  
+# Now calculate quantiles of the biomass-weighted values
+pal <- c(rev(brewer.pal(n = 8, name = "Dark2")), "gray20")
+
+wm_depth <- predict_mcod %>%
+  group_by(year) %>%
+  summarise("Median" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.5)),
+            "1st" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.25)),
+            "3rd" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.75))) %>% 
+  pivot_longer(cols = c("Median", "1st", "3rd"),
+               names_to = "series", values_to = "depth") %>% 
+  group_by(series) %>%  # standardize within for easy plotting
+  mutate(depth_ct = depth - mean(depth)) %>% 
+  ungroup()
+  
+plot_w_dep <- ggplot(wm_depth, aes(year, depth, color = series, group = series, fill = series)) +
+  stat_smooth(method = "gam", formula = y ~ s(x, k = 4), se = FALSE, size = 0.8) +
+  geom_point(size = 1.3, alpha = 0.8) +
+  scale_x_continuous(breaks = c(1994, 2000, 2006, 2012, 2018)) +
+  scale_color_manual(values = pal, name = "Quantiles") +
+  scale_fill_manual(values = pal) +
+  guides(fill = "none", color = "none") +
+  labs(y = "Depth [m]", x = "Year", color = "") +
+  scale_y_reverse() + 
+  theme_plot(base_size = 9) +
+  theme(plot.margin = unit(c(0.9, 0, 0, 0), "cm"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+
+## Oxygen
+# Plot oxygen in 2006
+oxy_plot <- plot_map_raster +
+  geom_raster(data = filter(predict_mcod, year == "2006"), aes(x = X * 1000, y = Y * 1000, fill = oxy)) +
+  scale_fill_viridis() +
+  labs(fill = expression(paste("O" [2], " [ml/L]", sep = "")), x = "") +
+  theme_plot(base_size = 9) +
+  theme(plot.margin = unit(c(0, 0, 0, 0), "cm"),
+        legend.key.height = unit(0.1, "cm"),
+        legend.key.width = unit(0.35, "cm"),
+        legend.position = c(0.8, .085),
+        legend.direction = "horizontal",
+        legend.background = element_rect(fill = NA),
+        legend.text = element_text(size = 5),
+        legend.title = element_text(size = 6)) +
+  guides(fill = guide_colorbar(title.position = "top", title.hjust = 1)) +
+  geom_sf(size = 0.1) +
+  annotate("text", label = "Sweden", x = xmin2 + 0.25*xrange, y = ymin2 + 0.8*yrange, color = "black", size = lab_size) +
+  annotate("text", label = "Denmark", x = xmin2 + 0.029*xrange, y = ymin2 + 0.43*yrange, color = "black", size = lab_size, angle = 75) +
+  annotate("text", label = "Germany", x = xmin2 + 0.07*xrange, y = ymin2 + 0.025*yrange, color = "black", size = lab_size) +
+  annotate("text", label = "Poland", x = xmin2 + 0.55*xrange, y = ymin2 + 0.1*yrange, color = "black", size = lab_size) +
+  annotate("text", label = "Russia", x = xmin2 + 0.95*xrange, y = ymin2 + 0.2*yrange, color = "black", size = lab_size) +
+  annotate("text", label = "Lithuania", x = xmin2 + 1*xrange, y = ymin2 + 0.47*yrange, color = "black", size = lab_size, angle = 75) +
+  annotate("text", label = "Latvia", x = xmin2 + 0.99*xrange, y = ymin2 + 0.68*yrange, color = "black", size = lab_size, angle = 75)
+
+# Plot biomass-weighted oxygen
+# Weighted total
+wm_oxy <- predict_mcod %>%
+  group_by(year) %>%
+  summarise("Median" = hutils::weighted_quantile(v = oxy, w = exp(est), p = c(0.5)),
+            "1st" = hutils::weighted_quantile(v = oxy, w = exp(est), p = c(0.25)),
+            "3rd" = hutils::weighted_quantile(v = oxy, w = exp(est), p = c(0.75))) %>% 
+  pivot_longer(cols = c("Median", "1st", "3rd"),
+               names_to = "series", values_to = "oxy") %>% 
+  ungroup() %>% 
+  group_by(series) %>% # standardize within for easy plotting
+  mutate(oxy_ct = oxy - mean(oxy)) %>%
+  ungroup()
+
+# Find which depths to calculate average oxygen on
+wm_depth %>% filter(series == "1st") %>% summarise(mean_depth = mean(depth))
+wm_depth %>% filter(series == "3rd") %>% summarise(mean_depth = mean(depth))
+
+annual_oxy <- pred_grid %>%
+  drop_na(oxy) %>%
+  filter(depth > 29 & depth < 61) %>% ###
+  #filter(depth > 40 & depth < 60) %>% ###
+  group_by(year) %>%
+  summarize(median_oxy = median(oxy)) %>%
+  ungroup() %>% 
+  rename("oxy" = "median_oxy") %>% 
+  mutate(series = "Median (env.)",
+         oxy_ct = oxy - mean(oxy))
+  
+oxygen_series <- bind_rows(wm_oxy, annual_oxy)
+
+plot_w_oxy <-
+ggplot(oxygen_series, aes(year, oxy, color = series, group = series, fill = series, linetype = series)) +
+  stat_smooth(method = "gam", formula = y ~ s(x, k = 4), se = FALSE, size = 0.8) +
+  geom_point(size = 1.3, alpha = 0.8) + 
+  scale_x_continuous(breaks = c(1994, 2000, 2006, 2012, 2018)) +
+  scale_linetype_manual(values = c(1, 1, 1, 2)) +
+  scale_color_manual(values = pal, name = "Quantiles") +
+  scale_fill_manual(values = pal) +
+  guides(fill = "none", linetype = "none", color = guide_legend(nrow = 2, title.position = "top", title.hjust = 0)) +
+  labs(y = expression(paste("O" [2], " [ml/L]", sep = "")), x = "Year",
+       color = "") +
+  theme_plot(base_size = 9) +
+  theme(legend.position = c(0.25, 0.12),
+        legend.key.size = unit(0.25, "cm"),
+        legend.background = element_rect(fill = NA),
+        plot.margin = unit(c(0, 0, 0, 0), "cm"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+
+plot_w_oxy
+
+oxygen_series %>% as.data.frame()
+
+## Temperature
+# Plot temperature in 2006
+temp_plot <- plot_map_raster +
+  geom_raster(data = filter(predict_mcod, year == "2006"), aes(x = X * 1000, y = Y * 1000, fill = temp)) +
+  scale_fill_viridis(option = "B", direction = -1) +
+  labs(fill = "Temperature [°C]", y = "") +
+  theme_plot(base_size = 9) +
+  theme(plot.margin = unit(c(0, 0, 0, 0), "cm"),
+        legend.key.height = unit(0.1, "cm"),
+        legend.key.width = unit(0.35, "cm"),
+        legend.position = c(0.8, .085),
+        legend.direction = "horizontal",
+        legend.background = element_rect(fill = NA),
+        legend.text = element_text(size = 5),
+        legend.title = element_text(size = 6)) +
+  guides(fill = guide_colorbar(title.position = "top", title.hjust = 1)) +
+  geom_sf(size = 0.1) +
+  annotate("text", label = "Sweden", x = xmin2 + 0.25*xrange, y = ymin2 + 0.8*yrange, color = "black", size = lab_size) +
+  annotate("text", label = "Denmark", x = xmin2 + 0.029*xrange, y = ymin2 + 0.43*yrange, color = "black", size = lab_size, angle = 75) +
+  annotate("text", label = "Germany", x = xmin2 + 0.07*xrange, y = ymin2 + 0.025*yrange, color = "black", size = lab_size) +
+  annotate("text", label = "Poland", x = xmin2 + 0.55*xrange, y = ymin2 + 0.1*yrange, color = "black", size = lab_size) +
+  annotate("text", label = "Russia", x = xmin2 + 0.95*xrange, y = ymin2 + 0.2*yrange, color = "black", size = lab_size) +
+  annotate("text", label = "Lithuania", x = xmin2 + 1*xrange, y = ymin2 + 0.47*yrange, color = "black", size = lab_size, angle = 75) +
+  annotate("text", label = "Latvia", x = xmin2 + 0.99*xrange, y = ymin2 + 0.68*yrange, color = "black", size = lab_size, angle = 75)
+
+# Plot biomass-weighted temperature
+# Weighted total
+wm_temp <- predict_mcod %>%
+  group_by(year) %>%
+  summarise("Median" = hutils::weighted_quantile(v = temp, w = exp(est), p = c(0.5)),
+            "1st" = hutils::weighted_quantile(v = temp, w = exp(est), p = c(0.25)),
+            "3rd" = hutils::weighted_quantile(v = temp, w = exp(est), p = c(0.75))) %>% 
+  pivot_longer(cols = c("Median", "1st", "3rd"),
+               names_to = "series", values_to = "temp") %>% 
+  ungroup() %>% 
+  group_by(series) %>% # standardize within for easy plotting
+  mutate(temp_ct = temp - mean(temp)) %>%
+  ungroup()
+
+# Find which depths to calculate average oxygen on
+wm_depth %>% filter(series == "1st") %>% summarise(mean_depth = mean(depth))
+wm_depth %>% filter(series == "3rd") %>% summarise(mean_depth = mean(depth))
+
+annual_temp <- pred_grid %>%
+  drop_na(temp) %>%
+  filter(depth > 29 & depth < 61) %>% ###
+  #filter(depth > 40 & depth < 60) %>% ###
+  group_by(year) %>%
+  summarize(median_temp = median(temp)) %>%
+  ungroup() %>% 
+  rename("temp" = "median_temp") %>% 
+  mutate(series = "Median (env.)",
+         temp_ct = temp - mean(temp))
+  
+temp_series <- bind_rows(wm_temp, annual_temp)
+
+plot_w_temp <-
+ggplot(temp_series, aes(year, temp, color = series, group = series, fill = series, linetype = series)) +
+  stat_smooth(method = "gam", formula = y ~ s(x, k = 4), se = FALSE, size = 0.8) +
+  geom_point(size = 1.3, alpha = 0.8) +
+  scale_x_continuous(breaks = c(1994, 2000, 2006, 2012, 2018)) +
+  scale_linetype_manual(values = c(1,1,1,2)) +
+  scale_color_manual(values = pal, name = "Quantiles") +
+  scale_fill_manual(values = pal) +
+  guides(fill = "none", linetype = "none", color = "none") +
+  labs(y = "Temperature [°C]", x = "Year", color = "") +
+  theme_plot(base_size = 9) +
+  theme(plot.margin = unit(c(0, 0, 0.9, 0), "cm"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+
+plot_w_temp
+
+## Make combined plot
+
+(bathy_plot | oxy_plot | temp_plot) / (plot_w_dep | plot_w_oxy | plot_w_temp) +
+  plot_annotation(tag_levels = 'A') &
+  theme(axis.text = element_text(size = 7),
+        axis.title = element_text(size = 7),
+        legend.text = element_text(size = 6),
+        legend.title = element_text(size = 6))
+
+l <- (bathy_plot / oxy_plot / temp_plot) & theme(legend.text = element_text(size = 5),
+                                                 legend.title = element_text(size = 5))
+
+r <- (plot_w_dep / plot_w_oxy / plot_w_temp) & theme(legend.text = element_text(size = 6),
+                                                     legend.title = element_text(size = 7))
+
+(l | r) + plot_annotation(tag_levels = 'A') 
+  
+
+#ggsave("figures/weighted_quantiles.pdf", width = 17, height = 11, units = "cm")
+ggsave("figures/weighted_quantiles.pdf", width = 14, height = 17, units = "cm")
+```
+
+### Weighted oxygen and depth by year and sub div
+
+```{r weighted oxygen depth  by subdiv and year}
+# Oxygen
+wm_oxy_sd <- predict_mcod %>%
+  filter(depth > 29 & depth < 61) %>%
+  group_by(year, sub_div) %>%
+  summarise("weighted median" = hutils::weighted_quantile(v = oxy, w = exp(est), p = c(0.5)),
+            "un-weighted median" = median(oxy)) %>% 
+  pivot_longer(c("weighted median", "un-weighted median"))
+
+ggplot(wm_oxy_sd, aes(year, value, color = factor(name), fill = factor(name))) +
+  stat_smooth(method = "gam", formula = y ~ s(x, k = 4), size = 0.8) +
+  geom_point(size = 1.5) +
+  scale_x_continuous(breaks = c(1994, 2000, 2006, 2012, 2018)) +
+  scale_color_brewer(palette = "Accent", name = "") +
+  scale_fill_brewer(palette = "Accent") +
+  guides(fill = "none") +
+  labs(y = expression(paste("O" [2], " [ml/L]", sep = "")), x = "Year") +
+  theme_plot() +
+  facet_wrap(~sub_div) +
+  theme(aspect.ratio = 1,
+        legend.position = "bottom",
+        legend.key.size = unit(0.6, "cm"),
+        legend.text = element_text(size = 8),
+        plot.margin = unit(c(0, 0, 0, 0.2), "cm"))
+
+ggsave("figures/supp/density/weighted_oxygen_subdiv.png", width = 6.5, height = 6.5, dpi = 600)
+
+# Calculate weighted mean and quantiles for sd 25 only 
+predict_mcod %>%
+  filter(sub_div == 25 & year >= 2015) %>%
+  summarise("Median" = hutils::weighted_quantile(v = oxy, w = exp(est), p = c(0.5)),
+            "1st quartile" = hutils::weighted_quantile(v = oxy, w = exp(est), p = c(0.25)),
+            "3rd quartile" = hutils::weighted_quantile(v = oxy, w = exp(est), p = c(0.75))) %>%
+  as.data.frame()
+
+# Now compare delta change in oxygen with delta change in condition
+# cond_delta_sd <- read.csv("output/div_index_delta_cond.csv") %>%
+#   mutate(sub_div = as.character(sub_div)) %>%
+#   dplyr::select(-X) %>%
+#   filter(!sub_div == "Total")
+
+# Depth
+wm_dep_sd <- predict_mcod %>%
+  filter(depth > 29 & depth < 61) %>%
+  group_by(year, sub_div) %>%
+  summarise("weighted median" = hutils::weighted_quantile(v = depth, w = exp(est), p = c(0.5)),
+            "un-weighted median" = median(depth)) %>% 
+  pivot_longer(c("weighted median", "un-weighted median"))
+
+ggplot(wm_dep_sd, aes(year, value, color = factor(name), fill = factor(name))) +
+  stat_smooth(data = filter(wm_dep_sd, name == "weighted median"), method = "gam", formula = y ~ s(x, k = 4), size = 0.8) +
+  geom_point(size = 1.5) +
+  scale_x_continuous(breaks = c(1994, 2000, 2006, 2012, 2018)) +
+  scale_color_brewer(palette = "Accent", name = "") +
+  scale_fill_brewer(palette = "Accent") +
+  guides(fill = "none") +
+  labs(y = "Depth [m]", x = "Year", color = "") +
+  theme_plot() +
+  facet_wrap(~sub_div) +
+  theme(aspect.ratio = 1,
+        legend.position = "bottom",
+        legend.key.size = unit(0.6, "cm"),
+        legend.text = element_text(size = 8),
+        plot.margin = unit(c(0, 0, 0, 0.2), "cm"))
+
+ggsave("figures/supp/density/weighted_depth_subdiv.png", width = 6.5, height = 6.5, dpi = 600)
+```
+
+## Sprat trends by sub division
+
+```{r, message=FALSE}
+# Temporal trends of sprat by sd
+pred_grid %>%
+  ggplot(aes(x = year, y = biomass_spr_sd, color = factor(sub_div))) +
+  stat_smooth(method = "gam", formula = y ~ s(x, k = 4), size = 1) +
+  geom_point(size = 2.5, alpha = 0.8) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  scale_color_brewer(palette = "Dark2", name = "ICES subdivision") +
+  guides(fill = "none", linetype = "none") +
+  labs(y = "Sprat biomass [tonnes]", x = "Year",
+       color = "") +
+  theme_plot() +
+  theme(aspect.ratio = 1,
+        legend.position = "bottom",
+        legend.key.size = unit(0.6, "cm"),
+        legend.text = element_text(size = 8),
+        plot.margin = unit(c(0, 0.4, 0, 0), "cm"))
+
+ggsave("figures/supp/sprat_subdiv.png", width = 6.5, height = 6.5, dpi = 600)
+```
+
+## Conditional effect of oxygen
+
+```{r conditional effects oxygen, message=FALSE, cache=TRUE}
+# Prepare prediction data frame
+d2 <- d %>% drop_na(oxy)
+nd_oxy <- data.frame(oxy = seq(min(d2$oxy), max(d2$oxy), length.out = 100))
+
+nd_oxy <- nd_oxy %>%
+  mutate(year = 2003L,
+         depth_sc = 0,
+         oxy_sc = (oxy - mean(oxy))/sd(oxy),
+         temp_sc = 0)
+
+# Predict
+p_cond_oxy <- predict(m, newdata = nd_oxy, se_fit = TRUE, re_form = NA)
+
+cond_oxy <- ggplot(p_cond_oxy, aes(oxy, exp(est),
+  ymin = exp(est) - 1.96 * exp(est_se), ymax = exp(est) + 1.96 * exp(est_se))) +
+  geom_line() +
+  geom_ribbon(alpha = 0.4) +
+  coord_cartesian(ylim = c(30, 220)) +
+  theme(aspect.ratio = 1) +
+  labs(x = expression(Oxygen[haul]))
+```
+
+## Conditional effect of depth
+
+```{r conditional effects depth, message=FALSE, cache=TRUE}
+# Prepare prediction data frame
+nd_dep <- data.frame(depth = seq(min(d2$depth), max(d2$depth), length.out = 100))
+
+nd_dep <- nd_dep %>%
+  mutate(year = 2003L,
+         depth_sc = (depth - mean(depth))/sd(depth),
+         oxy_sc = 0,
+         temp_sc = 0)
+
+# Predict
+p_cond_dep <- predict(m, newdata = nd_dep, se_fit = TRUE, re_form = NA)
+
+cond_depth <- ggplot(p_cond_dep, aes(depth, exp(est),
+  ymin = exp(est) - 1.96 * exp(est_se), ymax = exp(est) + 1.96 * exp(est_se))) +
+  geom_line() +
+  geom_ribbon(alpha = 0.4) +
+  coord_cartesian(ylim = c(30, 220)) +
+  theme(aspect.ratio = 1) +
+  labs(x = expression(Depth[haul]))
+```
+
+### Conditional effect of temperature
+
+```{r conditional effects temperature, message=FALSE, cache=TRUE}
+# Prepare prediction data frame
+nd_temp <- data.frame(temp = seq(min(d$temp), max(d$temp), length.out = 100))
+
+nd_temp <- nd_temp %>%
+  mutate(year = 2003L,
+         depth_sc = 0,
+         oxy_sc = 0,
+         temp_sc = (temp - mean(temp))/sd(temp))
+
+# Predict
+p_cond_temp <- predict(m, newdata = nd_temp, se_fit = TRUE, re_form = NA)
+
+cond_temp <- ggplot(p_cond_temp, aes(temp, exp(est),
+  ymin = exp(est) - 1.96 * exp(est_se), ymax = exp(est) + 1.96 * exp(est_se))) +
+  geom_line() +
+  geom_ribbon(alpha = 0.4) +
+  coord_cartesian(ylim = c(30, 220)) +
+  theme(aspect.ratio = 1) +
+  labs(x = expression(Temp[haul]))
+```
+
+## Plot together
+
+```{r}
+p_cond_dep2 <- p_cond_dep %>%
+  mutate(variable = "Depth") %>% 
+  dplyr::select(est, est_se, depth_sc, variable) %>% 
+  rename(value = depth_sc)
+
+p_cond_oxy2 <- p_cond_oxy %>%
+  mutate(variable = "Oxygen") %>% 
+  dplyr::select(est, est_se, oxy_sc, variable) %>% 
+  rename(value = oxy_sc)
+
+p_cond_tem2 <- p_cond_temp %>%
+  mutate(variable = "Temperature") %>% 
+  dplyr::select(est, est_se, temp_sc, variable) %>% 
+  rename(value = temp_sc)
+
+conds <- bind_rows(p_cond_dep2, p_cond_oxy2, p_cond_tem2)
+
+ggplot(conds, aes(value, exp(est), ymin = exp(est - 1.96 * est_se),
+                  ymax = exp(est + 1.96 * est_se))) +
+  geom_ribbon(alpha = 0.4) +
+  geom_line() +
+  facet_wrap(~variable, ncol = 2) +
+  labs(y = "Biomass density",
+       x = "Scaled value") +
+  theme_plot()
+
+ggsave("figures/supp/density/conditional_effects.png", width = 6.5, height = 6.5, dpi = 600)
+```
+
+```{r}
+knitr::knit_exit()
+```
+
+```{r weighted means for grant figures, fig.show='hide'}
+annual_temp2 <- pred_grid %>%
+  drop_na(temp) %>%
+  group_by(year) %>%
+  summarize(value = mean(temp)) %>%
+  mutate(series = "Mean (env.)",
+         variable = "Temperature",
+         species = "Environment")
+
+annual_oxy2 <- pred_grid %>%
+  drop_na(oxy) %>%
+  group_by(year) %>%
+  summarize(value = mean(oxy)) %>%
+  ungroup() %>%
+  mutate(series = "Mean (env.)",
+         variable = "Oxygen",
+         species = "Environment")
+
+# Weighted total
+wm_temp2_cod <- predict_mcod %>%
+  filter(exp(est) < 3000) %>% 
+  group_by(year) %>%
+  summarise(value = weighted.mean(x = temp, w = exp(est))) %>%
+  ungroup() %>% 
+  mutate(series = "Mean (weighted)",
+         variable = "Temperature",
+         species = "Cod")
+
+wm_temp2_fle <- predict_mcod %>%
+  filter(density_fle < 2000) %>% 
+  group_by(year) %>%
+  summarise(value = weighted.mean(x = temp, w = density_fle)) %>%
+  ungroup() %>% 
+  mutate(series = "Mean (weighted)",
+         variable = "Temperature",
+         species = "Flounder")
+
+wm_temp2_spr <- predict_mcod %>%
+  group_by(year) %>%
+  drop_na(biomass_spr) %>% 
+  summarise(value = weighted.mean(x = temp, w = biomass_spr)) %>%
+  ungroup() %>% 
+  mutate(series = "Mean (weighted)",
+         variable = "Temperature",
+         species = "Sprat")
+
+wm_temp2_her <- predict_mcod %>%
+  group_by(year) %>%
+  drop_na(biomass_her) %>% 
+  summarise(value = weighted.mean(x = temp, w = biomass_her)) %>%
+  ungroup() %>% 
+  mutate(series = "Mean (weighted)",
+         variable = "Temperature",
+         species = "Herring")
+
+wm_oxy2_cod <- predict_mcod %>%
+  filter(exp(est) < 3000) %>% 
+  group_by(year) %>%
+  summarise(value = weighted.mean(x = oxy, w = exp(est))) %>%
+  ungroup() %>% 
+  mutate(series = "Mean (weighted)",
+         variable = "Oxygen",
+         species = "Cod")
+
+wm_oxy2_fle <- predict_mcod %>%
+  filter(density_fle < 2000) %>% 
+  group_by(year) %>%
+  summarise(value = weighted.mean(x = oxy, w = density_fle)) %>%
+  ungroup() %>% 
+  mutate(series = "Mean (weighted)",
+         variable = "Oxygen",
+         species = "Flounder")
+
+mean_oxy_temp <- bind_rows(annual_temp2, annual_oxy2, wm_temp2_cod, wm_temp2_fle, wm_oxy2_cod, wm_oxy2_fle, wm_temp2_her, wm_temp2_spr)
+
+# # coords
+# wm_coord_cod <- predict_mcod %>%
+#   filter(exp(est) < 3000) %>% 
+#   group_by(year) %>%
+#   summarise(wlat = weighted.mean(x = lat, w = exp(est)),
+#             wlon = weighted.mean(x = lon, w = exp(est))) %>%
+#   ungroup() %>% 
+#   mutate(species = "Cod")
+# 
+# wm_coord_fle <- predict_mcod %>%
+#   filter(density_fle < 2000) %>% 
+#   group_by(year) %>%
+#   summarise(wlat = weighted.mean(x = lat, w = density_fle),
+#             wlon = weighted.mean(x = lon, w = density_fle)) %>%
+#   ungroup() %>% 
+#   mutate(species = "Flounder")
+# 
+# wm_coord_spr <- predict_mcod %>%
+#   group_by(year) %>%
+#   drop_na(biomass_spr) %>% 
+#   summarise(wlat = weighted.mean(x = lat, w = biomass_spr),
+#             wlon = weighted.mean(x = lon, w = biomass_spr)) %>%
+#   ungroup() %>% 
+#   mutate(species = "Sprat")
+# 
+# wm_coord_her <- predict_mcod %>%
+#   group_by(year) %>%
+#   drop_na(biomass_her) %>% 
+#   summarise(wlat = weighted.mean(x = lat, w = biomass_her),
+#             wlon = weighted.mean(x = lon, w = biomass_her)) %>%
+#   ungroup() %>% 
+#   mutate(species = "Herring")
+# 
+# coord_data <- bind_rows(wm_coord_cod, wm_coord_fle, wm_coord_spr, wm_coord_her)
+# 
+
+# Plot
+palz <- brewer.pal(n = 5, name = "Dark2")
+palz[5] <- "gray50"
+
+mean_oxy_temp %>% 
+  filter(variable == "Temperature",
+         !year == 1994) %>% 
+  mutate(species2 = ifelse(species == "Environment", 2, 1)) %>% 
+  ggplot(aes(year, value,
+             color = reorder(species, species2),
+             linetype = reorder(species, species2),
+             size = reorder(species, species2))) + 
+  geom_point(size = 2.3, alpha = 0.5) +
+  guides(size = "none", linetype = "none") +
+  scale_linetype_manual(values = c(1,1,1,1,2)) +
+  scale_size_manual(values = c(1,1,1,1,2.3)) +
+  scale_color_manual(values = palz, name = "") + 
+  stat_smooth(method = "gam", formula = y ~ s(x, k = 3), se = FALSE) +
+  labs(x = "Year", y = "Temperature [°C]") + 
+  theme_light(base_size = 16) +
+  theme(legend.position = "bottom",
+        aspect.ratio = 1)
+
+ggsave("figures/supp/density/weighted_mean_temp_species.png", width = 6.5, height = 6.5, dpi = 600)
+
+# # Now do flounder
+# ggplot(filter(coord_data, !year == 1993), aes(wlon, wlat, color = year)) + 
+#   facet_wrap(~species, scales = "free") +
+#   geom_point() +
+#   geom_path() +
+#   scale_color_viridis()
+# 
+# coord_data %>% filter(year %in% c(1994, 2019)) %>% 
+#   ggplot(aes(wlon, wlat, color = factor(year))) + 
+#   facet_wrap(~species, scales = "free") +
+#   geom_point() +
+#   geom_path() +
+#   scale_color_viridis(discrete = TRUE)
+# 
+# LongLatToUTM <- function(x, y, zone){
+#   xy <- data.frame(ID = 1:length(x), X = x, Y = y)
+#   coordinates(xy) <- c("X", "Y")
+#   proj4string(xy) <- CRS("+proj=longlat +datum=WGS84")  ## for example
+#   res <- spTransform(xy, CRS(paste("+proj=utm +zone=",zone," ellps=WGS84",sep='')))
+#   return(as.data.frame(res))
+# }
+# 
+# utm_coordz <- LongLatToUTM(zone = 33, coord_data$wlon, coord_data$wlat)
+# 
+# coord_data$wlat_y <- utm_coordz$Y
+# coord_data$wlon_x <- utm_coordz$X
+# 
+# plot_map_raster +
+#   facet_wrap(~species) +  
+#   geom_point(data = filter(coord_data, year %in% c(1994, 2019)),
+#              aes(wlon_x, wlat_y, color = factor(year)), inherit.aes = FALSE, size = 3) +
+#   scale_color_brewer(palette = "Dark2", name = "Year") + 
+#   theme(legend.position = "bottom",
+#         plot.margin = unit(c(0, 0.1, 0, 0.2), "cm")) + 
+#   geom_sf(size = 0.1)
+# 
+# plot_map_raster +
+#   facet_wrap(~species) +  
+#   geom_point(data = filter(coord_data, !year == c(1993)),
+#              aes(wlon_x, wlat_y, color = year), inherit.aes = FALSE, size = 1) +
+#   geom_path(data = filter(coord_data, !year == c(1993)),
+#              aes(wlon_x, wlat_y, color = year), inherit.aes = FALSE, size = 0.1) +
+#   scale_color_viridis() + 
+#   theme(plot.margin = unit(c(0, 0.1, 0, 0.2), "cm"),
+#         legend.text = element_text(angle = 30)) + 
+#   xlim(1.8*xmin2, 0.85*xmax2) +
+#   ylim(1.023*ymin2, 0.976*ymax2) +
+#   geom_sf(size = 0.1)
+# 
+# ggsave("figures/supp/density/weighted_mean_coord_species.png", width = 6.5, height = 8.5, dpi = 600)
+
+# pred_grid %>%
+#   filter(year > 2010 & sub_div == 25 & depth > 48 & depth < 52) %>% 
+#   group_by(year) %>% 
+#   summarise(mean_oxy = mean(oxy))
+#   
+# 
+# pred_grid %>%
+#   filter(year > 2010 & sub_div == 25 & depth > 50 & depth < 65) %>% 
+#   group_by(year) %>% 
+#   summarise(mean_oxy = mean(oxy))
+
+# VR combined plot
+p1 <- plot_map_raster +
+  facet_wrap(~species) +  
+  geom_point(data = filter(coord_data, !year == c(1993)),
+             aes(wlon_x, wlat_y, color = year), inherit.aes = FALSE, size = 1) +
+  geom_path(data = filter(coord_data, !year == c(1993)),
+             aes(wlon_x, wlat_y, color = year), inherit.aes = FALSE, size = 0.1) +
+  scale_color_viridis() + 
+  theme(legend.position = "bottom",
+        legend.spacing.x = unit(0, 'cm'),
+        legend.spacing.y = unit(0, 'cm'),
+        legend.margin=margin(0,0, 0, 0),
+        legend.box.margin=margin(-20,-20,-20,-20),
+        legend.text = element_text(angle = 30)#,
+        ) + 
+  xlim(1.8*xmin2, 0.85*xmax2) +
+  ylim(1.023*ymin2, 0.976*ymax2) +
+  geom_sf(size = 0.1)
+
+p2 <- mean_oxy_temp %>% 
+  filter(variable == "Temperature",
+         !year == 1994) %>% 
+  ggplot(aes(year, value, color = species, linetype = species, size = species)) + 
+  geom_point(size = 2.3, alpha = 0.5) +
+  guides(size = "none", linetype = "none", color = guide_legend(nrow = 1)) +
+  scale_linetype_manual(values = c(1,2,1,1,1)) +
+  scale_size_manual(values = c(1,2.3,1,1,1)) +
+  scale_color_manual(values = palz, name = "") + 
+  stat_smooth(method = "gam", formula = y ~ s(x, k = 3), se = FALSE) +
+  labs(x = "Year", y = "Temperature [°C]") + 
+  theme(legend.position = "bottom",
+        legend.text = element_text(size = 6),
+        legend.spacing.x = unit(0, 'cm'),
+        legend.spacing.y = unit(0, 'cm'),
+        legend.margin = margin(0, 0, 0, 0),
+        legend.box.margin = margin(-40,-40,-40,-40),
+        aspect.ratio = 1) +
+  geom_sf(size = 0.1)
+
+p1 | p2 
+
+ggsave("figures/supp/density/VR_weighted_mean_coord_species.png", width = 6.5, height = 8.5, dpi = 600)
+```
