@@ -72,6 +72,7 @@ SISP7 BITS 2017.pdf
 /output/predict_mcod_density.csv
 /output/mcod.rds
 /output/mfle.rds
+/output/mfull.rds
 /output/gif/
 /data/test/
 
@@ -81,6 +82,11 @@ SISP7 BITS 2017.pdf
 Checklist for cod_density project - Google Docs
 
 # Unnessesary & figures
+/figures/supp/condition/cond_oxygen_rasters/
+/figures/supp/condition/cond_temp_rasters/
+/figures/supp/density/density_oxygen_rasters/
+/figures/supp/density/density_temp_rasters/
+
 /figures/supp/oxygen_rasters/
 /figures/supp/temp_rasters/
 /figures/supp/cpue_oxygen_rasters/
@@ -93,6 +99,7 @@ Checklist for cod_density project - Google Docs
 /meetings
 
 # Test scripts
+R/supp_analysis/oxygen_sensitivity.Rmd
 test.Rmd
 test.html
 R/guides/
