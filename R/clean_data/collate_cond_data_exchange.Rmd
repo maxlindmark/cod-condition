@@ -227,9 +227,6 @@ bits_hh %>%
   summarise(n = n()) %>% 
   ungroup() %>% 
   mutate((prop = n / sum(n)) * 100)
-              
-  
-
 ```
 
 ### Clean DATRAS EXCHANGE data
@@ -1154,20 +1151,17 @@ d_test <- drop_na(dat) %>%
          density_saduria_rec_sc = density_saduria_rec,
          depth_sc = depth,
          depth_rec_sc = depth_rec,
-         depth_sd_sc = depth_sd,
          oxy_sc = oxy,
          oxy_rec_sc = oxy_rec,
-         oxy_sd_sc = oxy_sd,
          temp_sc = temp,
-         temp_rec_sc = temp_rec,
-         temp_sd_sc = temp_sd)  %>%
+         temp_rec_sc = temp_rec) %>%
   mutate_at(c("biomass_her_sc", "biomass_her_sd_sc", "biomass_spr_sc", "biomass_spr_sd_sc",
               "density_cod_sc", "density_cod_data_sc", "density_cod_rec_sc", 
               "density_fle_sc", "density_fle_data_sc", "density_fle_rec_sc", 
               "density_saduria_sc", "density_saduria_rec_sc", 
-              "depth_sc", "depth_rec_sc", "depth_sd_sc",
-              "oxy_sc", "oxy_rec_sc", "oxy_sd_sc",
-              "temp_sc", "temp_rec_sc", "temp_sd_sc"
+              "depth_sc", "depth_rec_sc",
+              "oxy_sc", "oxy_rec_sc", 
+              "temp_sc", "temp_rec_sc"
               ),
             ~(scale(.) %>% as.vector)) %>% 
   mutate(year = as.integer(year))
@@ -1185,8 +1179,9 @@ m1 <- lm(ln_weight_g ~ as.factor(year) + ln_length_cm + biomass_her_sc + biomass
 
 summary(m1)
 
-# density_cod_sc         -0.0038978  0.0005076   -7.678 1.63e-14 ***
-# density_fle_sc          0.0015849  0.0005212    3.041 0.002362 ** 
+#                         Estimate   Std. Error  t value Pr(>|t|)    
+# density_cod_sc         -0.0037685  0.0005036   -7.484 7.29e-14 ***
+# density_fle_sc          0.0018239  0.0005206    3.503  0.00046 ***
 
 m2 <- lm(ln_weight_g ~ as.factor(year) + ln_length_cm + biomass_her_sc + biomass_her_sd_sc +
     biomass_spr_sc + biomass_spr_sd_sc +
@@ -1200,8 +1195,20 @@ m2 <- lm(ln_weight_g ~ as.factor(year) + ln_length_cm + biomass_her_sc + biomass
 
 summary(m2)
 
-# density_cod_data_sc    -0.0021723  0.0004714   -4.608 4.07e-06 ***
-# density_fle_data_sc     0.0009110  0.0004950    1.840 0.065723 .  
+#                         Estimate   Std. Error  t value Pr(>|t|)    
+# density_cod_data_sc    -0.0018478  0.0004664   -3.962 7.45e-05 ***
+# density_fle_data_sc     0.0011130  0.0004946    2.250  0.02444 *  
+
+dd <- data.frame(est = c(-0.0037685, 0.0018239, -0.0018478, 0.0011130),
+                 se = c(0.0005036,  0.0005206, 0.0004664, 0.0004946),
+                 source = rep(c("model", "data"), each = 2),
+                 term = rep(c("cod", "flounder"), 2)) %>% 
+  mutate(lwr = est - 2*se,
+         upr = est + 2*se)
+  
+ggplot(dd, aes(term, est, ymin = lwr, ymax = upr, color = source)) + 
+  geom_point(position = position_dodge(width = 0.4)) +
+  geom_errorbar(width = 0, position = position_dodge(width = 0.4))
 ```
 
 
