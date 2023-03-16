@@ -1093,7 +1093,7 @@ min(hlfleL3$CPUEst)
 # Now calculate total CPUE per haul in Orios unit, then create the new unit, i.e.:
 # convert from kg of fish caught by trawling for 1 h a standard bottom swept area of
 # 0.45km2 (using a TVL trawl with 75 m sweeps at the standard speed of three knots) to....
-# kg of fish per km^2 by dividing with 0.45 and by multipliying with the haulduration in hours
+# kg of fish per km^2 by dividing with 0.45
 
 hlcodhaul <- hlcodL3 %>%
   group_by(haul.id) %>% 
@@ -1101,9 +1101,7 @@ hlcodhaul <- hlcodL3 %>%
          haul_cpue = sum(CPUEst),
          haul_cpue_kg_un = sum(CPUEun_kg),
          haul_cpue_un = sum(CPUEun),
-         abund = haul_cpue * (HaulDur / 60),
-         haul_kg = haul_cpue_kg * (HaulDur / 60),
-         density = haul_kg/0.45,
+         density = haul_cpue_kg/0.45,
          density_ab = haul_cpue/0.45) %>% 
   ungroup() %>% 
   distinct(haul.id, .keep_all = TRUE)
@@ -1117,9 +1115,7 @@ hlflehaul <- hlfleL3 %>%
          haul_cpue = sum(CPUEst),
          haul_cpue_kg_un = sum(CPUEun_kg),
          haul_cpue_un = sum(CPUEun),
-         abund = haul_cpue * (HaulDur / 60),
-         haul_kg = haul_cpue_kg * (HaulDur / 60),
-         density = haul_kg/0.45,
+         density = haul_cpue_kg/0.45,
          density_ab = haul_cpue/0.45) %>% 
   ungroup() %>% 
   distinct(haul.id, .keep_all = TRUE)
