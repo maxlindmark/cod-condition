@@ -2,7 +2,7 @@
 
 #### 
 
-[![DOI](%5Bhttps://zenodo.org/badge/295981963.svg)](https://zenodo.org/badge/latestdoi/295981963)](https://zenodo.org/badge/295981963.svg)](<https://zenodo.org/badge/latestdoi/295981963>))
+[![DOI](https://zenodo.org/badge/295981963.svg)](https://zenodo.org/badge/latestdoi/295981963)
 
 We use Spatiotemporal linear mixed-effects models and a predictive-modeling framework within the R package [sdmTMB](https://github.com/pbs-assess/sdmTMB) to understand spatiotemporal variation in, and the effects of covariates on body condition of Atlantic cod in the Baltic Sea. This repo contains R code and data to reproduce data processing and analysis.
 
