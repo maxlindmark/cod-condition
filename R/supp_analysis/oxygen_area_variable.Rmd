@@ -1,5 +1,5 @@
 ---
-title: "Condition model - cross validation"
+title: "Condition model"
 author: "Max Lindmark, Sean Andersson, Mayya Gogina and Michele Casini"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
@@ -75,20 +75,17 @@ d <- d %>%
          density_saduria_rec_sc = density_saduria_rec,
          depth_sc = depth,
          depth_rec_sc = depth_rec,
-         depth_sd_sc = depth_sd,
          oxy_sc = oxy,
          oxy_rec_sc = oxy_rec,
-         oxy_sd_sc = oxy_sd,
          temp_sc = temp,
-         temp_rec_sc = temp_rec,
-         temp_sd_sc = temp_sd)  %>%
+         temp_rec_sc = temp_rec)  %>%
   mutate_at(c("biomass_her_sc", "biomass_her_sd_sc", "biomass_spr_sc", "biomass_spr_sd_sc",
               "density_cod_sc", "density_cod_rec_sc", 
               "density_fle_sc", "density_fle_rec_sc", 
               "density_saduria_sc", "density_saduria_rec_sc", 
-              "depth_sc", "depth_rec_sc", "depth_sd_sc",
-              "oxy_sc", "oxy_rec_sc", "oxy_sd_sc",
-              "temp_sc", "temp_rec_sc", "temp_sd_sc"
+              "depth_sc", "depth_rec_sc",
+              "oxy_sc", "oxy_rec_sc",
+              "temp_sc", "temp_rec_sc"
               ),
             ~(scale(.) %>% as.vector)) %>% 
   mutate(year = as.integer(year))

@@ -45,7 +45,8 @@ library(ggcorrplot)
 library(ggridges)
 library(brms)
 # remotes::install_github("pbs-assess/sdmTMB")
-library(sdmTMB) # sdmTMB_0.1.4.9004
+library(sdmTMB) 
+library(sdmTMBextra) 
 
 # To load entire cache in interactive r session, do: 
 # qwraps2::lazyload_cache_dir(path = "R/analysis/condition_model_cf_cache/html")
@@ -319,26 +320,6 @@ pred_grid %>%
   ggplot(., aes(X, Y)) + geom_point(size = 0.1) + facet_wrap(~year)
 ```
 
-```{r, include=FALSE}
-# Include some tests & calculations for the manuscript
-pred_grid %>% 
-  filter(depth > 40 & depth < 60) %>% 
-  ggplot(aes(depth, oxy)) +
-  geom_point(alpha = 0.1)
-  
-pred_grid %>% 
-  filter(sub_div == 25) %>% 
-  ggplot(aes(depth, oxy)) + geom_point() +
-  geom_hline(yintercept = 4.6, col = "red") +
-  geom_vline(xintercept = 57, col = "red")
-
-m1 <- lm(oxy ~ depth, data = filter(pred_grid, sub_div == 25))
-nd <- data.frame(depth = 57)
-nd$pred <- predict(m1, newdata = nd)
-nd
-nd$pred[2] - nd$pred[1]
-```
-
 ## Make spde mesh
 
 ```{r make mesh, results='hide', message=FALSE}
@@ -371,17 +352,6 @@ mnull <- sdmTMB(
 proc.time() - ptm
 
 sanity(mnull)
-
-# mlm <- lm(
-#   formula = ln_weight_g ~ ln_length_cm,
-#   data = d)
-
-# bm <- brms::brm(formula = ln_weight_g ~ ln_length_cm, data = d, family = student())
-# summary(bm)
-# plot(bm)
-# brms::pp_check(bm)
-
-# Right, so even though sdmTMB warns, the actual estimates are very similar to lm and brms, student-t or gaussian. So will just play along with it
 
 # Extract average a and b across the total dataset
 a <- as.numeric(tidy(mnull)[1, "estimate"])
@@ -521,13 +491,15 @@ saveRDS(mfull, "output/mfull.rds")
 ```
 
 ```{r qqplot and resid, results='hide', cache=TRUE, message=FALSE}
-mcmc_res <- residuals(mfull, type = "mle-mcmc", mcmc_iter = 5000, mcmc_warmup = 2000)
+samps <- sdmTMBextra::predict_mle_mcmc(mfull, mcmc_iter = 201, mcmc_warmup = 200)
+
+mcmc_res <- residuals(mfull, type = "mle-mcmc", mcmc_samples = samps)
 
 png(file = "figures/supp/condition/qq.png", units = "in", width = 6.5, height = 6.5, res = 300)
 qqnorm(mcmc_res);qqline(mcmc_res)
 dev.off()
 
-d$residuals <- mcmc_res[, 1]
+d$residuals <- mcmc_res
 ```
 
 ## Calculate approximate $R^2$ manually using a modifed `r2.sdmTMB`
@@ -786,26 +758,6 @@ year_diff %>%
             upr97.5 = quantile(perc_change, probs = 0.975))
 ```
 
-Evaluate sensitivity to using a pred grid with a subset excluding low density areas
-
-```{r sim version condition index subset pred grid, fig.show='hide'}
-# Now do the same but excluding the areas not sampled in the pred grid
-# ncells_sub <- filter(pred_grid, year == max(pred_grid$year) & depth > 40 & depth < 120) %>% nrow()
-# pred_grid_sub <- filter(pred_grid, depth > 40 & depth < 120)
-# 
-# pred_avg_sim_sub <- predict(mfull, newdata = pred_grid_sub, nsim = 100)
-# 
-# index_avg_sim_sub <- get_index_sims(pred_avg_sim_sub, area = rep(1/ncells_sub, nrow(pred_avg_sim_sub)))
-# 
-# # Combine and plot & compare
-# index_avg_sim_comp <- bind_rows(mutate(index_avg_sim, area = "full"),
-#                                 mutate(index_avg_sim_sub, area = "subset"))
-# 
-# ggplot(index_avg_sim_comp, aes(year, est, ymin = lwr, ymax = upr, color = area, fill = area)) +
-#   geom_line() +
-#   geom_ribbon(alpha = 0.4, color = NA)
-```
-
 ### Simulated annual condition factor by sub-division 
 
 ```{r sim annual condition factor by sub-division, message=FALSE, cache=TRUE}
@@ -839,7 +791,7 @@ div_index <- bind_rows(div_index_list)
 ### Condition factor over time
 
 ```{r plot condition index and condition factor, message=FALSE}
-# Spatiotemporally standardized indicies
+# Spatiotemporally standardized indices
 div_index2 <- bind_rows(div_index %>% dplyr::select(year, est, lwr, upr, sub_div) %>% mutate(sub_div = as.factor(sub_div)),
                         mutate(index_avg_sim, sub_div = as.factor("Weighted index")))
 
@@ -852,20 +804,20 @@ div_index2 <- bind_rows(div_index2,
 
 # Add fixed effect predictions and the un-weighted index
 div_index2 <- bind_rows(div_index2,
-                        index_avg_sim_fe %>% mutate(sub_div = "Weighted index (fixed effects)"),
+                        index_avg_sim_fe %>% mutate(sub_div = "Weighted index (fixed effects, year omitted)"),
                         index_avg_sim_uw %>% mutate(sub_div = "Un-weighted index",
                                                     upr = NA,
                                                     lwr = NA))
 
 
 # Add sims for total and fixed effect prediction
-index_comp_sims <- bind_rows(index_avg_sims_fe %>% mutate(sub_div = "Weighted index (fixed effects)"),
+index_comp_sims <- bind_rows(index_avg_sims_fe %>% mutate(sub_div = "Weighted index (fixed effects, year omitted)"),
                              index_avg_sims %>% mutate(sub_div = "Weighted index")) %>%
   filter(.iteration < 26)
 
 # Plot!
 p1 <- div_index2 %>% 
-  filter(sub_div %in% c("Weighted index", "Un-weighted index", "Empirical mean", "Weighted index (fixed effects)")) %>% 
+  filter(sub_div %in% c("Weighted index", "Un-weighted index", "Empirical mean", "Weighted index (fixed effects, year omitted)")) %>% 
   mutate(plot_facet = "Total and data") %>% 
   mutate(plot_group = ifelse(sub_div %in% c("Empirical mean", "Un-weighted index"), 1, 0)) %>% 
   mutate(line_group = ifelse(sub_div %in% c("Empirical mean", "Un-weighted index"), "1", "0")) %>%
@@ -876,7 +828,6 @@ p1 <- div_index2 %>%
             aes(year, est, group = interaction(.iteration, sub_div), color = sub_div), inherit.aes = FALSE, alpha = 0.3) +
   geom_line(aes(linetype = line_group), size = 0.6) +
   facet_wrap(~plot_facet, ncol = 1) +
-  guides(linetype = "none") +
   scale_color_brewer(palette = "Set2") +
   scale_fill_brewer(palette = "Set2") +
   scale_x_continuous(breaks = c(1994, 2000, 2006, 2012, 2018)) +
@@ -887,18 +838,20 @@ p1 <- div_index2 %>%
         legend.spacing.y = unit(0, 'cm'),
         legend.key.size = unit(1, "cm"),
         legend.key.width = unit(0.5, "cm"),
-        legend.title = element_text(size = 8),
-        legend.text = element_text(size = 7), 
+        legend.title = element_text(size = 9),
+        legend.text = element_text(size = 8), 
         legend.background = element_rect(fill = NA),
         panel.grid.major = element_blank(),
         panel.grid.minor = element_blank()) +
   guides(fill = "none",
-         color = guide_legend(ncol = 1, title.position = "top", title.hjust = 0.5))
+         linetype = "none",
+         color = guide_legend(ncol = 1, title.position = "top", title.hjust = 0.5,
+                              override.aes = list(linetype = c(2, 2, 1, 1))))
 
 p1
 
 p2 <- div_index2 %>% 
-  filter(!sub_div %in% c("Weighted index", "Un-weighted index", "Empirical mean", "Weighted index (fixed effects)")) %>% 
+  filter(!sub_div %in% c("Weighted index", "Un-weighted index", "Empirical mean", "Weighted index (fixed effects, year omitted)")) %>% 
   mutate(plot_facet = "Subdivision") %>% 
   ggplot(aes(year, est, color = sub_div, fill = sub_div)) +
   scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
@@ -915,8 +868,8 @@ p2 <- div_index2 %>%
         legend.spacing.y = unit(0, 'cm'),
         legend.key.size = unit(0.8, "cm"),
         legend.key.width = unit(0.3, "cm"),
-        legend.title = element_text(size = 8),
-        legend.text = element_text(size = 7), 
+        legend.title = element_text(size = 9),
+        legend.text = element_text(size = 8), 
         legend.background = element_rect(fill = NA),
         panel.grid.major = element_blank(),
         panel.grid.minor = element_blank()) +
@@ -927,15 +880,13 @@ p2
 
 p1 / p2 + plot_annotation(tag_levels = "A")
 
-#ggsave("figures/cond_index.pdf", width = 11, height = 17, units = "cm")
+# It gets messed up when I save in a knit, so i hashtag it here
+#ggsave("figures/cond_index.pdf", width = 17, height = 20, units = "cm")
 ```
 
 ## Coefficients
 
 ```{r extract coefficients, message=FALSE}
-# What is one standard deviation of oxygen?
-sd(d$oxy)
-
 # Extract random and fixed coefficients from the full model
 mfull_est <- bind_rows(tidy(mfull, effects = "ran_par", conf.int = TRUE) %>%
                          filter(term %in% c("sigma_O", "sigma_E")),
@@ -1020,13 +971,14 @@ ggplot(mfull_est, aes(reorder(term, term2), estimate, color = group, fill = grou
   theme_plot() +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
-        plot.margin = unit(c(0.2, 0.2, 0.4, 0.2), "cm")) + 
-  guides(color = "none", fill = "none", shape = guide_legend(ncol = 4))
-  
-ggsave("figures/effect_size.pdf", width = 17, height = 17, units = "cm")
+        plot.margin = unit(c(0.2, 0.2, 0.4, 0.2), "cm")) +
+  guides(color = "none", fill = "none", shape = guide_legend(ncol = 2))
+
+ggsave("figures/effect_size.pdf", width = 17, height = 12, units = "cm")
 
 # Just a test to see the labels were alright
-ggplot(mfull_est, aes(reorder(term, estimate), estimate)) +
+ggplot(mfull_est, aes(reorder(term, estimate), estimate))
+  
 ggplot(mfull_est, aes(term, estimate)) +
   geom_hline(yintercept = 0, linetype = 2, color = "red", alpha = 0.5) +
   geom_point(size = 2) +
@@ -1078,23 +1030,6 @@ plot_map_raster +
   annotate("text", label = "Latvia", x = xmin2 + 0.99*xrange, y = ymin2 + 0.68*yrange, color = "black", size = lab_size, angle = 75)
 
 ggsave("figures/condition_map_covars.pdf", width = 17, height = 17, units = "cm")
-```
-
-```{r gganimate condition,cache=TRUE, message=FALSE, include = FALSE}
-# p <- plot_map_raster +
-#   geom_raster(data = pred_map2, aes(x = X*1000, y = Y*1000, fill = est)) +
-#   scale_fill_gradientn(colours = rev(pal), name = "log(condition factor)") +
-#   NULL
-# 
-# # Here comes the gganimate specific bits
-# anim <- p +
-#   labs(title = 'Year: {frame_time}') +
-#   transition_time(as.integer(year)) +
-#   ease_aes('linear')
-# 
-# gganimate::animate(anim, height = 600, width = 600)
-# 
-# anim_save(filename = "/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/cod_condition/output/gif/cond_oxy.gif")
 ```
 
 ## Plot spatial and spatiotemporal random effects:

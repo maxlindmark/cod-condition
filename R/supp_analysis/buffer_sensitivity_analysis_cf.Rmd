@@ -136,7 +136,7 @@ dep_rast2_rect_agg <- terra::aggregate(dep_rast, fact = fact_rec, fun = mean)
 
 plot(dep_rast2_rect_agg)
 
-d$depth_agg <- extract(dep_rast2_rect_agg, d %>% dplyr::select(lon, lat), method = "bilinear")
+d$depth_agg <- raster::extract(dep_rast2_rect_agg, d %>% dplyr::select(lon, lat), method = "bilinear")
 
 # Convert to depth
 d$depth_agg <- (d$depth_agg - max(d$depth_agg)) * -1
@@ -155,12 +155,11 @@ d <- d %>%
 ### Saduria
 
 ```{r aggregated saduria}
-saduria <- raster("data/saduria_tif/FWBiomassm_raster_19812019presHighweightcor_no0_newZi.tif")
+saduria <- terra::rast("data/saduria_tif/FWBiomassm_raster_19812019presHighweightcor_no0_newZi.tif")
 
-saduria_longlat = projectRaster(saduria, crs = ('+proj=longlat'))
+newcrs <- "+proj=longlat +datum=WGS84"
 
-crs(saduria_longlat)
-extent(saduria_longlat)
+saduria_longlat = terra::project(saduria, newcrs)
 
 plot(saduria_longlat)
 
@@ -175,7 +174,7 @@ sad2_rect_agg <- terra::aggregate(saduria_longlat, fact = fact_rec, fun = mean)
 plot(sad2_rect_agg)
 
 # Now extract the values from the saduria raster to the data
-d$density_saduria_agg <- extract(sad2_rect_agg, d %>% dplyr::select(lon, lat))
+d$density_saduria_agg <- raster::extract(sad2_rect_agg, d %>% dplyr::select(lon, lat))$FWBiomassm_raster_19812019presHighweightcor_no0_newZi
 
 ggplot(d, aes(density_saduria_rec, density_saduria_agg)) +
   geom_point() + 
@@ -256,45 +255,45 @@ oxy_array[oxy_array == fillvalue$value] <- NA
 # We use mainly quarter 4 in this analysis, but in the revision we decided to use also a lagged version. Therefore, we will add quarter 3 as well. So now we want to loop through each time step, and if it is a correct month save it as a raster. First get the index of months that correspond to Q4
 months
 
-index_keep_q3 <- which(months %in% c(7, 8, 9))
+index_keep_q4 <- which(months %in% c(10, 11, 12))
 
 # Quarter 3 or 4 by keeping months in index_keep
-oxy_q3 <- oxy_array[, , index_keep_q3]
+oxy_q4 <- oxy_array[, , index_keep_q4]
 
-months_keep_q3 <- months[index_keep_q3]
+months_keep_q4 <- months[index_keep_q4]
 
-years_keep_q3 <- years[index_keep_q3]
+years_keep_q4 <- years[index_keep_q4]
 
 # We need to now calculate the average within a year.
 # Get a sequence that takes every third value between 1: number of months (length)
-loop_seq_q3 <- seq(1, dim(oxy_q3)[3], by = 3)
+loop_seq_q4 <- seq(1, dim(oxy_q4)[3], by = 3)
 
 # Create objects that will hold data
-dlist_q3 <- list()
+dlist_q4 <- list()
 
 oxy_7 <- c()
 oxy_8 <- c()
 oxy_9 <- c()
-oxy_ave_q3 <- c()
+oxy_ave_q4 <- c()
 
 # Loop through the vector sequence with every third value, then take the average of
 # three consecutive months(i.e. a quarter)
-for(i in loop_seq_q3) { # We can use q3 as looping index, doesn't matter!
+for(i in loop_seq_q4) { # We can use q4 as looping index, doesn't matter!
 
-  oxy_7 <- oxy_q3[, , (i)]
-  oxy_8 <- oxy_q3[, , (i + 1)]
-  oxy_9 <- oxy_q3[, , (i + 2)]
+  oxy_10 <- oxy_q4[, , (i)]
+  oxy_11 <- oxy_q4[, , (i + 1)]
+  oxy_12 <- oxy_q4[, , (i + 2)]
 
-  oxy_ave_q3 <- (oxy_7 + oxy_8 + oxy_9) / 3
+  oxy_ave_q4 <- (oxy_10 + oxy_11 + oxy_12) / 3
 
-  list_pos_q3 <- ((i/3) - (1/3)) + 1 # to get index 1:n(years)
+  list_pos_q4 <- ((i/3) - (1/3)) + 1 # to get index 1:n(years)
 
-  dlist_q3[[list_pos_q3]] <- oxy_ave_q3
+  dlist_q4[[list_pos_q4]] <- oxy_ave_q4
 
 }
 
 # Now name the lists with the year:
-names(dlist_q3) <- unique(years_keep_q3)
+names(dlist_q4) <- unique(years_keep_q4)
 
 # Now I need to make a loop where I extract the raster value for each year...
 
@@ -313,24 +312,24 @@ d_sub_oxy$year_f <- as.factor(d_sub_oxy$year)
 for(i in unique(d_sub_oxy$year_f)) {
   
   # Subset a year
-  oxy_slice_q3 <- dlist_q3[[i]]
+  oxy_slice_q4 <- dlist_q4[[i]]
   
   # Create raster for that year (i) and quarter
-  r_q3 <- raster(t(oxy_slice_q3), xmn = min(lon), xmx = max(lon), ymn = min(lat), ymx = max(lat),
+  r_q4 <- raster(t(oxy_slice_q4), xmn = min(lon), xmx = max(lon), ymn = min(lat), ymx = max(lat),
                  crs = CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs+ towgs84=0,0,0"))
   # Flip...
-  r_q3 <- flip(r_q3, direction = 'y')
+  r_q4 <- flip(r_q4, direction = 'y')
   
-  plot(r_q3, main = paste(i, " Q3"))
+  plot(r_q4, main = paste(i, " Q4"))
   
   # Aggregate
-  res(r_q3) # degrees, roughly 3000 m
+  res(r_q4) # degrees, roughly 3000 m
   
   fact_rec = (55000/2) / 3000
   
-  r_q3_agg <- terra::aggregate(r_q3, fact = fact_rec, fun = mean)
+  r_q4_agg <- terra::aggregate(r_q4, fact = fact_rec, fun = mean)
   
-  plot(r_q3_agg)
+  plot(r_q4_agg)
 
   # Filter the same year (i) in the pred-grid data and select only coordinates
   d_slice <- d_sub_oxy %>% filter(year_f == i) %>% dplyr::select(lon, lat)
@@ -339,11 +338,11 @@ for(i in unique(d_sub_oxy$year_f)) {
   data_sp <- SpatialPoints(d_slice)
   
   # Extract raster value (oxygen)
-  rasValue_q3 <- raster::extract(r_q3_agg, data_sp, method = "bilinear")
+  rasValue_q4 <- raster::extract(r_q4_agg, data_sp, method = "bilinear")
   
   # Add in the raster value in the df holding the coordinates for the pred-grid data
-  # Q4 is our main value, but we also want q3 average
-  d_slice$oxy_q3 <- rasValue_q3
+  # Q4 is our main value, but we also want q4 average
+  d_slice$oxy_q4 <- rasValue_q4
   
   # Add in which year
   d_slice$year <- i
@@ -363,7 +362,7 @@ d_oxy <- dplyr::bind_rows(data_list)
 # Add in oxygen to the main prediction grid
 d_oxy <- d_oxy %>%
   mutate(id = paste(lon, lat, year, sep = "_")) %>% 
-  dplyr::select(oxy_q3, id)
+  dplyr::select(oxy_q4, id)
 
 d <- d %>% mutate(id = paste(lon, lat, year, sep = "_"))
 
@@ -375,17 +374,17 @@ d <- d %>% left_join(d_oxy, by = "id")
 # From Ye: 1 ml/l = 10^3/22.391 = 44.661 μmol/l (same as mmol/m^3)
 # Hence, 0.0223909 ml/l = 1 μmol/l (mmol/m^3)
 
-d$oxy_q3 <- d$oxy_q3 * 0.0223909
+d$oxy_q4 <- d$oxy_q4 * 0.0223909
 
 # Compare with ices_rect
-ggplot(d, aes(oxy_q3, oxy_rec)) + 
+ggplot(d, aes(oxy_q4, oxy_rec)) + 
   geom_point(alpha = 0.2) + 
   geom_abline(color = "red")
 
 # Rename
 d <- d %>%
   dplyr::select(-oxy_rec) %>%
-  rename(oxy_rec = oxy_q3)
+  rename(oxy_rec = oxy_q4)
 ```
 
 ### Temperature
@@ -454,45 +453,45 @@ temp_array[temp_array == fillvalue$value] <- NA
 
 months
 
-index_keep_q3 <- which(months %in% c(7, 8, 9))
+index_keep_q4 <- which(months %in% c(10, 11, 12))
 
-temp_q3 <- temp_array[, , index_keep_q3]
+temp_q4 <- temp_array[, , index_keep_q4]
 
-months_keep_q3 <- months[index_keep_q3]
+months_keep_q4 <- months[index_keep_q4]
 
-years_keep_q3 <- years[index_keep_q3]
+years_keep_q4 <- years[index_keep_q4]
 
-# Now we have an array with Q3 & Q4 data...
+# Now we have an array with Q4 data...
 # We need to now calculate the average within a year.
 # Get a sequence that takes every third value between 1: number of months (length)
-loop_seq_q3 <- seq(1, dim(temp_q3)[3], by = 3)
+loop_seq_q4 <- seq(1, dim(temp_q4)[3], by = 3)
 
 # Create objects that will hold data
 dlist <- list()
 
-temp_7 <- c()
-temp_8 <- c()
-temp_9 <- c()
-temp_ave_q3 <- c()
+temp_10 <- c()
+temp_11 <- c()
+temp_12 <- c()
+temp_ave_q4 <- c()
 
 # Loop through the vector sequence with every third value, then take the average of
 # three consecutive months (i.e. a quarter)
-for(i in loop_seq_q3) { # We can use q3 as looping index, doesn't matter!
+for(i in loop_seq_q4) { # We can use q4 as looping index, doesn't matter!
 
-  temp_7 <- temp_q3[, , (i)]
-  temp_8 <- temp_q3[, , (i + 1)]
-  temp_9 <- temp_q3[, , (i + 2)]
+  temp_10 <- temp_q4[, , (i)]
+  temp_11 <- temp_q4[, , (i + 1)]
+  temp_12 <- temp_q4[, , (i + 2)]
   
-  temp_ave_q3 <- (temp_7 + temp_8 + temp_9) / 3
+  temp_ave_q4 <- (temp_10 + temp_11 + temp_12) / 3
   
-  list_pos_q3 <- ((i/3) - (1/3)) + 1 # to get index 1:n(years)
+  list_pos_q4 <- ((i/3) - (1/3)) + 1 # to get index 1:n(years)
   
-  dlist_q3[[list_pos_q3]] <- temp_ave_q3
+  dlist_q4[[list_pos_q4]] <- temp_ave_q4
   
 }
 
 # Now name the lists with the year:
-names(dlist_q3) <- unique(years_keep_q3)
+names(dlist_q4) <- unique(years_keep_q4)
 
 # Now I need to make a loop where I extract the raster value for each year...
 
@@ -511,25 +510,25 @@ d_sub_temp$year_f <- as.factor(d_sub_temp$year)
 for(i in unique(d_sub_temp$year_f)) {
   
   # Subset a year
-  temp_slice_q3 <- dlist_q3[[i]]
+  temp_slice_q4 <- dlist_q4[[i]]
   
   # Create raster for that year (i)
-  r_q3 <- raster(t(temp_slice_q3), xmn = min(lon), xmx = max(lon), ymn = min(lat), ymx = max(lat),
+  r_q4 <- raster(t(temp_slice_q4), xmn = min(lon), xmx = max(lon), ymn = min(lat), ymx = max(lat),
                  crs = CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs+ towgs84=0,0,0"))
   
   # Flip...
-  r_q3 <- flip(r_q3, direction = 'y')
+  r_q4 <- flip(r_q4, direction = 'y')
   
-  plot(r_q3, main = paste(i, " Q3"))
+  plot(r_q4, main = paste(i, " Q4"))
   
   # Aggregate
-  res(r_q3) # degrees, roughly 3000 m
+  res(r_q4) # degrees, roughly 3000 m
   
   fact_rec = (55000/2) / 3000
   
-  r_q3_agg <- terra::aggregate(r_q3, fact = fact_rec, fun = mean)
+  r_q4_agg <- terra::aggregate(r_q4, fact = fact_rec, fun = mean)
   
-  plot(r_q3_agg)
+  plot(r_q4_agg)
   
   # Filter the same year (i) in the pred-grid data and select only coordinates
   d_slice <- d_sub_temp %>% filter(year_f == i) %>% dplyr::select(lon, lat)
@@ -538,10 +537,10 @@ for(i in unique(d_sub_temp$year_f)) {
   data_sp <- SpatialPoints(d_slice)
   
   # Extract raster value (temperature)
-  rasValue_q3 <- raster::extract(r_q3_agg, data_sp, method = "bilinear")
+  rasValue_q4 <- raster::extract(r_q4_agg, data_sp, method = "bilinear")
   
   # Add in the raster value in the df holding the coordinates for the pred-grid data
-  d_slice$temp_q3 <- rasValue_q3
+  d_slice$temp_q4 <- rasValue_q4
   
   # Add in which year
   d_slice$year <- i
@@ -561,21 +560,21 @@ d_temp <- dplyr::bind_rows(data_list)
 # Add in temperature to the main prediction grid
 d_temp <- d_temp %>%
   mutate(id = paste(lon, lat, year, sep = "_")) %>% 
-  dplyr::select(temp_q3, id)
+  dplyr::select(temp_q4, id)
 
 d <- d %>% mutate(id = paste(lon, lat, year, sep = "_"))
 
 d <- left_join(d, d_temp, by = "id")
 
 # Compare with ices_rect
-ggplot(d, aes(temp_q3, temp_rec)) + 
+ggplot(d, aes(temp_q4, temp_rec)) + 
   geom_point(alpha = 0.2) + 
   geom_abline(color = "red")
 
 # Rename
 d <- d %>%
   dplyr::select(-temp_rec) %>%
-  rename(temp_rec = temp_q3)
+  rename(temp_rec = temp_q4)
 ```
 
 ## Scale variables

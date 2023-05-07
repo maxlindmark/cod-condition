@@ -34,11 +34,11 @@ library(janitor)
 ```
 
 ```{r pressure, echo=FALSE, fig.cap="A caption", out.width = '100%'}
-knitr::include_graphics("/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/cod_condition/data/OCEANOGRAPHY/oxygen_data_download.png")
+#knitr::include_graphics("data/OCEANOGRAPHY/oxygen_data_download.png")
 ```
 
 ```{r read in ices data}
-ices <- read.delim("/Users/maxlindmark/Desktop/R_STUDIO_PROJECTS/cod_condition/data/OCEANOGRAPHY/Ocean_d1f9ae38-9a6d-44d4-aee1-8b3ab7b582d7/8e079dde-5c00-4f61-a79c-2f8f1de63c56.txt")
+ices <- read.delim("data/OCEANOGRAPHY/Ocean_d1f9ae38-9a6d-44d4-aee1-8b3ab7b582d7/8e079dde-5c00-4f61-a79c-2f8f1de63c56.txt")
 
 glimpse(ices)
 

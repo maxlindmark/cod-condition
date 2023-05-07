@@ -963,8 +963,8 @@ pred_grid <- pred_grid %>%
   drop_na(depth, temp, oxy, density_saduria, density_cod, density_fle) %>% 
   group_by(year, ices_rect) %>% 
   mutate(depth_rec = median(depth),
-         temp_rec = median(temp_q3), # q3!
-         oxy_rec = median(oxy_q3), # q3!
+         temp_rec = median(temp), # temp_q3!
+         oxy_rec = median(oxy), # oxy_q3!
          density_cod_rec = median(density_cod),
          density_fle_rec = median(density_fle),
          density_saduria_rec = median(density_saduria))
@@ -974,7 +974,7 @@ temp <- pred_grid %>%
   drop_na(depth, temp, oxy, density_saduria, density_cod, density_fle) %>% 
   group_by(year, ices_rect) %>% 
   summarise(temp_rec = median(temp),
-         temp_rec_q3 = median(temp_q3)) %>%
+            temp_rec_q3 = median(temp_q3)) %>%
   ungroup() %>% 
   dplyr::select(temp_rec, temp_rec_q3) %>% 
   rename(rec = temp_rec,
@@ -1021,7 +1021,6 @@ p2 <- ggplot(oxy, aes(rec, rec_q3)) +
 p1 + p2
 
 ggsave("figures/supp/lagged_vars.png", width = 6.5, height = 6.5, dpi = 600)
-
 ```
 
 ## Save

@@ -33,7 +33,7 @@ library(patchwork)
 library(janitor)
 
 # To load entire cache in interactive r session, do: 
-qwraps2::lazyload_cache_dir(path = "R/analysis/cpue_model_cache/html")
+qwraps2::lazyload_cache_dir(path = "R/analysis/density_model_cache/html")
 ```
 
 ## Read the prediction grids
@@ -97,14 +97,14 @@ dep_oxy <- lm(oxy ~ depth + depth_sq, data = pred_grid_sd25)
 
 #abline(x = pred_grid_sd25$depth, y = predict(dep_oxy, newdata = pred_grid_sd25))
 
-summary(dep_oxy)
-
-depth_df$pred_oxy <- predict(dep_oxy, newdata = depth_df)
-
-ggplot(depth_df, aes(year, pred_oxy, color = method)) + 
-  geom_point() + 
-  geom_line() +
-  stat_smooth(method = "lm")
+# summary(dep_oxy)
+# 
+# depth_df$pred_oxy <- predict(dep_oxy, newdata = depth_df)
+# 
+# ggplot(depth_df, aes(year, pred_oxy, color = method)) + 
+#   geom_point() + 
+#   geom_line() +
+#   stat_smooth(method = "lm")
 ```
 
 ### This is not low enough. It starts similar but Mich's goes to ~4. Much steeper slope. Is it because Mich used different depths? We calculate it as weighted average (mean or median), but I think Ale (2019) calculates it as the average of percentage-of-population-at-5m-depth-stratum (not sure exactly how). Anyway, can we reproduce the steep decline in oxygen if we use those depths and not ours?
@@ -130,9 +130,9 @@ ggplot(mich_depth_dat, aes(year, pred)) +
 ### Using my data (SMHI SCOBI NORDIC model), how much deeper do cod have to go to get such a decline in oxygen based on depth only?
 
 ```{r depths leading to fast decline in oxy}
-test_df <- data.frame(depth = c(37, 64))
-
-predict(dep_oxy, newdata = test_df)
+# test_df <- data.frame(depth = c(37, 64))
+# 
+# predict(dep_oxy, newdata = test_df)
 ```
 
 ### So, with the predicted grid oxygen and depth relationship in my data, cod need to go from 37 to 64 m to get the same change in oxygen as mich finds.

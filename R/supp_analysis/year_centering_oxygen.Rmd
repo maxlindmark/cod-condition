@@ -1,0 +1,326 @@
+---
+title: "Condition model"
+author: "Max Lindmark, Sean C. Andersson, Mayya Gogina and Michele Casini"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: paged
+    code_folding: hide
+  pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include = FALSE, cache=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.align ='center'
+)
+```
+
+# Fit condition model with environmental and biological predictors
+Fit main model (see exploratory scripts and model comparison), visualize results.
+
+## Load packages
+
+```{r packages, message=FALSE, warning=TRUE}
+library(tidyverse)
+library(tidylog)
+library(viridis)
+library(marmap)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(sf)
+library(RColorBrewer)
+library(gganimate)
+library(gifski)
+library(latex2exp)
+library(patchwork)
+library(png)
+library(RCurl)
+library(wesanderson)
+library(qwraps2) 
+library(ggcorrplot)
+library(ggridges)
+library(brms)
+# remotes::install_github("pbs-assess/sdmTMB")
+library(sdmTMB) # sdmTMB_0.1.4.9004
+
+# To load entire cache in interactive r session, do: 
+# qwraps2::lazyload_cache_dir(path = "R/supp_analysis/year_centering_oxygen_cache/html")
+```
+
+## Read data
+
+```{r read and process data, message=FALSE, warning=FALSE, fig.show='hide'}
+# Read the split files and join them
+d1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod-condition/master/data/for_analysis/mdat_cond_(1_2).csv")
+d2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod-condition/master/data/for_analysis/mdat_cond_(2_2).csv")
+
+d <- bind_rows(d1, d2)
+
+unique(is.na(d$density_cod))
+unique(is.na(d$density_cod_rec))
+
+# Calculate standardized variables
+d <- d %>% 
+  mutate(ln_length_cm = log(length_cm),
+         ln_weight_g = log(weight_g),
+         year_ct = year - mean(year),
+         biomass_her_sc = biomass_her,
+         biomass_her_sd_sc = biomass_her_sd,
+         biomass_spr_sc = biomass_spr,
+         biomass_spr_sd_sc = biomass_spr_sd,
+         density_cod_sc = density_cod,
+         density_cod_rec_sc = density_cod_rec,
+         density_fle_sc = density_fle,
+         density_fle_rec_sc = density_fle_rec,
+         density_saduria_sc = density_saduria,
+         density_saduria_rec_sc = density_saduria_rec,
+         depth_sc = depth,
+         depth_rec_sc = depth_rec,
+         oxy_sc = oxy,
+         oxy_rec_sc = oxy_rec,
+         temp_sc = temp,
+         temp_rec_sc = temp_rec,
+         year_f = as.factor(year))  %>%
+  mutate_at(c("biomass_her_sc", "biomass_her_sd_sc", "biomass_spr_sc", "biomass_spr_sd_sc",
+              "density_cod_sc", "density_cod_rec_sc", 
+              "density_fle_sc", "density_fle_rec_sc", 
+              "density_saduria_sc", "density_saduria_rec_sc", 
+              "depth_sc", "depth_rec_sc", 
+              "oxy_sc", "oxy_rec_sc", 
+              "temp_sc", "temp_rec_sc"
+              ),
+            ~(scale(.) %>% as.vector)) %>% 
+  mutate(year = as.integer(year))
+
+unique(is.na(d))
+
+unique(is.na(d$density_cod_rec))
+unique(is.na(d$density_cod))
+
+# Drop NA covariates for the correlation plot
+d <- d %>% drop_na(biomass_her_sc, biomass_her_sd_sc, biomass_spr_sc, biomass_spr_sd_sc,
+                   density_cod_sc, density_cod_rec_sc, density_fle_sc, density_fle_rec_sc, 
+                   density_saduria_sc, density_saduria_rec_sc, depth_sc, depth_rec_sc,
+                   oxy_sc, oxy_rec_sc, temp_sc, temp_rec_sc)
+```
+
+## Read the prediction grids
+
+```{r read and process prediction grid, message=FALSE, warning=FALSE, fig.show='hide'}
+pred_grid1 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(1_2).csv")
+pred_grid2 <- readr::read_csv("https://raw.githubusercontent.com/maxlindmark/cod_condition/master/data/for_analysis/pred_grid_(2_2).csv")
+
+pred_grid <- bind_rows(pred_grid1, pred_grid2)
+
+unique(is.na(pred_grid$density_cod))
+unique(is.na(pred_grid$density_cod_rec))
+
+pred_grid <- pred_grid %>% mutate(year = as.integer(year),
+                                  year_f = as.factor(year))
+
+# Scale the variables with respect to data! First calculate means in data
+data_means <- d %>%
+  dplyr::select(biomass_her, biomass_her_sd, biomass_spr, biomass_spr_sd,
+                density_cod, density_cod_rec, 
+                density_fle, density_fle_rec, 
+                density_saduria, density_saduria_rec, 
+                depth, depth_rec,
+                oxy, oxy_rec, 
+                temp, temp_rec) %>%
+  mutate_all(~mean(.)) %>%
+  distinct(.keep_all = TRUE)
+
+data_stdev <- d %>%
+  dplyr::select(biomass_her, biomass_her_sd, biomass_spr, biomass_spr_sd,
+                density_cod, density_cod_rec, 
+                density_fle, density_fle_rec, 
+                density_saduria, density_saduria_rec, 
+                depth, depth_rec, 
+                oxy, oxy_rec, 
+                temp, temp_rec
+                ) %>%
+  mutate_all(~sd(.)) %>%
+  distinct(.keep_all = TRUE)
+
+# Before actually scaling, replace the ices-rectangle pelagic values that are NA with the mean across rectangles in the sub division.
+# Replace the sub-division pelagic values that are NA with the mean in the year.
+# Note that the sub-division values are not the sum of the rectangles (due to missing rectangles), so 
+# I need to calculate a sub-division mean across rectangles within each sub-division
+pred_grid <- pred_grid %>% 
+  group_by(year) %>% 
+  mutate(median_biomass_sprat_across_sub_div = median(biomass_spr_sd, na.rm = TRUE),
+         median_biomass_herring_across_sub_div = median(biomass_her_sd, na.rm = TRUE)) %>% 
+  ungroup() %>% # Replace sub_divsion NA's with the median across sub_divisions in that year
+  mutate(biomass_spr_sd = ifelse(is.na(biomass_spr_sd) == TRUE, median_biomass_sprat_across_sub_div, biomass_spr_sd),
+         biomass_her_sd = ifelse(is.na(biomass_her_sd) == TRUE, median_biomass_herring_across_sub_div, biomass_her_sd)) %>% 
+  group_by(year, sub_div) %>% 
+  mutate(median_biomass_sprat_across_rect_in_sub_div = median(biomass_spr, na.rm = TRUE),
+         median_biomass_herring_across_rect_in_sub_div = median(biomass_her, na.rm = TRUE)) %>% 
+  ungroup() %>% # Replace rectangle NA's with the median across rectangles in that year and sub-division
+  mutate(biomass_spr = ifelse(is.na(biomass_spr) == TRUE, median_biomass_sprat_across_rect_in_sub_div, biomass_spr),
+         biomass_her = ifelse(is.na(biomass_her) == TRUE, median_biomass_herring_across_rect_in_sub_div, biomass_her)) %>% 
+  # Since I still have some NAs (some sub-divisions do not have a single rectangle in some years), I will will those rectangles 
+  # with the sub-division value divided by the number of rectangles in that sub division
+  group_by(year, sub_div) %>% 
+  mutate(n_rect = length(unique(ices_rect))) %>% 
+  ungroup() %>% 
+  mutate(biomass_spr = ifelse(is.na(biomass_spr) == TRUE, biomass_spr_sd/n_rect, biomass_spr),
+         biomass_her = ifelse(is.na(biomass_her) == TRUE, biomass_her_sd/n_rect, biomass_her))
+
+pred_grid <- pred_grid %>%
+  mutate(ln_length_cm = log(1),
+         year_ct = year - mean(year),
+         biomass_her_sc = (biomass_her - data_means$biomass_her) / data_stdev$biomass_her,
+         biomass_her_sd_sc = (biomass_her_sd - data_means$biomass_her_sd) / data_stdev$biomass_her_sd,
+         biomass_spr_sc = (biomass_spr - data_means$biomass_spr) / data_stdev$biomass_spr,
+         biomass_spr_sd_sc = (biomass_spr_sd - data_means$biomass_spr_sd) / data_stdev$biomass_spr_sd,
+         density_cod_sc = (density_cod - data_means$density_cod) / data_stdev$density_cod,
+         density_cod_rec_sc = (density_cod_rec - data_means$density_cod_rec) / data_stdev$density_cod_rec,
+         density_fle_sc = (density_fle - data_means$density_fle) / data_stdev$density_fle,
+         density_fle_rec_sc = (density_fle_rec - data_means$density_fle_rec) / data_stdev$density_fle_rec,
+         density_saduria_sc = (density_saduria - data_means$density_saduria) / data_stdev$density_saduria,
+         density_saduria_rec_sc = (density_saduria_rec - data_means$density_saduria_rec) / data_stdev$density_saduria_rec,
+         depth_sc = (depth - data_means$depth) / data_stdev$depth,
+         depth_rec_sc = (depth_rec - data_means$depth_rec) / data_stdev$depth_rec,
+         oxy_sc = (oxy - data_means$oxy) / data_stdev$oxy,
+         oxy_rec_sc = (oxy_rec - data_means$oxy_rec) / data_stdev$oxy_rec,
+         temp_sc = (temp - data_means$temp) / data_stdev$temp,
+         temp_rec_sc = (temp_rec - data_means$temp_rec) / data_stdev$temp_rec)
+```
+
+## Make spde mesh
+
+```{r make mesh, results='hide', message=FALSE}
+spde <- make_mesh(d, xy_cols = c("X", "Y"),
+                  n_knots = 100,  
+                  type = "kmeans", seed = 42)
+
+# Plot and save spde
+png(file = "figures/supp/condition/spde.png", units = "in", width = 6.5, height = 6.5, res = 300)
+plot(spde)
+dev.off()
+```
+
+## Fit models
+### Non spatial model to get the average length weight relationship. The main model's response variable is the ratio of the observed vs this predicted average weight.
+
+```{r first fit non_spatial model without covariates, cache=TRUE, fig.show='hide'}
+mnull <- sdmTMB(
+  formula = ln_weight_g ~ ln_length_cm,
+  data = d,
+  time = NULL,
+  mesh = spde,
+  family = student(link = "identity", df = 5),
+  spatiotemporal = "off",
+  spatial = "off",
+  silent = TRUE,
+  reml = FALSE
+  )
+
+# Extract average a and b across the total dataset
+a <- as.numeric(tidy(mnull)[1, "estimate"])
+b <- as.numeric(tidy(mnull)[2, "estimate"])
+a
+b
+
+d$weight_g_avg_pred <- exp(a)*d$length_cm^b
+
+d$le_cren <- d$weight_g / d$weight_g_avg_pred
+d$log_le_cren <- log(d$le_cren)
+```
+
+### Fit main model
+
+```{r spatiotemporal le cren model, cache=TRUE}
+# Now we need to scale oxygen. Add an annual average oxygen term, and let the spatial oxygen term (at haul) be the difference from the annual means.
+
+names(d)
+
+mfull <- sdmTMB(
+  formula = log_le_cren ~ s(year) + biomass_her_sc + biomass_her_sd_sc +
+    biomass_spr_sc + biomass_spr_sd_sc +
+    density_cod_sc + density_cod_rec_sc + 
+    density_fle_sc + density_fle_rec_sc + 
+    density_saduria_sc + density_saduria_rec_sc + 
+    depth_sc + depth_rec_sc + 
+    oxy_sc + oxy_rec_sc + 
+    temp_sc + temp_rec_sc,
+    data = d,
+  time = "year",
+  mesh = spde, 
+  family = student(link = "identity", df = 5),
+  spatiotemporal = "iid",
+  spatial = "on",
+  silent = TRUE,
+  reml = FALSE,
+  control = sdmTMBcontrol(newton_loops = 1))
+
+# First calculate annual average oxygen
+d2 <- d %>% 
+  group_by(year) %>% 
+  mutate(oxy_annual_mean = mean(oxy)) %>% 
+  ungroup() %>% 
+  mutate(oxy_annual_mean_ct = oxy_annual_mean - mean(oxy_annual_mean),
+         oxy_annual_mean_sc = oxy_annual_mean_ct / sd(oxy_annual_mean),
+         oxy_ct2 = oxy - oxy_annual_mean,
+         oxy_ct2_scaled = oxy_ct2 / sd(oxy_ct2))
+
+mfull_sc <- sdmTMB(
+  formula = log_le_cren ~ s(year) + biomass_her_sc + biomass_her_sd_sc +
+    biomass_spr_sc + biomass_spr_sd_sc +
+    density_cod_sc + density_cod_rec_sc +
+    density_fle_sc + density_fle_rec_sc +
+    density_saduria_sc + density_saduria_rec_sc +
+    depth_sc + depth_rec_sc +
+    oxy_ct2_scaled + oxy_annual_mean_sc + oxy_rec_sc +
+    temp_sc + temp_rec_sc,
+    data = d2,
+  time = "year",
+  mesh = spde,
+  family = student(link = "identity", df = 5),
+  spatiotemporal = "iid",
+  spatial = "on",
+  silent = TRUE,
+  reml = FALSE,
+  control = sdmTMBcontrol(newton_loops = 1))
+
+sanity(mfull)
+
+tidy(mfull, conf.int = TRUE) %>% arrange(desc(abs(estimate)))
+tidy(mfull, effects = "ran_par", conf.int = TRUE) 
+```
+
+```{r}
+# Extract random and fixed coefficients from the full model
+mfull_est <- bind_rows(tidy(mfull, effects = "ran_par", conf.int = TRUE) %>%
+                         filter(term %in% c("sigma_O", "sigma_E")),
+                       tidy(mfull, effects = "fixed", conf.int = TRUE)  %>% 
+                         filter(!grepl('year', term))) %>%
+  mutate(term = factor(term),
+         model = "main")
+
+
+mfull_sc_est <- bind_rows(tidy(mfull_sc, effects = "ran_par", conf.int = TRUE) %>%
+                            filter(term %in% c("sigma_O", "sigma_E")),
+                          tidy(mfull_sc, effects = "fixed", conf.int = TRUE)  %>% 
+                            filter(!grepl('year', term))) %>%
+  mutate(term = factor(term),
+         model = "new")
+
+par <- bind_rows(mfull_est, mfull_sc_est)
+
+ggplot(par, aes(term, estimate, color = model, shape = model)) +
+  geom_hline(yintercept = 0, linetype = 2, color = "red", alpha = 0.5) +
+  geom_point(size = 4, alpha = 0.5, position = position_dodge(width = 0.2)) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0,
+                position = position_dodge(width = 0.2)) +
+  labs(x = "", y = "Standardized coefficient") +
+  coord_flip() + 
+  theme_light()
+
+ggsave("figures/supp/oxygen_year_ct.pdf", width = 17, height = 17, units = "cm")
+```

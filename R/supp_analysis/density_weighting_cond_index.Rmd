@@ -51,6 +51,8 @@ library(sdmTMB)
 
 ```{r read coastline data, message=FALSE, warning=FALSE, fig.show='hide'}
 # Specify map ranges
+sf::sf_use_s2(FALSE)
+
 ymin = 52; ymax = 60; xmin = 10; xmax = 24
 
 map_data <- rnaturalearth::ne_countries(
@@ -150,21 +152,18 @@ d <- d %>%
          density_saduria_rec_sc = density_saduria_rec,
          depth_sc = depth,
          depth_rec_sc = depth_rec,
-         depth_sd_sc = depth_sd,
          oxy_sc = oxy,
          oxy_rec_sc = oxy_rec,
-         oxy_sd_sc = oxy_sd,
          temp_sc = temp,
          temp_rec_sc = temp_rec,
-         temp_sd_sc = temp_sd,
          year_f = as.factor(year))  %>%
   mutate_at(c("biomass_her_sc", "biomass_her_sd_sc", "biomass_spr_sc", "biomass_spr_sd_sc",
               "density_cod_sc", "density_cod_rec_sc", 
               "density_fle_sc", "density_fle_rec_sc", 
               "density_saduria_sc", "density_saduria_rec_sc", 
-              "depth_sc", "depth_rec_sc", "depth_sd_sc",
-              "oxy_sc", "oxy_rec_sc", "oxy_sd_sc",
-              "temp_sc", "temp_rec_sc", "temp_sd_sc"
+              "depth_sc", "depth_rec_sc",
+              "oxy_sc", "oxy_rec_sc", 
+              "temp_sc", "temp_rec_sc"
               ),
             ~(scale(.) %>% as.vector)) %>% 
   mutate(year = as.integer(year))
@@ -173,32 +172,6 @@ unique(is.na(d))
 
 unique(is.na(d$density_cod_rec))
 unique(is.na(d$density_cod))
-
-# Drop NA covariates for the correlation plot
-d <- d %>% drop_na(biomass_her_sc, biomass_her_sd_sc, biomass_spr_sc, biomass_spr_sd_sc,
-                   density_cod_sc, density_cod_rec_sc, density_fle_sc, density_fle_rec_sc, 
-                   density_saduria_sc, density_saduria_rec_sc, depth_sc, depth_rec_sc,
-                   oxy_sc, oxy_rec_sc, temp_sc, temp_rec_sc)
-
-
-
-# Plot correlation between variables
-d_cor <- d %>% dplyr::select("biomass_her_sc", "biomass_her_sd_sc",
-                             "biomass_spr_sc", "biomass_spr_sd_sc",
-                             "density_cod_sc", "density_cod_rec_sc", 
-                             "density_fle_sc", "density_fle_rec_sc", 
-                             "density_saduria_sc", "density_saduria_rec_sc", 
-                             "depth_sc", "depth_rec_sc",
-                             "oxy_sc", "oxy_rec_sc",
-                             "temp_sc", "temp_rec_sc")
-
-corr <- round(cor(d_cor), 1)
-
-ggcorrplot(corr, hc.order = TRUE, type = "lower", lab = TRUE, lab_size = 2.5) +
-  theme_classic() + 
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.3))
-
-ggsave("figures/supp/condition/correlation_variables.png", width = 6.5, height = 6.5, dpi = 600)
 ```
 
 ## Read the prediction grids
@@ -221,9 +194,9 @@ data_means <- d %>%
                 density_cod, density_cod_rec, 
                 density_fle, density_fle_rec, 
                 density_saduria, density_saduria_rec, 
-                depth, depth_rec, depth_sd,
-                oxy, oxy_rec, oxy_sd,
-                temp, temp_rec, temp_sd) %>%
+                depth, depth_rec,
+                oxy, oxy_rec, 
+                temp, temp_rec) %>%
   mutate_all(~mean(.)) %>%
   distinct(.keep_all = TRUE)
 
