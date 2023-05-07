@@ -92,11 +92,19 @@ Checklist for cod_density project - Google Docs
 /figures/supp/cpue_oxygen_rasters/
 /figures/supp/cpue_temp_rasters/
 
+/figures/supp/oxy_data_model_comparison/
+
 # Exploring convergence html markdown
 /R/supp_analysis/converge_tests_condition_model_cf.html
 
 # Meeting slides
 /meetings
+
+# Old ms files
+drafts/
+
+# Other docs
+guides/
 
 # Test scripts
 R/supp_analysis/oxygen_sensitivity.Rmd
