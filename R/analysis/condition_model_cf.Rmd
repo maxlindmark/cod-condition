@@ -84,8 +84,9 @@ theme_plot <- function(base_size = 11, base_family = "") {
       legend.margin = margin(0, 0, 0, 0),
       legend.box.margin = margin(-5, -5, -5, -5),
       strip.text = element_text(size = 9, colour = 'gray10', margin = margin(b = 1, t = 1)),
-      strip.background = element_rect(fill = "grey95")
-      )
+      strip.background = element_rect(fill = "grey95"),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank())
 }
 
 # Define plotting theme for facet_wrap map with years
@@ -103,7 +104,8 @@ theme_facet_map <- function(base_size = 11, base_family = "") {
         legend.key.width = unit(2, "line"),
         legend.spacing.x = unit(0.1, 'cm'),
         legend.position = "bottom",
-      )
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
 }
 
 # Make default base map plot
@@ -840,9 +842,7 @@ p1 <- div_index2 %>%
         legend.key.width = unit(0.5, "cm"),
         legend.title = element_text(size = 9),
         legend.text = element_text(size = 8), 
-        legend.background = element_rect(fill = NA),
-        panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank()) +
+        legend.background = element_rect(fill = NA)) +
   guides(fill = "none",
          linetype = "none",
          color = guide_legend(ncol = 1, title.position = "top", title.hjust = 0.5,
@@ -870,9 +870,7 @@ p2 <- div_index2 %>%
         legend.key.width = unit(0.3, "cm"),
         legend.title = element_text(size = 9),
         legend.text = element_text(size = 8), 
-        legend.background = element_rect(fill = NA),
-        panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank()) +
+        legend.background = element_rect(fill = NA)) +
   guides(color = guide_legend(ncol = 1, title.position = "top", title.hjust = 0.5),
          fill = "none")
 
@@ -969,9 +967,7 @@ ggplot(mfull_est, aes(reorder(term, term2), estimate, color = group, fill = grou
                               )) +
   coord_flip() +
   theme_plot() +
-  theme(panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank(),
-        plot.margin = unit(c(0.2, 0.2, 0.4, 0.2), "cm")) +
+  theme(plot.margin = unit(c(0.2, 0.2, 0.4, 0.2), "cm")) +
   guides(color = "none", fill = "none", shape = guide_legend(ncol = 2))
 
 ggsave("figures/effect_size.pdf", width = 17, height = 12, units = "cm")

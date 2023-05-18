@@ -91,8 +91,9 @@ theme_plot <- function(base_size = 11, base_family = "") {
       legend.margin = margin(0, 0, 0, 0),
       legend.box.margin = margin(-5, -5, -5, -5),
       strip.text = element_text(size = 9, colour = 'gray10', margin = margin(b = 1, t = 1)),
-      strip.background = element_rect(fill = "grey95")
-      )
+      strip.background = element_rect(fill = "grey95"),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank())
 }
 
 # Define plotting theme for facet_wrap map with years
@@ -110,7 +111,8 @@ theme_facet_map <- function(base_size = 11, base_family = "") {
         legend.key.width = unit(2, "line"),
         legend.spacing.x = unit(0.1, 'cm'),
         legend.position = "bottom",
-      )
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
 }
 
 # Make default base map plot
@@ -361,8 +363,6 @@ ind_plot_sd <-
         legend.title = element_text(size = 7),
         legend.background = element_blank(),
         plot.margin = unit(c(0, 0, 0, 0), "cm"),
-        panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank(),
         panel.background = element_blank())
 
 ind_plot_tot <- 
@@ -381,9 +381,7 @@ ind_plot_tot <-
         legend.text = element_text(size = 6),
         legend.title = element_text(size = 7),
         legend.background = element_blank(),
-        plot.margin = unit(c(0, 0, 0, 0), "cm"),
-        panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank())
+        plot.margin = unit(c(0, 0, 0, 0), "cm"))
 
 cpue_map_94_18 <- plot_map_raster +
   geom_raster(data = filter(predict_mcod, year %in% c("1994", "2018") & depth < 120 & depth > 10), aes(x = X * 1000, y = Y * 1000, fill = exp(est))) +
@@ -500,9 +498,7 @@ plot_w_dep <- ggplot(wm_depth, aes(year, depth, color = series, group = series, 
   labs(y = "Depth [m]", x = "Year", color = "") +
   scale_y_reverse() + 
   theme_plot(base_size = 11) +
-  theme(plot.margin = unit(c(0.9, 0, 0, 0), "cm"),
-        panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank())
+  theme(plot.margin = unit(c(0.9, 0, 0, 0), "cm"))
 
 ## Oxygen
 # Plot oxygen in 2006
@@ -575,9 +571,7 @@ ggplot(oxygen_series, aes(year, oxy, color = series, group = series, fill = seri
   theme(legend.position = c(0.25, 0.12),
         legend.key.size = unit(0.25, "cm"),
         legend.background = element_rect(fill = NA),
-        plot.margin = unit(c(0, 0, 0, 0), "cm"),
-        panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank())
+        plot.margin = unit(c(0, 0, 0, 0), "cm"))
 
 plot_w_oxy
 
@@ -656,9 +650,7 @@ ggplot(temp_series, aes(year, temp, color = series, group = series, fill = serie
   guides(fill = "none", linetype = "none", color = "none") +
   labs(y = "Temperature [°C]", x = "Year", color = "") +
   theme_plot(base_size = 11) +
-  theme(plot.margin = unit(c(0, 0, 0.9, 0), "cm"),
-        panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank())
+  theme(plot.margin = unit(c(0, 0, 0.9, 0), "cm"))
 
 plot_w_temp
 
