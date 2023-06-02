@@ -173,9 +173,11 @@ sanity(mcod_1)
 ```
 
 ```{r, MCMC residuals of cod model}
-mcmc_res <- residuals(mcod, type = "mle-mcmc", mcmc_iter = 201, mcmc_warmup = 200)
+samps <- sdmTMBextra::predict_mle_mcmc(mcod_1, mcmc_iter = 201, mcmc_warmup = 200)
 
-qqnorm(mcmc_res);qqline(mcmc_res)
+mcmc_res_cod <- residuals(mcod_1, type = "mle-mcmc", mcmc_samples = samps)
+
+qqnorm(mcmc_res_cod);qqline(mcmc_res_cod)
 ```
 
 ```{r save cod model}
@@ -208,7 +210,9 @@ sanity(mfle_1)
 ```
 
 ```{r, MCMC residuals of flounder model}
-mcmc_res_fle <- residuals(mfle_1, type = "mle-mcmc", mcmc_iter = 201, mcmc_warmup = 200)
+samps <- sdmTMBextra::predict_mle_mcmc(mfle_1, mcmc_iter = 201, mcmc_warmup = 200)
+
+mcmc_res_fle <- residuals(mfle_1, type = "mle-mcmc", mcmc_samples = samps)
 
 qqnorm(mcmc_res_fle);qqline(mcmc_res_fle)
 ```
