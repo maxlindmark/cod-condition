@@ -6,7 +6,9 @@
 
 We use Spatiotemporal linear mixed-effects models and a predictive-modeling framework within the R package [sdmTMB](https://github.com/pbs-assess/sdmTMB) to understand spatiotemporal variation in, and the effects of covariates on body condition of Atlantic cod in the Baltic Sea. This repo contains R code and data to reproduce data processing and analysis.
 
-Preprint: [Lindmark, M.](https://maxlindmark.github.io/), [Anderson, S. C.](https://seananderson.ca/), [Gogina, M.](https://www.io-warnemuende.de/mayya-gogina.html), and [Casini, M](https://www.slu.se/cv/michele-casini/). 2022, October 21. Evaluating drivers of spatiotemporal individual condition of a bottom-associated marine fish. bioRxiv. <https://www.biorxiv.org/content/10.1101/2022.04.19.488709v3> (Accessed 19 January 2023).
+[ICES Journal of Marine Science](https://academic.oup.com/icesjms/article/80/5/1539/7186976): [Lindmark, M.](https://maxlindmark.github.io/), [Anderson, S. C.](https://seananderson.ca/), [Gogina, M.](https://www.io-warnemuende.de/mayya-gogina.html), and [Casini, M](https://www.slu.se/cv/michele-casini/). Evaluating drivers of spatiotemporal variability in individual condition of a bottom-associated marine fish, Atlantic cod (Gadus morhua). ICES Journal of Marine Science 80, 1539–1550 (2023).
+
+[Preprint](https://www.biorxiv.org/content/10.1101/2022.04.19.488709v3): [Lindmark, M.](https://maxlindmark.github.io/), [Anderson, S. C.](https://seananderson.ca/), [Gogina, M.](https://www.io-warnemuende.de/mayya-gogina.html), and [Casini, M](https://www.slu.se/cv/michele-casini/). 2022, October 21. Evaluating drivers of spatiotemporal individual condition of a bottom-associated marine fish. bioRxiv. <https://www.biorxiv.org/content/10.1101/2022.04.19.488709v3>.
 
 ## How to replicate our analyses and navigate this repo
 
